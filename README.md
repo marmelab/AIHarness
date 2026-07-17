@@ -11,8 +11,8 @@ Copy all elements except LICENSE and README.md in your project.
 
 ## Contents
 
-| File | Description
-|---|---|---|
+| File | Description |
+|---|---|
 | `CLAUDE.md` | Only relevant informations for Claude Code |
 | `AGENTS.md` | Context duplicated across AI tools (Claude/Copilot/Codex) |
 | `.claude/settings.json` | Hooks application |
