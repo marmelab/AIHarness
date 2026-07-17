@@ -1,0 +1,49 @@
+{
+  "//": "Starting point. Adapt the commands (pnpm/npm/yarn, paths) to each project before use.",
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(pnpm add *)",
+      "Bash(yarn add *)"
+    ],
+    "//deny": "See rules/dependency-safety.md: blocks adding new packages, allows `npm install`/`pnpm install`/`yarn install` with no argument (installing deps already declared in the lockfile). Adapt the exact permission pattern syntax to the Claude Code version in use."
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/bash-guard.mjs"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/circuit-breaker.mjs"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-pr-checks.mjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/format-on-write.mjs"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-typescript-shortcuts.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
