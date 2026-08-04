@@ -1,0 +1,51 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No `npm ci`: there is no package-lock.json yet. Commit one (`npm install`
+      # locally) and switch this to `npm ci` for reproducible installs.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      # The guards ARE the product, and an untested guard fails silently: one of them
+      # was inert for months. This job is the reason that cannot happen unnoticed again.
+      - name: Test
+        run: npm test
+
+      # Every SubagentStop matcher must name a role declared in harness.config.json,
+      # otherwise a hook is registered against a role that does not exist.
+      - name: Config sync
+        run: node scripts/check-config-sync.mjs
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Every hook registered in hooks/hooks.json must exist on disk, and every hook on
+      # disk should be registered. A path typo in hooks.json is invisible at runtime:
+      # Claude Code just never runs that hook.
+      - name: Hooks are wired to real files
+        run: node scripts/check-hooks-wiring.mjs
+
+      # The core must not depend on anything but node builtins, so the plugin stays
+      # installable in any project without pulling a dependency tree.
+      - name: Core has no runtime dependencies
+        run: node scripts/check-core-deps.mjs

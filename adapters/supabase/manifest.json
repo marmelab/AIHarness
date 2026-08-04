@@ -1,0 +1,35 @@
+{
+  "adapter": "supabase",
+  "provides": "deploy",
+  "description": "Supabase deploy adapter: the deploy-time SQL migration round, plus the isolated e2e stack. Active iff the consuming project's harness.config.json has a `deploy` block with adapter=supabase.",
+  "detection": {
+    "relevantGlobsFrom": "harness.config.json:deploy.relevantGlobs",
+    "pendingDeploysScript": "scripts/pending-deploys.mjs"
+  },
+  "generate": {
+    "skill": "writing-migrations",
+    "note": "developer-dispatched skill that generates SQL under supabase/migrations/ from the session-branch schema diff"
+  },
+  "apply": {
+    "script": "scripts/apply-migrations.mjs"
+  },
+  "review": {
+    "mode": "migration-review",
+    "agent": "quality-reviewer",
+    "note": "single-shot migration-review mode gates the generated SQL before merge"
+  },
+  "writeGuard": {
+    "hook": "hooks/block-migration-writes.mjs",
+    "note": "blocks migration SQL writes outside the deploy-time round"
+  },
+  "e2eSmoke": {
+    "script": "scripts/e2e-smoke.sh",
+    "note": "isolated slot-leased Supabase + Playwright, launched by hooks/e2e-on-feature-review.mjs, never by an agent"
+  },
+  "promptFragments": {
+    "status": "not-yet-extracted",
+    "note": "The Supabase-specific sections still live inline in agents/quality-reviewer.md (A.6b schema changes, B.1 RLS), agents/planner.md, agents/developer.md and agents/orchestrator.md. Extracting them so this adapter owns them is the next step; until then a non-Supabase project has to edit those prompts. See HARNESS-SPLIT.md."
+  },
+  "locations": "plugin-relative",
+  "note": "Paths are relative to the plugin root (CLAUDE_PLUGIN_ROOT), or to the project's .claude/ when the harness was copied in rather than installed. hooks/lib/paths.mjs harnessFile() resolves both."
+}

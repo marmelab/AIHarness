@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "aiharness",
+  "description": "Marmelab's AI harness kit",
+  "owner": {
+    "name": "Jerome",
+    "email": "jerome@marmelab.com"
+  },
+  "plugins": [
+    {
+      "name": "aiharness",
+      "description": "Agent harness: hook-enforced implementation pipeline over git worktrees",
+      "category": "development",
+      "source": "./"
+    }
+  ]
+}
