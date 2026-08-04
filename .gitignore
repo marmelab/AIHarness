@@ -1,0 +1,6 @@
+node_modules/
+
+# Harness scratch, if the harness is ever run against this repo itself
+.harness/
+.promote.lock
+test-results/

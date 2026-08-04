@@ -1,0 +1,40 @@
+{
+  "adapter": "launcher-chat-service",
+  "provides": "launcher",
+  "description": "The managed-launcher wiring for a web-chat surface that drives the harness (CRM Builder's chat-service is the reference). Every coupling is a value in the consuming project's harness.config.json `launcher` block, so this adapter carries configuration and documentation, not code.",
+  "extensionPoints": {
+    "sessionDirEnv": {
+      "value": "CHAT_SESSION_DIR",
+      "consumers": [
+        "hooks/lib/context.mjs",
+        "hooks/lib/reviews.mjs",
+        "hooks/session-bootstrap.mjs"
+      ],
+      "note": "the launcher-owned session dir, which is NOT the recomputed /tmp/<repo>/<id> path"
+    },
+    "turnSentinelDir": {
+      "value": "/tmp/pty-sentinels",
+      "consumers": ["hooks/turn-complete.mjs"],
+      "note": "where the Stop hook drops pty-turn-done-<sid> so the launcher knows the turn ended"
+    },
+    "postCheckoutScript": {
+      "value": "/entrypoint-helpers/apply-app-variant.sh",
+      "consumers": ["agents/merger.md", "hooks/block-orchestrator-merge.mjs"],
+      "note": "run by the merger after checkout to materialize the app variant; the guard makes it merger-only"
+    },
+    "logsDir": {
+      "value": "/chat-service/logs",
+      "consumers": ["hooks/bash-guard.mjs"],
+      "note": "the one directory agents may redirect output into, besides /dev/null"
+    }
+  },
+  "assets": {
+    "askStateCartouche": "ask-state-cartouche.md"
+  },
+  "personaInjection": {
+    "mechanism": "--append-system-prompt at launch",
+    "note": "the web-chat orchestrator is this plugin's orchestrator with a non-technical persona layered on by the launcher. The core never hardcodes a persona."
+  },
+  "inertWhenUnset": true,
+  "note": "Leave the launcher block out of harness.config.json (the default) and every consumer above is inert: no directory is created, no path is hardcoded, no guard clause fires. Nothing in the core needs this adapter to be present."
+}
