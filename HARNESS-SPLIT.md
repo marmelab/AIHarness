@@ -42,8 +42,7 @@ than what this product is:
 - `rules/` — the mechanics (worktree scope, output contracts, validation commands,
   security triggers) and the team conventions (coding style, testing, English-only).
 - `skills/` — ponytail, ADR writing, e2e conventions, Playwright patterns, grill-me,
-  worktree detection, rollback-conflict resolution, setup interview, plus the review and
-  cleanup skills this repo already had.
+  worktree detection, rollback-conflict resolution, setup interview, PR description.
 - `commands/` — `/harness-diff`, `/harness-revert`, `/harness-target`, the ponytail set.
 - `scripts/` — config-sync check, revert, statusline, monitor, Playwright MCP launcher.
 
@@ -98,6 +97,27 @@ places had to stop assuming:
   a path that does not exist in every container. It uses `$CLAUDE_CONFIG_DIR` now.
 - The deprecated `CRM_TMP_ROOT` and `documentator@atomic-crm.local` fallbacks, both
   marked "kept for one release", are gone.
+
+## What was dropped from the previous kit
+
+The repo used to carry six files aimed at a developer working WITHOUT the harness. Five
+were redundant once the harness arrived, and they are out (still in `main`'s history):
+
+| dropped | already owned by |
+|---|---|
+| `end-of-feature-cleanup` | its four steps each have an owner: `ponytail-review` (loaded by the quality-reviewer), the documentator, `adr-writing` (loaded by the developer), and the ticket's acceptance criteria |
+| `retro-capitalize` | the documentator's Mode 1 and Mode 2, same destination table, orchestrator-triggered |
+| `simplify` | ponytail, including the guardrails ("never simplify away input validation, security, accessibility") verbatim in intent |
+| `review-hotspots` | the quality-reviewer's required "Hotspots for human review" section, same 1-to-5 cap and same priority order |
+| `code-reviewer` | 27 lines competing with Anthropic's maintained `code-review` plugin and `security-review` |
+
+`pr-description` stayed, because it is the one that filled a verifiable gap: the team's
+Problem / Solution / How to test convention otherwise lives only in a personal
+`~/.claude/commands/pr`, so it was not shareable.
+
+Two consequences were fixed rather than left dangling: `pr-description` had its hotspot
+method inlined instead of pointing at the removed skill, and `templates/AGENTS.md` now
+points at `/ponytail-review` instead of a `/simplify` the plugin no longer ships.
 
 ## What is deliberately not done yet
 

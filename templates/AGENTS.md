@@ -36,7 +36,7 @@
 - On a non-trivial task: propose a plan, ask clarifying questions in prose (never a multiple-choice menu), wait for validation, then implement in small steps.
 - One step, one review. Don't chain several unreviewed steps.
 - Never commit, push or open a PR without explicit validation, see `rules/git-policy.md`.
-- End of feature: `/simplify` then `/review` before human review (see `.claude/skills/`).
+- End of feature: `/ponytail-review` for over-engineering, then a human review.
 - Never expand the scope of a request without explicitly flagging it (no unrequested renaming, refactor or "improvement").
 - Flag the part of the work where you hesitated and why, at the end of the plan or implementation. This focuses the review on uncertainty rather than on everything.
 

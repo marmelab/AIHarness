@@ -73,6 +73,10 @@ mechanics rules and the generic skills. You own `harness.config.json` and your d
 skills. Backends and launcher surfaces are adapters, dormant until your config activates
 them.
 
+This repo used to be a copy-paste kit aimed at working WITHOUT a harness. Five of those
+files were redundant once the harness arrived and were dropped; `HARNESS-SPLIT.md` says
+which, and what already owns each of them.
+
 One caveat worth knowing before adopting it for a non-Supabase stack: four agent prompts
 still inline Supabase specifics, so you would have to edit them. Moving those into the
 adapter is the next planned step.
