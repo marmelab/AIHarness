@@ -15,10 +15,8 @@ jobs:
         with:
           node-version: 22
 
-      # No `npm ci`: there is no package-lock.json yet. Commit one (`npm install`
-      # locally) and switch this to `npm ci` for reproducible installs.
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm ci
 
       # The guards ARE the product, and an untested guard fails silently: one of them
       # was inert for months. This job is the reason that cannot happen unnoticed again.
