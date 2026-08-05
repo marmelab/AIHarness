@@ -1,6 +1,6 @@
 {
   "name": "aiharness",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Marmelab's agent harness, distributed as a Claude Code plugin",
   "license": "MIT",
   "private": true,
