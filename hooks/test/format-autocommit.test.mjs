@@ -96,6 +96,40 @@ describe("the format step's auto-commit", () => {
     expect(g(WT, "status", "--porcelain").stdout.trim()).not.toBe("");
   });
 
+  // The enforcement is bounded on purpose. A commit can fail for reasons outside the
+  // agent's control (a failing pre-commit hook), and an unbounded "commit or I refuse"
+  // would wedge the pipeline, the same shape as the foreground gate that had to be relaxed.
+  test("after the budget, commits the work honestly rather than wedging", () => {
+    writeFileSync(join(WT, "seed.ts"), 'export const a = "renamed";\n');
+    expect(stop().status).toBe(2);
+    expect(stop().status).toBe(2);
+    const r = stop();
+    expect(r.status).toBe(0);
+    expect(log()[0]).toContain("commit work the agent left uncommitted");
+    expect(g(WT, "status", "--porcelain").stdout.trim()).toBe("");
+  });
+
+  test("the fallback commit never claims to be formatting", () => {
+    writeFileSync(join(WT, "seed.ts"), 'export const a = "renamed";\n');
+    stop();
+    stop();
+    stop();
+    expect(log()[0]).not.toContain("auto-apply prettier");
+    expect(log()[0]).not.toContain("style(");
+  });
+
+  test("committing during the budget clears it, so the next stop is clean", () => {
+    writeFileSync(join(WT, "seed.ts"), 'export const a = "renamed";\n');
+    expect(stop().status).toBe(2);
+    g(WT, "add", "-A");
+    g(WT, "commit", "-q", "-m", "simple: rename");
+    expect(stop().status).toBe(0);
+    // The budget reset, so a LATER lapse gets the full allowance again rather than
+    // falling straight through to the fallback.
+    writeFileSync(join(WT, "seed.ts"), 'export const a = "again";\n');
+    expect(stop().status).toBe(2);
+  });
+
   test("names the files it is refusing to swallow", () => {
     writeFileSync(join(WT, "seed.ts"), 'export const a = "renamed";\n');
     expect(stop().stderr).toContain("seed.ts");

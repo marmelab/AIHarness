@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -155,6 +161,41 @@ function stepSkipped(ctx, step) {
   return false;
 }
 
+// Per-worktree budget for "you stopped without committing" rejections. Scoped per worktree
+// because sibling developers stop independently, and under the session's breaker/ dir like
+// the other bounded rejections.
+const DIRTY_REJECT_LIMIT = 2;
+const dirtyRejectFile = (ctx, cwd) => {
+  const dir = join(ctx.sessionDir, "breaker");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best effort */
+  }
+  return join(dir, `format-dirty-${basename(cwd)}`);
+};
+const readDirtyRejects = (ctx, cwd) => {
+  try {
+    return parseInt(readFileSync(dirtyRejectFile(ctx, cwd), "utf8"), 10) || 0;
+  } catch {
+    return 0;
+  }
+};
+const writeDirtyRejects = (ctx, cwd, n) => {
+  try {
+    writeFileSync(dirtyRejectFile(ctx, cwd), String(n));
+  } catch {
+    /* best effort */
+  }
+};
+const clearDirtyRejects = (ctx, cwd) => {
+  try {
+    unlinkSync(dirtyRejectFile(ctx, cwd));
+  } catch {
+    /* absent - fine */
+  }
+};
+
 // Run ONE config-declared step in `cwd`. Returns { ok } or { ok:false, output }.
 // The step id is the caller's fail-report label, so config ids (prettier,
 // typecheck, unit-app, unit-fn, e2e) ARE the reported step names.
@@ -185,21 +226,48 @@ function runStep(ctx, step, { cwd, base }) {
   // The auto-commit below used `git add -A`, so it swept that work into a commit labelled
   // "auto-apply prettier": observed on a real run where a one-line rename landed with a
   // style message and no developer commit at all. The history then lies to review, to
-  // /harness-diff and to the revert path. Reject the stop instead: committing is the
-  // agent's contract, and the format step must only ever commit formatting.
-  const dirtyBefore =
-    step.kind === "format" &&
-    step.autoCommit &&
-    exec("git", ["-C", cwd, "status", "--porcelain"]).stdout.trim() !== "";
-  if (dirtyBefore) {
-    return {
-      ok: false,
-      output:
-        "Uncommitted changes in the worktree. Commit your work before stopping: the " +
-        "output contract requires a commit sha, and the formatting step must not commit " +
-        "your changes for you under a `style(...)` message.\n" +
-        tailLines(exec("git", ["-C", cwd, "status", "--short"]).stdout, 20),
-    };
+  // /harness-diff and to the revert path.
+  //
+  // Rejecting the stop is the enforcement, BOUNDED. Nothing in the harness forbids an
+  // agent from committing (verified against every Bash guard), but a commit can still fail
+  // for reasons outside the agent's control, a failing pre-commit hook being the obvious
+  // one. An unbounded "commit or I refuse" would then wedge the pipeline forever, which is
+  // the same shape as the foreground gate that had to be relaxed. So: reject twice, then
+  // commit the work with an HONEST message and let the stop through. The contract is
+  // enforced in the normal case and the history never lies in either case.
+  if (step.kind === "format" && step.autoCommit) {
+    const dirty =
+      exec("git", ["-C", cwd, "status", "--porcelain"]).stdout.trim() !== "";
+    if (!dirty) {
+      clearDirtyRejects(ctx, cwd);
+    } else {
+      const rejects = readDirtyRejects(ctx, cwd);
+      if (rejects < DIRTY_REJECT_LIMIT) {
+        writeDirtyRejects(ctx, cwd, rejects + 1);
+        return {
+          ok: false,
+          output:
+            "Uncommitted changes in the worktree. Commit your work before stopping: the " +
+            "output contract requires a commit sha, and the formatting step must not " +
+            "commit your changes for you under a `style(...)` message. " +
+            `(attempt ${rejects + 1}/${DIRTY_REJECT_LIMIT})\n` +
+            tailLines(exec("git", ["-C", cwd, "status", "--short"]).stdout, 20),
+        };
+      }
+      // Still uncommitted after the budget: never wedge. Commit it, but say what it is.
+      exec("git", ["-C", cwd, "add", "-A"]);
+      exec("git", [
+        "-C",
+        cwd,
+        "commit",
+        "-m",
+        `chore(${basename(cwd)}): commit work the agent left uncommitted`,
+      ]);
+      clearDirtyRejects(ctx, cwd);
+      ctx.log(
+        `uncommitted work persisted after ${rejects} rejection(s), committed wt=${cwd}`,
+      );
+    }
   }
 
   const r = bash(`${step.command} 2>&1`, { cwd });
