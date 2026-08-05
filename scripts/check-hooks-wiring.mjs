@@ -68,9 +68,10 @@ const orphans = onDisk
   .map((f) => `hooks/${f}`)
   .filter((p) => !registered.has(p) && !INTENTIONALLY_UNREGISTERED.has(p));
 
+const mcpPath = join(ROOT, ".mcp.json");
+
 // Same class of failure for the MCP servers the plugin declares: a bad path means the
 // server never starts, and the only symptom is a tool that silently is not there.
-const mcpPath = join(ROOT, ".mcp.json");
 if (existsSync(mcpPath)) {
   const servers = JSON.parse(readFileSync(mcpPath, "utf8"));
   for (const [name, def] of Object.entries(servers)) {
@@ -82,7 +83,40 @@ if (existsSync(mcpPath)) {
   }
 }
 
+// An agent that lists a browser tool under the WRONG name simply does not get it, silently:
+// the developer hand-rolled a chromium script instead, because a plugin-provided server is
+// exposed as mcp__plugin_<plugin>_<server>__<tool>, not mcp__<server>__<tool>. If this plugin
+// declares MCP servers, every agent asking for one of their tools must use the namespaced form.
+const pluginName = JSON.parse(
+  readFileSync(join(ROOT, ".claude-plugin", "plugin.json"), "utf8"),
+).name;
+const misnamedTools = [];
+if (existsSync(mcpPath)) {
+  const servers = Object.keys(JSON.parse(readFileSync(mcpPath, "utf8")));
+  const agentsDir = join(ROOT, "agents");
+  if (existsSync(agentsDir)) {
+    for (const f of readdirSync(agentsDir).filter((x) => x.endsWith(".md"))) {
+      const body = readFileSync(join(agentsDir, f), "utf8");
+      for (const server of servers) {
+        const bare = new RegExp(`^  - mcp__${server}__(\\S+)$`, "gm");
+        for (const m of body.matchAll(bare)) {
+          const ns = `mcp__plugin_${pluginName}_${server}__${m[1]}`;
+          if (!body.includes(ns))
+            misnamedTools.push(`agents/${f}: ${m[0].trim()} without ${ns}`);
+        }
+      }
+    }
+  }
+}
+
 let failed = false;
+if (misnamedTools.length) {
+  console.error(
+    `check-hooks-wiring: ${misnamedTools.length} agent tool(s) declared only under the bare MCP name, so a plugin-provided server never grants them:`,
+  );
+  for (const m of misnamedTools) console.error(`  ${m}`);
+  failed = true;
+}
 if (unresolved.length) {
   console.error(
     `check-hooks-wiring: ${unresolved.length} registration(s) do not resolve to a file:`,
