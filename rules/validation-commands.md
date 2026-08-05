@@ -16,6 +16,14 @@ guard, so they can never drift:
   **e2e is NOT in this chain**: a ticket can legitimately be mid-feature, and the
   chain's `cwd:"repo"` steps run in the base-branch checkout, so a per-stop e2e run
   only ever tested code the ticket had not touched.
+- **The chain has a failure budget.** A step that fails rejects the stop, and the agent's loop
+  fixes it and stops again, but only up to 5 consecutive failures for that step. Past it the
+  stop is RELEASED rather than refused forever, a marker lands in
+  `<session_dir>/validation-gave-up/<TASK-XXX>`, and `block-merger-without-review` then refuses
+  to merge that ticket. So "we never merge red" is enforced at the merge, not by an unbounded
+  refusal: an agent that cannot reach green stops the ticket instead of wedging the pipeline.
+  The penultimate rejection says so explicitly, so an agent that is repeating the same fix can
+  report the failure in its final message instead.
 - `e2e-on-feature-review.mjs` (SubagentStop, `quality-reviewer`) is the ONLY place
   the e2e suite is launched. It fires on the `MODE: feature-review` stop, and only
   when that review APPROVED (it keys off the reviewer's own

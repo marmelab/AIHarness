@@ -29,3 +29,14 @@ export const reviewsDir = (ctx) =>
 
 export const reviewFlag = (ctx, taskId, role) =>
   join(reviewsDir(ctx), `${taskId}-${role}`);
+
+// A worktree whose validation chain refused the stop too many times in a row: the developer
+// could not get to green. The stop is released so the pipeline is not wedged, and this marker
+// is what keeps the work from being merged anyway. Producer: lib/validation.mjs. Consumer:
+// block-merger-without-review.mjs. Shared here so the two cannot disagree on the path.
+export const validationGaveUpFlag = (ctx, taskId) =>
+  join(
+    process.env.CHAT_SESSION_DIR || ctx.sessionDir,
+    "validation-gave-up",
+    String(taskId),
+  );
