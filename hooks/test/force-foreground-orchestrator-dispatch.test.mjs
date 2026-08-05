@@ -1,8 +1,12 @@
-// Tests for force-foreground-orchestrator-dispatch.mjs. The gate exists because a
-// nested subagent is never re-invoked when a background child completes, so a
-// background pipeline dispatch orphans review/merge/promotion. Only an EXPLICIT
-// run_in_background:false may pass: absent means the extension's background default,
-// which IS the bug (3K loosened exactly this and neutered the gate).
+// Tests for force-foreground-orchestrator-dispatch.mjs. The gate exists because a nested
+// subagent is never re-invoked when a background child completes, so a backgrounded
+// pipeline dispatch orphans review/merge/promotion.
+//
+// It blocks an EXPLICIT true and accepts absent. Requiring an explicit false deadlocked the
+// harness in a runtime whose nested Agent tool does not expose the parameter: the
+// orchestrator could not comply, and every pipeline dispatch was refused. The residual risk
+// in the absent case is covered by completion-invariant, which rejects a stop that leaves
+// APPROVED work unmerged.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,12 +56,14 @@ describe("force-foreground-orchestrator-dispatch", () => {
     expect(r.stdout).toContain(role);
   });
 
-  // The regression that matters: absent is NOT the same as false.
+  // Absent is accepted: a runtime may not offer the parameter to a nested subagent at all,
+  // and blocking then refuses every dispatch with no way for the orchestrator to comply.
   test.each(PIPELINE)(
-    "%s dispatched with run_in_background absent → blocked",
+    "%s dispatched with run_in_background absent → allowed",
     (role) => {
       const r = run({ subagentType: role });
-      expect(isBlocked(r)).toBe(true);
+      expect(r.status).toBe(0);
+      expect(isBlocked(r)).toBe(false);
     },
   );
 
@@ -86,6 +92,17 @@ describe("force-foreground-orchestrator-dispatch", () => {
     });
     expect(isBlocked(r)).toBe(true);
     expect(r.stdout).toContain("merger");
+  });
+
+  // The exact shape observed in the wild: a nested dispatch whose tool_input carries no
+  // run_in_background key at all, five of which were refused in a row before this changed.
+  test("the runtime shape that deadlocked the harness now passes", () => {
+    const r = run({
+      subagentType: "developer",
+      prompt: "ROLE: developer\nTASK_ID: TASK-001\n",
+    });
+    expect(isBlocked(r)).toBe(false);
+    expect(r.stdout).not.toContain("must not be EXPLICITLY backgrounded");
   });
 
   test("an unparseable payload allows the dispatch (fail-open)", () => {
