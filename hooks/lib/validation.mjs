@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   getBaseBranch,
   getWorktreeChangeSummary,
@@ -15,6 +15,7 @@ import {
 import { bash, exec } from "./process.mjs";
 import { loadConfig, validationSteps } from "./config.mjs";
 import { appendProgress } from "./progress-log.mjs";
+import { validationGaveUpFlag } from "./reviews.mjs";
 
 // `only` narrows to a single worktree when the caller already knows it
 // (validate-on-stop scoping to the stopping agent's own task worktree);
@@ -160,6 +161,83 @@ function stepSkipped(ctx, step) {
   }
   return false;
 }
+
+// Release the stop but keep the work out of the base branch: the marker is read by
+// block-merger-without-review, which refuses the merger dispatch for this ticket.
+function giveUp(ctx, cwd, stepId, attempts, output) {
+  const taskId = basename(cwd);
+  try {
+    const flag = validationGaveUpFlag(ctx, taskId);
+    mkdirSync(dirname(flag), { recursive: true });
+    writeFileSync(
+      flag,
+      JSON.stringify(
+        {
+          kind: "validation-gave-up",
+          taskId,
+          step: stepId,
+          attempts,
+          finishedAt: new Date().toISOString(),
+          output: String(output || "")
+            .split("\n")
+            .slice(-30)
+            .join("\n"),
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    /* best effort: the log line above still records it */
+  }
+}
+
+// Sugar: the label a successful step clears its counter under.
+const id0 = (step, r) => r.step ?? step.id;
+
+// The validation chain is the one enforcement with no budget: it refuses the stop for as long
+// as a step fails. That is right in principle, a green stop is the contract, but with no exit
+// it wedges. Observed on a real run: 35 validation cycles over 52 minutes on one ticket, a
+// developer thrashing on an ambiguous test locator, no signal to the orchestrator and no way
+// for the agent to give up (validate-on-stop does not read the FAILED contract line).
+//
+// So: count consecutive failures per worktree AND per step, because a developer that fixes
+// lint and then breaks a test should not inherit the lint budget. Past the limit, release the
+// stop and drop a marker; block-merger-without-review then refuses to merge that ticket, so
+// "we never merge red" survives mechanically without the wedge.
+const STEP_FAIL_LIMIT = 5;
+const stepFailFile = (ctx, cwd, stepId) => {
+  const dir = join(ctx.sessionDir, "breaker");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best effort */
+  }
+  return join(dir, `step-fail-${basename(cwd)}-${stepId}`);
+};
+const readStepFails = (ctx, cwd, stepId) => {
+  try {
+    return (
+      parseInt(readFileSync(stepFailFile(ctx, cwd, stepId), "utf8"), 10) || 0
+    );
+  } catch {
+    return 0;
+  }
+};
+const writeStepFails = (ctx, cwd, stepId, n) => {
+  try {
+    writeFileSync(stepFailFile(ctx, cwd, stepId), String(n));
+  } catch {
+    /* best effort */
+  }
+};
+const clearStepFails = (ctx, cwd, stepId) => {
+  try {
+    unlinkSync(stepFailFile(ctx, cwd, stepId));
+  } catch {
+    /* absent - fine */
+  }
+};
 
 // Per-worktree budget for "you stopped without committing" rejections. Scoped per worktree
 // because sibling developers stop independently, and under the session's breaker/ dir like
@@ -356,14 +434,42 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
         // (the uncommitted-work check runs before the formatter, so calling it
         // "prettier" would point the agent at the wrong thing).
         const id = r.step ?? step.id;
-        progress(`[validate:${label}] ${id} FAILED`);
-        ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
+        const fails = readStepFails(ctx, wt, id) + 1;
+        writeStepFails(ctx, wt, id, fails);
+        progress(
+          `[validate:${label}] ${id} FAILED (${fails}/${STEP_FAIL_LIMIT})`,
+        );
+        ctx.log(
+          `FAIL step=${id} wt=${wt} attempt=${fails}/${STEP_FAIL_LIMIT}\n${r.output}`,
+        );
+
+        if (fails >= STEP_FAIL_LIMIT) {
+          // Give up rather than wedge, and record WHY so the merge is refused later.
+          giveUp(ctx, wt, id, fails, r.output);
+          progress(
+            `[validate:${label}] ${id} gave up after ${fails}, merge will be refused`,
+          );
+          ctx.log(
+            `GAVE-UP step=${id} wt=${wt} after=${fails}; merge blocked for this ticket`,
+          );
+          clearStepFails(ctx, wt, id);
+          continue;
+        }
+
         return {
           ok: false,
           step: id,
-          output: `=== ${id} failed in ${wt} ===\n${r.output}\n`,
+          output:
+            `=== ${id} failed in ${wt} (attempt ${fails}/${STEP_FAIL_LIMIT}) ===\n${r.output}\n` +
+            (fails === STEP_FAIL_LIMIT - 1
+              ? "This is your LAST attempt at this step. On the next failure the stop is " +
+                "released, the ticket is marked as failing validation, and the merger will " +
+                "refuse to merge it. If you cannot get to green, say so in your final " +
+                "message rather than repeating the same fix.\n"
+              : ""),
         };
       }
+      clearStepFails(ctx, wt, id0(step, r));
     }
     progress(`[validate:${label}] checks passed`);
     ctx.log(`OK wt=${wt}`);

@@ -13,7 +13,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
-import { REVIEW_ROLES, reviewFlag } from "./lib/reviews.mjs";
+import {
+  REVIEW_ROLES,
+  reviewFlag,
+  validationGaveUpFlag,
+} from "./lib/reviews.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "block-merger-without-review");
@@ -24,6 +28,29 @@ if (d.mode === "promote") process.exit(0); // promotion-only carries no per-tick
 if (["SIMPLE", "MIGRATION", "PROMOTE", "ROLLBACK"].includes(d.taskId))
   process.exit(0);
 if (!/^TASK-\d+$/.test(d.taskId)) process.exit(0); // can't identify a ticket → fail open
+
+// The validation chain gave up on this ticket: it refused the developer's stop up to its
+// limit and released it rather than wedging the pipeline. The work is therefore NOT green,
+// and this is where "we never merge red" is enforced, mechanically, instead of relying on
+// the orchestrator to have read a result file.
+const gaveUp = validationGaveUpFlag(ctx, d.taskId);
+if (existsSync(gaveUp)) {
+  let detail = "";
+  try {
+    const r = JSON.parse(readFileSync(gaveUp, "utf8"));
+    detail = ` (step \`${r.step}\` failed ${r.attempts} times)`;
+  } catch {
+    /* the marker's presence is the signal; its contents are a nicety */
+  }
+  ctx.fail(
+    `Refusing to dispatch the merger for ${d.taskId}: its validation never reached green${detail}.\n` +
+      "The developer's stop was released so the pipeline would not wedge, but the work is not " +
+      "mergeable. Do NOT delete the marker and do NOT re-dispatch the merger: either dispatch a " +
+      "developer to actually fix the failing step, or report this ticket as failed in your " +
+      `handoff and carry on with the others. Details: ${gaveUp}`,
+    { log: `BLOCK ${d.taskId} validation gave up` },
+  );
+}
 
 const missing = REVIEW_ROLES.filter(
   (role) => !existsSync(reviewFlag(ctx, d.taskId, role)),

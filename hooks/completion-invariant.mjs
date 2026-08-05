@@ -23,6 +23,7 @@ import {
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { readAgentMeta } from "./lib/agent-meta.mjs";
+import { isOrchestrator } from "./lib/teams.mjs";
 import { getUnmergedTaskBranches, git } from "./lib/git.mjs";
 import { reviewFlag } from "./lib/reviews.mjs";
 import { sessionBranch, simpleBranch } from "./lib/topology.mjs";
@@ -44,7 +45,7 @@ try {
   // filter (see cleanup-worktree) and agent_type in the payload is empty, so identify
   // via the sibling meta.json. Any doubt -> accept (never block a non-orchestrator stop).
   const meta = readAgentMeta(payload);
-  if (!meta || meta.agentType !== "orchestrator") {
+  if (!meta || !isOrchestrator(meta.agentType)) {
     ctx.accept(`not orchestrator (${meta?.agentType || "unknown"})`);
   }
 

@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
+import { bareRole } from "./lib/teams.mjs";
 import { REPO, CONFIG_DIR } from "./lib/paths.mjs";
 
 // Detect the documentator EITHER by DOCUMENTATOR_RUN=1 (legacy standalone
@@ -22,7 +23,7 @@ try {
 }
 if (
   process.env.DOCUMENTATOR_RUN !== "1" &&
-  (input.agent_type || "") !== "documentator"
+  bareRole(input.agent_type) !== "documentator"
 ) {
   process.exit(0);
 }
