@@ -8,6 +8,18 @@
 // | PROMOTE | ROLLBACK, so prose mentioning another ticket (e.g. "TASK-001 is
 // merged; now merge this one") can never mis-key a gate.
 
+// Whether a dispatch is EXPLICITLY backgrounded, which is the only case
+// force-foreground-orchestrator-dispatch denies. Absent is not the same thing: a nested
+// subagent's Agent tool may not expose the parameter at all, so absent means "the runtime
+// chose", not "the orchestrator chose background".
+//
+// It lives here because TWO hooks must agree on it. force-foreground decides what to deny;
+// block-duplicate-dispatch decides what to debounce, and it must debounce exactly the
+// dispatches that will proceed. When they disagreed, the debounce silently switched itself
+// off for every pipeline role and a second planner got through.
+export const isExplicitlyBackgrounded = (input) =>
+  input?.tool_input?.run_in_background === true;
+
 /**
  * @param {Record<string, unknown>} input  Parsed PreToolUse(Agent) payload.
  * @returns {object} Dispatch fields used by the Agent-gating hooks.

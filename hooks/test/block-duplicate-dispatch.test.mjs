@@ -170,16 +170,27 @@ describe("block-duplicate-dispatch — pass-through", () => {
   });
 });
 
-describe("block-duplicate-dispatch — force-foreground retry (regression 8468cc06)", () => {
-  // A pipeline dispatch without run_in_background:false is DENIED by
-  // force-foreground-orchestrator-dispatch and re-issued. block-duplicate must NOT
-  // record a marker for the denied attempt, or the corrective retry would be wrongly
-  // rejected as a duplicate (this wedged planning for 60 min in a real run).
-  test("a rib-absent pipeline dispatch is skipped, so the rib:false retry is not a duplicate", () => {
+describe("block-duplicate-dispatch — agreement with force-foreground", () => {
+  // The debounce must cover exactly the dispatches that PROCEED. force-foreground denies
+  // only an explicit true, so an explicit true is the only form to skip: recording a marker
+  // for a denied attempt would reject the corrective retry as a duplicate (that wedged
+  // planning for 60 min once).
+  test("an explicitly backgrounded dispatch is skipped, so its retry is not a duplicate", () => {
     const p = `TICKETS_DIR=${join(TMP, "tickets-ff")}`;
     const FF = "ff-orch"; // unique caller: no marker collision with earlier tests
-    expect(run(p, "planner", FF, "absent").blocked).toBe(false); // denied form -> skipped, no marker
+    expect(run(p, "planner", FF, true).blocked).toBe(false); // denied form -> skipped, no marker
     expect(run(p, "planner", FF, false).blocked).toBe(false); // the retry proceeds
-    expect(run(p, "planner", FF, false).blocked).toBe(true); // a genuine 2nd planner is still blocked
+    expect(run(p, "planner", FF, false).blocked).toBe(true); // a genuine 2nd planner is blocked
+  });
+
+  // The bug this replaces: the skip condition was `run_in_background !== false`, and a
+  // nested subagent's Agent tool does not expose the parameter, so EVERY pipeline dispatch
+  // exited early and the debounce was silently off. Observed as two planner dispatches
+  // twelve seconds apart, with no log line from this hook at all.
+  test("a dispatch with no run_in_background key is still debounced", () => {
+    const p = `TICKETS_DIR=${join(TMP, "tickets-absent")}`;
+    const CALLER = "absent-orch";
+    expect(run(p, "planner", CALLER, "absent").blocked).toBe(false); // first one proceeds
+    expect(run(p, "planner", CALLER, "absent").blocked).toBe(true); // second is caught
   });
 });
