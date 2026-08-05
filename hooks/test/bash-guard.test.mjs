@@ -30,7 +30,10 @@ const STANDARD_CONFIG = {
     ],
     extraForbidden: ["build", "e2e"],
   },
-  roles: { developer: { model: "sonnet" }, "quality-reviewer": { model: "opus" } },
+  roles: {
+    developer: { model: "sonnet" },
+    "quality-reviewer": { model: "opus" },
+  },
 };
 
 const standardRepo = mkdtempSync(join(tmpdir(), "bash-guard-standard-"));
@@ -301,6 +304,16 @@ describe("bash-guard hook", () => {
   });
 
   describe("guard-state rule — orchestrator only", () => {
+    // The give-up marker is what keeps a red ticket out of the base branch, so the enforced
+    // party must not be able to lift its own refusal. Recovery is a green validation run.
+    test("the orchestrator cannot delete a validation-gave-up marker", () => {
+      const r = runHook(
+        "orchestrator",
+        "rm -f /tmp/_repo/sess-1234/validation-gave-up/TASK-001",
+      );
+      expect(isBlocked(r)).toBe(true);
+    });
+
     const SD = "/tmp/_repo/sess-1234";
 
     test("orchestrator touches a review flag → blocked", () => {

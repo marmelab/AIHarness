@@ -20,6 +20,7 @@
 // CHAT_SESSION_DIR is unset and ctx.sessionDir already equals <session_dir> (the
 // session-bootstrap hook injects exactly that), so this is a no-op there.
 
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 
 export const REVIEW_ROLES = ["quality-reviewer"];
@@ -40,3 +41,14 @@ export const validationGaveUpFlag = (ctx, taskId) =>
     "validation-gave-up",
     String(taskId),
   );
+
+// Cleared when that worktree's whole chain passes: giving up must be recoverable, or the
+// documented fix ("dispatch a developer to fix the failing step") cannot work and the ticket is
+// dead for the session with no exit but deleting the file the block message forbids deleting.
+export const clearValidationGaveUp = (ctx, taskId) => {
+  try {
+    rmSync(validationGaveUpFlag(ctx, taskId), { force: true });
+  } catch {
+    /* absent - fine */
+  }
+};

@@ -15,7 +15,7 @@ import {
 import { bash, exec } from "./process.mjs";
 import { loadConfig, validationSteps } from "./config.mjs";
 import { appendProgress } from "./progress-log.mjs";
-import { validationGaveUpFlag } from "./reviews.mjs";
+import { clearValidationGaveUp, validationGaveUpFlag } from "./reviews.mjs";
 
 // `only` narrows to a single worktree when the caller already knows it
 // (validate-on-stop scoping to the stopping agent's own task worktree);
@@ -425,6 +425,9 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
 
   for (const wt of worktrees) {
     const label = basename(wt);
+    // A step that gave up releases the stop and continues, so the loop still reaches its end.
+    // Without this flag the "green" path below would then clear the marker just written.
+    let gaveUpHere = false;
     for (const step of perWorktree) {
       if (stepSkipped(ctx, step)) continue;
       progress(`[validate:${label}] ${step.id}…`);
@@ -471,6 +474,7 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
             `GAVE-UP step=${id} wt=${wt} after=${fails}; merge blocked for this ticket`,
           );
           clearStepFails(ctx, wt, id);
+          gaveUpHere = true;
           continue;
         }
 
@@ -489,6 +493,9 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
       }
       clearStepFails(ctx, wt, id0(step, r));
     }
+    // Green: the ticket is mergeable again. Without this the give-up marker outlives the fix
+    // and block-merger-without-review keeps refusing a ticket whose validation now passes.
+    if (!gaveUpHere) clearValidationGaveUp(ctx, basename(wt));
     progress(`[validate:${label}] checks passed`);
     ctx.log(`OK wt=${wt}`);
   }

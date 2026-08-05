@@ -67,14 +67,15 @@ if (isOrchestrator(agent || ctx.agentType)) {
   // use — `RD="$(dirname "$TICKET_FILE")/reviews" && touch "$RD/<flag>"` — whose
   // literal text is `…/reviews"` then `$RD/…`, never `/reviews/`. That let a
   // confused orchestrator forge a verdict flag through the documented form.
-  const guardPath = /\/(reviews|breaker)(\/|["'\s]|$)/;
+  const guardPath = /\/(reviews|breaker|validation-gave-up)(\/|["'\s]|$)/;
   const mutatingVerb =
     /(^|[;&|]|\bsudo\b|\bxargs\b)\s*(rm|touch|mkdir|mv|cp|truncate|ln)\b/.test(
       cmd,
     ) ||
     /\bsed\s+(-[a-zA-Z]*i\b|--in-place)/.test(cmd) ||
     /\|\s*tee\b/.test(cmd);
-  const redirectToGuard = />>?\s*\S*\/(reviews|breaker)(\/|["'\s]|$)/.test(cmd);
+  const redirectToGuard =
+    />>?\s*\S*\/(reviews|breaker|validation-gave-up)(\/|["'\s]|$)/.test(cmd);
   if ((mutatingVerb && guardPath.test(cmd)) || redirectToGuard) {
     ctx.block({
       reason:
