@@ -44,6 +44,20 @@ const orphans = onDisk
   .map((f) => `hooks/${f}`)
   .filter((p) => !registered.has(p) && !INTENTIONALLY_UNREGISTERED.has(p));
 
+// Same class of failure for the MCP servers the plugin declares: a bad path means the
+// server never starts, and the only symptom is a tool that silently is not there.
+const mcpPath = join(ROOT, ".mcp.json");
+if (existsSync(mcpPath)) {
+  const servers = JSON.parse(readFileSync(mcpPath, "utf8"));
+  for (const [name, def] of Object.entries(servers)) {
+    for (const arg of def.args ?? []) {
+      const m = String(arg).match(/\$\{CLAUDE_PLUGIN_ROOT\}\/(\S+)/);
+      if (m && !existsSync(join(ROOT, m[1])))
+        unresolved.push(`.mcp.json ${name}: ${m[1]}`);
+    }
+  }
+}
+
 let failed = false;
 if (unresolved.length) {
   console.error(
