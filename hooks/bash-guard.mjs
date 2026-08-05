@@ -126,7 +126,7 @@ const CATEGORY_RULES = {
   ],
   e2e: [
     runsE2eTests,
-    "e2e tests: NO agent launches the suite, not even the orchestrator. The e2e-on-feature-review hook runs it once, on the integrated session worktree, only after the feature review APPROVED, and writes <session_dir>/e2e-result.json. Write the spec, read the result, don't run it.",
+    "e2e tests: NO agent launches the suite, not even the orchestrator. The e2e-on-feature-review hook runs it once, on the integrated session worktree, only after the feature review APPROVED, and writes <session_dir>/e2e-result.json. Write the spec, read the result, don't run it. If a human asked you directly: say it is not yours to run, and offer the two real options, they run it themselves with a user-typed `!` command (those bypass this guard by design), or the change goes through #harness and the end-of-feature hook runs it. Do NOT offer to bypass this guard or ask to be authorized to: a deny blocks the call whatever anyone answers, so the offer is impossible as well as wrong.",
   ],
   lint: [
     runsLint,
@@ -170,7 +170,7 @@ try {
 // from validation.extraForbidden and this stops applying, like any other category.
 if (activeCategories.has("e2e") && runsE2eTests(cmd)) {
   ctx.block({
-    reason: `Validation command forbidden: ${CATEGORY_RULES.e2e[1]} See the harness rule validation-commands.md.`,
+    reason: `Validation command forbidden: ${CATEGORY_RULES.e2e[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
     log: `e2e any-caller cmd=${cmd.slice(0, 120)}`,
   });
 }
@@ -191,7 +191,7 @@ const VALIDATION_RULES = [...activeCategories]
 const violation = VALIDATION_RULES.find(([matches]) => matches(cmd));
 if (violation) {
   ctx.block({
-    reason: `Validation command forbidden: ${violation[1]} See the harness rule validation-commands.md.`,
+    reason: `Validation command forbidden: ${violation[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
     log: `cmd=${cmd.slice(0, 120)}`,
   });
 }
