@@ -246,6 +246,9 @@ function runStep(ctx, step, { cwd, base }) {
         writeDirtyRejects(ctx, cwd, rejects + 1);
         return {
           ok: false,
+          // Not a prettier failure: prettier has not run yet. Reporting `prettier` here
+          // told the agent the formatter broke, which sent it looking in the wrong place.
+          step: "uncommitted",
           output:
             "Uncommitted changes in the worktree. Commit your work before stopping: the " +
             "output contract requires a commit sha, and the formatting step must not " +
@@ -349,12 +352,16 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
       progress(`[validate:${label}] ${step.id}…`);
       const r = runStep(ctx, step, { cwd: wt, base });
       if (!r.ok) {
-        progress(`[validate:${label}] ${step.id} FAILED`);
-        ctx.log(`FAIL step=${step.id} wt=${wt}\n${r.output}`);
+        // A step may report its own label when the failure is not its command failing
+        // (the uncommitted-work check runs before the formatter, so calling it
+        // "prettier" would point the agent at the wrong thing).
+        const id = r.step ?? step.id;
+        progress(`[validate:${label}] ${id} FAILED`);
+        ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
         return {
           ok: false,
-          step: step.id,
-          output: `=== ${step.id} failed in ${wt} ===\n${r.output}\n`,
+          step: id,
+          output: `=== ${id} failed in ${wt} ===\n${r.output}\n`,
         };
       }
     }
