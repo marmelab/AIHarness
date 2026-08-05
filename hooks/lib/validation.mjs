@@ -434,6 +434,24 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
         // (the uncommitted-work check runs before the formatter, so calling it
         // "prettier" would point the agent at the wrong thing).
         const id = r.step ?? step.id;
+
+        // A step that reports its OWN label also owns its OWN budget and its own recovery
+        // (the uncommitted-work check rejects twice, then commits honestly). Counting it here
+        // as well gave one condition two counters with different limits, and a message that
+        // said `attempt 2/2` in its body while the log said `attempt=2/5`. Contradictory
+        // advice is worse than none. So the generic budget covers only the steps with no
+        // budget of their own: a failing command, where the agent must reach green or be
+        // stopped.
+        if (r.step) {
+          progress(`[validate:${label}] ${id} FAILED`);
+          ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
+          return {
+            ok: false,
+            step: id,
+            output: `=== ${id} failed in ${wt} ===\n${r.output}\n`,
+          };
+        }
+
         const fails = readStepFails(ctx, wt, id) + 1;
         writeStepFails(ctx, wt, id, fails);
         progress(
