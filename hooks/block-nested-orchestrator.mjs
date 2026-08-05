@@ -19,12 +19,13 @@
 
 import { readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
-import { isOrchestrator } from "./lib/teams.mjs";
+import { isOrchestrator, bareRole } from "./lib/teams.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "block-nested-orchestrator");
 
-const target = input.tool_input?.subagent_type || "";
+// Normalised: a dispatch may name the target bare or namespaced (aiharness:orchestrator).
+const target = bareRole(input.tool_input?.subagent_type);
 const caller = input.agent_type || ctx.agentType || "";
 
 // Rule 1 — orchestrator allowlist.

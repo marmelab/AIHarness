@@ -32,7 +32,8 @@ const DEFAULTS = {
   },
 };
 
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const isObject = (v) =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
 
 // Deep-merge `override` onto `base`. Objects merge recursively; arrays and
 // scalars from `override` REPLACE (never concatenate): a config that lists
@@ -70,10 +71,17 @@ function validate(cfg) {
     }
     const isVitest = step.runner === "vitest";
     if (!isVitest && (typeof step.command !== "string" || !step.command)) {
-      fail(`validation.steps[${step.id}] needs a \`command\` (or runner:"vitest")`);
+      fail(
+        `validation.steps[${step.id}] needs a \`command\` (or runner:"vitest")`,
+      );
     }
-    if (isVitest && (typeof step.config !== "string" || !Array.isArray(step.projects))) {
-      fail(`validation.steps[${step.id}] (vitest) needs \`config\` and \`projects[]\``);
+    if (
+      isVitest &&
+      (typeof step.config !== "string" || !Array.isArray(step.projects))
+    ) {
+      fail(
+        `validation.steps[${step.id}] (vitest) needs \`config\` and \`projects[]\``,
+      );
     }
   }
 
