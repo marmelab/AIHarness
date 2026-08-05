@@ -25,7 +25,7 @@ Around that, hooks:
 - block the commands that would make the pipeline look healthy while being broken:
   merging outside the merger, launching arbitrary containers, opening a headed browser
 
-387 tests cover those hooks. That number matters: the guards are the product, and an
+441 tests cover those hooks. That number matters: the guards are the product, and an
 untested guard fails silently. One of them had been inert for months before a test caught
 it.
 
@@ -44,8 +44,17 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
   "containers": { "allow": [] },
   "validation": {
     "steps": [
-      { "id": "typecheck", "kind": "typecheck", "command": "npm run typecheck" },
-      { "id": "unit", "kind": "unit", "runner": "vitest", "changedScoped": true }
+      {
+        "id": "typecheck",
+        "kind": "typecheck",
+        "command": "npm run typecheck"
+      },
+      {
+        "id": "unit",
+        "kind": "unit",
+        "runner": "vitest",
+        "changedScoped": true
+      }
     ],
     "extraForbidden": ["build", "e2e"]
   },
@@ -97,3 +106,9 @@ Copy `hooks/`, `agents/`, `rules/`, `skills/`, `commands/` and `scripts/` into y
 project's `.claude/`, and merge `hooks/hooks.json` into your `.claude/settings.json`
 (replacing `${CLAUDE_PLUGIN_ROOT}` with `$CLAUDE_PROJECT_DIR/.claude`). The core resolves
 its own files in either layout.
+
+One thing does not carry over: the browser tools. A plugin exposes an MCP server as
+`mcp__plugin_aiharness_<server>__<tool>`, which is the name the developer and the
+quality-reviewer declare, so a `.mcp.json` of your own naming the server `playwright`
+grants them nothing (silently, which is how this went unnoticed for weeks). Name that
+server `plugin_aiharness_playwright` to keep them.

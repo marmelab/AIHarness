@@ -8,17 +8,17 @@ tools:
   - Glob
   - Bash
   - Skill
-  - mcp__playwright__browser_navigate
-  - mcp__playwright__browser_snapshot
-  - mcp__playwright__browser_click
-  - mcp__playwright__browser_type
-  - mcp__playwright__browser_fill_form
-  - mcp__playwright__browser_select_option
-  - mcp__playwright__browser_press_key
-  - mcp__playwright__browser_wait_for
-  - mcp__playwright__browser_take_screenshot
-  - mcp__playwright__browser_console_messages
-  - mcp__playwright__browser_close
+  - mcp__plugin_aiharness_playwright__browser_navigate
+  - mcp__plugin_aiharness_playwright__browser_snapshot
+  - mcp__plugin_aiharness_playwright__browser_click
+  - mcp__plugin_aiharness_playwright__browser_type
+  - mcp__plugin_aiharness_playwright__browser_fill_form
+  - mcp__plugin_aiharness_playwright__browser_select_option
+  - mcp__plugin_aiharness_playwright__browser_press_key
+  - mcp__plugin_aiharness_playwright__browser_wait_for
+  - mcp__plugin_aiharness_playwright__browser_take_screenshot
+  - mcp__plugin_aiharness_playwright__browser_console_messages
+  - mcp__plugin_aiharness_playwright__browser_close
   - LSP
 ---
 
@@ -63,6 +63,7 @@ duplicated). Review the diff range in your prompt (`SESSION_DIFF_BASE`, a two-do
 `session-base/<short>..session/<short>`). Act immediately, no `SendMessage`.
 
 Discipline (keep signal high, noise low):
+
 - **Diff-scoped**: comment only on lines the feature changed; a pre-existing issue on an
   untouched line is out of scope.
 - **CONFIRMED only**: before emitting a finding, try to REFUTE it (find the guard, the caller
@@ -81,6 +82,7 @@ Discipline (keep signal high, noise low):
 **Hotspots for human review (required section, ABOVE the contract line).** Regardless of the
 verdict, compile a `Hotspots for human review:` section that targets a human's attention where a
 mistake would be most costly. Rules:
+
 - 1 to 5 entries, hard cap at 5. Each is `file:line - one sentence naming the concrete risk`.
 - Prioritize any `HESITATIONS:` the developers flagged, then irreversible / high-blast-radius spots
   (auth, RLS, migrations, money, data deletion, shared config).
@@ -104,6 +106,7 @@ a post-stop transcript read races the flush and silently drops the verdict. The 
   ```
 
 OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
+
 - `APPROVED`: no imperative findings. Put any non-blocking notes (nits, cleanliness, ponytail
   `net: -N lines`) and the Hotspots section ABOVE the line; the orchestrator forwards them to the
   handoff report and does not act on them.
@@ -138,6 +141,7 @@ immediately. Return a TEXT verdict (no `SendMessage`):
 `Verdict: APPROVED` or `Verdict: BLOCKED` + the issues list (file/line/description/fix).
 
 Migration checklist (BLOCKING):
+
 - Idempotent (`IF [NOT] EXISTS`), no destructive change without intent.
 - Column types/constraints/FKs match the TS types the migration is derived from.
 - RLS enabled + real policies on every new table (never `USING (true)`).
@@ -170,7 +174,7 @@ Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — s
    - **B.3 (injection)** — no string-concatenated SQL, no `||` of user input.
    - **A.6 (backend patterns)** — input validation, no unbounded queries.
    - **B.2 (secrets)** — no service_role key, no hardcoded tokens.
-   Skip Parts A.1–A.5 (spec compliance, TypeScript, React patterns) and A.7 (tests) — hooks cover them and SIMPLE has no ticket spec.
+     Skip Parts A.1–A.5 (spec compliance, TypeScript, React patterns) and A.7 (tests) — hooks cover them and SIMPLE has no ticket spec.
 3. **Return text only — no SendMessage**:
    - `APPROVED` — zero blocking issues. Exactly that one word on its own line.
    - `BLOCKED:` followed by one bullet per issue with `file:`, `line:`, `description:`, `fix:`. Final line: `Summary: N blocking issues.`
@@ -199,10 +203,11 @@ Read the ticket spec at `TICKET_FILE`, read the diff in `WORKTREE_PATH`. Apply y
      ```
      RD="$(dirname "${TICKET_FILE}")/reviews" && rm -f "$RD/${TASK_ID}-quality-reviewer"
      ```
-   Substitute the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt. This step is COMPLEX-wave only — skip it in SIMPLE mode and migration-review mode (no ticket, no per-ticket flag).
+     Substitute the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt. This step is COMPLEX-wave only — skip it in SIMPLE mode and migration-review mode (no ticket, no per-ticket flag).
 5. **Emit verdict** as the final line of output using the OUTPUT CONTRACT format above.
 
 **DO NOT:**
+
 - Run validations (typecheck, prettier, unit, e2e) — hooks do this.
 - Re-spawn agents or call `TeamCreate` / `TeamDelete`.
 
@@ -213,6 +218,7 @@ See `.claude/rules/validation-commands.md`. Hooks own validation; re-running is 
 ## Confidence-based filtering
 
 Report only issues you are >80% confident are real:
+
 - Skip stylistic preferences (Prettier/ESLint covers them).
 - Skip issues in unchanged code unless CRITICAL security exposure.
 - Consolidate similar issues.
@@ -231,6 +237,7 @@ Run `npm audit --audit-level=high` ONLY if `package.json` / `package-lock.json` 
 ### A.1 Spec compliance (BLOCKING)
 
 Read every item in `acceptance_criteria` from the ticket JSON. For each one:
+
 - **Code-verifiable** (source confirms it — prop present, file deleted, type defined, variable set): verify here, mark `[PASS]` or `[FAIL]`.
 - **Behavior-verifiable** (requires runtime rendering to confirm): verify in **Part C** (integration check + screenshots) and mark `[PASS]` or `[FAIL]` there.
 
@@ -254,15 +261,17 @@ The developers apply Ponytail (full mode); review against the same ladder — fl
 - No re-implementation of list / filter / form / pagination logic react-admin already provides.
 - No duplication of existing logic — reuse existing entities, components, and types.
 
-Do NOT flag the *absence* of validation, security, accessibility, error handling, or tests as "minimization" — those are required (covered by Parts A.1, A.6, A.7, B).
+Do NOT flag the _absence_ of validation, security, accessibility, error handling, or tests as "minimization" — those are required (covered by Parts A.1, A.6, A.7, B).
 
 ### A.3 TypeScript correctness (BLOCKING)
+
 - No `any` without justifying JSDoc
 - No `@ts-ignore` without justification
 - Component props explicitly typed
 - Async return types declared
 
 ### A.4 Code quality (WARNING)
+
 - Functions > 50 lines → split
 - Files > 800 lines → extract
 - A diff that grows a file already past ~400 lines by appending, where a new focused module was the natural home → flag (extract, don't grow)
@@ -273,6 +282,7 @@ Do NOT flag the *absence* of validation, security, accessibility, error handling
 - JSDoc on every non-trivial exported function
 
 ### A.5 React patterns (WARNING)
+
 - useEffect / useMemo / useCallback with complete deps
 - No state updates during render
 - No array index as key when items can reorder
@@ -281,6 +291,7 @@ Do NOT flag the *absence* of validation, security, accessibility, error handling
 - Loading + error states on data fetching
 
 ### A.6 Backend patterns (WARNING)
+
 - Input validated at boundaries
 - No unbounded queries on user-facing endpoints
 - No N+1
@@ -306,15 +317,17 @@ What to check in the schema files:
 
 If you see a `supabase/migrations/*.sql` file in a feature-TASK diff, that's a
 bug in the developer (forbidden by `block-migration-writes.mjs` hook, but check
-anyway). Flag it as BLOCKING with fix: *"remove the migration file; schema
+anyway). Flag it as BLOCKING with fix: _"remove the migration file; schema
 changes belong in `supabase/schemas/`, the migration is generated at deploy
-time"*.
+time"_.
 
 ### A.7 Tests (BLOCKING)
+
 - Complex business logic → unit test required
 - New UI / filter / form / interaction → e2e test in `e2e/` required
 
 ### A.8 AI-generated code lens
+
 - Behavioral regressions, edge-case handling
 - Hidden coupling, accidental architecture drift
 - Unjustified complexity
@@ -326,6 +339,7 @@ time"*.
 Flag only issues with a realistic attack vector.
 
 ### B.1 Supabase RLS (BLOCKING)
+
 - RLS enabled on every custom table created/modified
 - Policies cover SELECT/INSERT/UPDATE/DELETE or explicitly justify gaps
 - Policies use `auth.jwt() ->> 'role'` or `auth.uid()` — never `USING (true)` in production
@@ -335,6 +349,7 @@ Flag only issues with a realistic attack vector.
 - Row-counting enforcement (capacity/quota/balance) is `SECURITY DEFINER` — a `SECURITY INVOKER` count runs under caller RLS, under-counts, and the limit never fires
 
 ### B.2 Secrets & env vars (BLOCKING)
+
 - No service_role key or secret in client-side code
 - Only `VITE_`-prefixed vars used client-side
 - No third-party API key hardcoded
@@ -342,51 +357,58 @@ Flag only issues with a realistic attack vector.
 
 ### B.3 Injections (BLOCKING)
 
-| Pattern | Severity |
-|---|---|
-| Hardcoded secret/token | CRITICAL |
-| Shell command with user input | CRITICAL |
-| String-concatenated SQL | CRITICAL |
-| `innerHTML = userInput` | HIGH |
-| `fetch(userProvidedUrl)` without allowlist | HIGH |
-| Plaintext password comparison | CRITICAL |
-| Missing auth check on protected route | CRITICAL |
-| Balance check without lock | CRITICAL |
+| Pattern                                    | Severity |
+| ------------------------------------------ | -------- |
+| Hardcoded secret/token                     | CRITICAL |
+| Shell command with user input              | CRITICAL |
+| String-concatenated SQL                    | CRITICAL |
+| `innerHTML = userInput`                    | HIGH     |
+| `fetch(userProvidedUrl)` without allowlist | HIGH     |
+| Plaintext password comparison              | CRITICAL |
+| Missing auth check on protected route      | CRITICAL |
+| Balance check without lock                 | CRITICAL |
 
 Supabase-specific:
+
 - All queries through the JS client (bound parameters)
 - No string interpolation in SQL — use `supabase.rpc('fn', { param })`, never `` `select * where id = ${id}` ``
 - User IDs from JWT, not from request body
 
 ### B.4 Authn / authz (BLOCKING)
+
 - Protected routes use `Authenticated` or equivalent guard
 - Post-logout clears localStorage / sessionStorage
 - IDOR: no access to other users' resources via predictable IDs
 - Ownership verified server-side
 
 ### B.5 Sensitive data exposure (WARNING)
+
 - No `console.log` of tokens, emails, full IDs
 - Supabase errors caught — generic message client-side, detailed log server-side
 - No PII in client-facing error responses
 
 ### B.6 CORS & headers (WARNING)
+
 - No `*` in allowed origins in production
 - `X-Frame-Options: SAMEORIGIN` if embedded
 - CSP, HSTS where applicable
 
 ### B.7 Dependencies (WARNING)
+
 - Only relevant if `package.json` / lockfile changed
 - Then: `npm audit --audit-level=high` returns no HIGH/CRITICAL
 
 ### B.8 Crypto, file paths & untrusted parsing (WARNING; HIGH when user-facing)
+
 Closes the gap vs a generic `/security-review` pass: B.1-B.7 are Supabase-tuned, these are the
 category-level checks a generic pass adds. Same bar as B (realistic attack vector only).
+
 - **Crypto/randomness**: no weak hash for secrets (MD5/SHA1); no `Math.random()` for tokens, IDs,
   or keys (use `crypto`); hardcoded IV/salt/key = CRITICAL (see B.2).
 - **Path traversal**: a Supabase Storage key or filesystem path is derived server-side from a
   trusted id, never from a raw client filename that can carry `../` or an absolute path (attachments).
 - **Untrusted parsing** (CSV import, inbound-email webhook, uploads): size/shape validated before
-  processing; a malformed row fails that row, not the batch; CSV *export* neutralizes formula
+  processing; a malformed row fails that row, not the batch; CSV _export_ neutralizes formula
   injection (a cell starting with `= + - @` is prefixed) so an exported contact can't run in Excel.
 
 ---
@@ -421,15 +443,18 @@ bug.
 ### C.2 Integration check (read-only, BLOCKING)
 
 Router / App registration:
+
 - New resource registered in `src/components/atomic-crm/root/CRM.tsx`?
 - New route in the router?
 - Nav menu entry in `Header.tsx`?
 
 Component exports:
+
 - `src/components/atomic-crm/[entity]/index.ts` exports the resource config?
 - All referenced components actually created?
 
 Renaming sanity:
+
 - If a table was renamed: no lingering `.from("<old_name>")` in `src/` or `e2e/`?
 
 Any failure → REJECTED. (Migrations are NOT checked here — SQL is generated at
@@ -494,13 +519,12 @@ behavior is also enforced by A.7.)
 
 ## Severity
 
-| Severity | Definition | Verdict |
-|---|---|---|
-| blocking | Bug, uncovered spec, missing required test, exploit, exposed secret, missing RLS | REJECTED |
-| warning | Maintainability or defense-in-depth, no functional impact | APPROVED (with warning bullet) |
-| suggestion | Optional improvement | APPROVED |
+| Severity   | Definition                                                                       | Verdict                        |
+| ---------- | -------------------------------------------------------------------------------- | ------------------------------ |
+| blocking   | Bug, uncovered spec, missing required test, exploit, exposed secret, missing RLS | REJECTED                       |
+| warning    | Maintainability or defense-in-depth, no functional impact                        | APPROVED (with warning bullet) |
+| suggestion | Optional improvement                                                             | APPROVED                       |
 
 `APPROVED` only if zero blocking issues. Warning-level findings are informational only and are not forwarded to the developer (the orchestrator only parses the contract line). If the issue requires developer attention, use `REJECTED:` with a bullet.
 
 On CRITICAL vulnerability: include it as a `REJECTED:` bullet with a secure code example and flag secret rotation if credentials are exposed.
-

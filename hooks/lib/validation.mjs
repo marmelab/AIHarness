@@ -15,7 +15,7 @@ import {
 import { bash, exec } from "./process.mjs";
 import { loadConfig, validationSteps } from "./config.mjs";
 import { appendProgress } from "./progress-log.mjs";
-import { validationGaveUpFlag } from "./reviews.mjs";
+import { clearValidationGaveUp, validationGaveUpFlag } from "./reviews.mjs";
 
 // `only` narrows to a single worktree when the caller already knows it
 // (validate-on-stop scoping to the stopping agent's own task worktree);
@@ -425,6 +425,9 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
 
   for (const wt of worktrees) {
     const label = basename(wt);
+    // A step that gave up releases the stop and continues, so the loop still reaches its end.
+    // Without this flag the "green" path below would then clear the marker just written.
+    let gaveUpHere = false;
     for (const step of perWorktree) {
       if (stepSkipped(ctx, step)) continue;
       progress(`[validate:${label}] ${step.id}…`);
@@ -434,6 +437,24 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
         // (the uncommitted-work check runs before the formatter, so calling it
         // "prettier" would point the agent at the wrong thing).
         const id = r.step ?? step.id;
+
+        // A step that reports its OWN label also owns its OWN budget and its own recovery
+        // (the uncommitted-work check rejects twice, then commits honestly). Counting it here
+        // as well gave one condition two counters with different limits, and a message that
+        // said `attempt 2/2` in its body while the log said `attempt=2/5`. Contradictory
+        // advice is worse than none. So the generic budget covers only the steps with no
+        // budget of their own: a failing command, where the agent must reach green or be
+        // stopped.
+        if (r.step) {
+          progress(`[validate:${label}] ${id} FAILED`);
+          ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
+          return {
+            ok: false,
+            step: id,
+            output: `=== ${id} failed in ${wt} ===\n${r.output}\n`,
+          };
+        }
+
         const fails = readStepFails(ctx, wt, id) + 1;
         writeStepFails(ctx, wt, id, fails);
         progress(
@@ -453,6 +474,7 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
             `GAVE-UP step=${id} wt=${wt} after=${fails}; merge blocked for this ticket`,
           );
           clearStepFails(ctx, wt, id);
+          gaveUpHere = true;
           continue;
         }
 
@@ -471,6 +493,9 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
       }
       clearStepFails(ctx, wt, id0(step, r));
     }
+    // Green: the ticket is mergeable again. Without this the give-up marker outlives the fix
+    // and block-merger-without-review keeps refusing a ticket whose validation now passes.
+    if (!gaveUpHere) clearValidationGaveUp(ctx, basename(wt));
     progress(`[validate:${label}] checks passed`);
     ctx.log(`OK wt=${wt}`);
   }

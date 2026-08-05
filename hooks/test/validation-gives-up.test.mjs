@@ -43,7 +43,10 @@ const CONFIG = {
     steps: [{ id: "unit-app", kind: "unit", command: "false" }],
     extraForbidden: [],
   },
-  roles: { developer: { model: "sonnet" }, "quality-reviewer": { model: "opus" } },
+  roles: {
+    developer: { model: "sonnet" },
+    "quality-reviewer": { model: "opus" },
+  },
 };
 
 beforeEach(() => {
@@ -63,7 +66,16 @@ beforeEach(() => {
   g(APP_DIR, "branch", `session/${SHORT}`);
 
   WT = join(SESSION_DIR, "TASK-001");
-  g(APP_DIR, "worktree", "add", "-q", "-b", `${SHORT}/TASK-001`, WT, `session/${SHORT}`);
+  g(
+    APP_DIR,
+    "worktree",
+    "add",
+    "-q",
+    "-b",
+    `${SHORT}/TASK-001`,
+    WT,
+    `session/${SHORT}`,
+  );
   // A committed change, so the uncommitted-work check passes and the unit step is reached.
   writeFileSync(join(WT, "seed.ts"), "export const a = 2;\n");
   g(WT, "add", "-A");
@@ -137,6 +149,32 @@ describe("the validation chain's failure budget", () => {
     expect(r.taskId).toBe("TASK-001");
     expect(r.step).toBe("unit-app");
     expect(r.attempts).toBe(LIMIT);
+  });
+});
+
+describe("giving up is recoverable", () => {
+  // Without this the documented fix cannot work: the marker outlives the repair and the merge
+  // stays refused, leaving no exit but deleting the file the block message forbids deleting.
+  test("a green run clears the marker and the merge is allowed again", () => {
+    for (let i = 0; i < LIMIT; i++) stop();
+    expect(existsSync(gaveUpFlag())).toBe(true);
+    approve();
+    expect(dispatchMerger("TASK-001").status).toBe(2);
+
+    // The step now passes, which is what a developer dispatched to fix it would achieve.
+    writeFileSync(
+      join(APP_DIR, "harness.config.json"),
+      JSON.stringify({
+        ...CONFIG,
+        validation: {
+          steps: [{ id: "unit-app", kind: "unit", command: "true" }],
+          extraForbidden: [],
+        },
+      }),
+    );
+    expect(stop().status).toBe(0);
+    expect(existsSync(gaveUpFlag())).toBe(false);
+    expect(dispatchMerger("TASK-001").status).toBe(0);
   });
 });
 
