@@ -25,8 +25,8 @@ const lineValue = (lines, prefix) => {
 // with a `worktree <path>` line and (unless detached/bare) a `branch refs/...`
 // line. Parse each block independently; drop blocks with no path (trailing blank).
 export function getWorktreeEntries() {
-  return git(["worktree", "list", "--porcelain"]).stdout
-    .split("\n\n")
+  return git(["worktree", "list", "--porcelain"])
+    .stdout.split("\n\n")
     .map((block) => block.split("\n"))
     .map((lines) => ({
       path: lineValue(lines, WORKTREE_PREFIX),
@@ -45,8 +45,20 @@ export function getWorktreeChangeSummary(wt, base) {
   const nonEmpty = (lines) => lines.split("\n").filter((l) => l.trim());
   const statusPath = (line) => line.trim().split(/\s+/).pop();
   const working = exec("git", ["-C", wt, "status", "--porcelain"]).stdout;
-  const ahead = exec("git", ["-C", wt, "log", "--oneline", `${base}..HEAD`]).stdout.trim();
-  const committed = exec("git", ["-C", wt, "diff", "--name-only", `${base}..HEAD`]).stdout;
+  const ahead = exec("git", [
+    "-C",
+    wt,
+    "log",
+    "--oneline",
+    `${base}..HEAD`,
+  ]).stdout.trim();
+  const committed = exec("git", [
+    "-C",
+    wt,
+    "diff",
+    "--name-only",
+    `${base}..HEAD`,
+  ]).stdout;
   const changedFiles = [
     ...new Set([
       ...nonEmpty(committed).map((l) => l.trim()),

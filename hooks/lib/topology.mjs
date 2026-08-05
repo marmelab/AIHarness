@@ -18,8 +18,11 @@ export const sessionBranch = (ctx) => `session/${ctx.sessionShort}`;
 export const sessionBaseBranch = (ctx) => `session-base/${ctx.sessionShort}`;
 
 // Infrastructure worktrees are never removed by cleanup.
-export const isInfraWorktreePath = (p) => p.endsWith("/_session") || p.endsWith("/simple");
+export const isInfraWorktreePath = (p) =>
+  p.endsWith("/_session") || p.endsWith("/simple");
 // Session-lifetime branches are never deleted by cleanup.
-export const isProtectedBranch = (b) => /^session(-base)?\//.test(b) || /\/simple$/.test(b);
+export const isProtectedBranch = (b) =>
+  /^session(-base)?\//.test(b) || /\/simple$/.test(b);
 // Directory names under <worktreeBase> that the leftover sweep may touch.
-export const isTaskWorktreeDirName = (name) => /^TASK-[0-9]+$/.test(name) || name === "simple";
+export const isTaskWorktreeDirName = (name) =>
+  /^TASK-[0-9]+$/.test(name) || name === "simple";

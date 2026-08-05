@@ -87,8 +87,7 @@ export function detectInflight(ctx, { checkDeploy = true } = {}) {
 
     const tickets = readTickets(ctx);
     const hasTickets = tickets.length > 0;
-    const allMerged =
-      hasTickets && tickets.every((t) => t.status === "merged");
+    const allMerged = hasTickets && tickets.every((t) => t.status === "merged");
     const sessRef = sessionBranch(ctx); // session/<short>
     const branchExists = verifyRef(`refs/heads/${sessRef}`);
 
