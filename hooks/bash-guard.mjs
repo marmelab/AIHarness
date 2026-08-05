@@ -98,8 +98,15 @@ const runsUnitTests = (c) =>
   /(npm\s+run\s+test(:unit)?(:[a-z]+)?|npm\s+test\b|npx\s+vitest|make\s+test(-unit)?(-[a-z]+)?)/.test(
     c,
   );
+// Any make target whose name carries `e2e`, not just the ones that RUN the suite: the
+// targets that bring the stack UP are worse than the suite itself. Observed in the wild
+// on `make start-e2e`, which (1) never returns, because it backgrounds a dev server that
+// keeps the pipe open, (2) `rm -rf`s the e2e database, destroying a human's session, and
+// (3) starts the SHARED stack the harness deliberately replaces with a slot-leased
+// isolated one. Matching the token rather than enumerating targets keeps this from
+// growing a per-project list.
 const runsE2eTests = (c) =>
-  /(npx\s+playwright\s+test|make\s+test-e2e|e2e-smoke\.sh)/.test(c);
+  /(npx\s+playwright\s+test|make\s+[\w:-]*e2e|e2e-smoke\.sh)/.test(c);
 const runsLint = (c) => /(make\s+lint\b|npm\s+run\s+lint\b)/.test(c);
 const runsBuild = (c) =>
   /(npx\s+vite\s+build|npm\s+run\s+build\b|make\s+build\b)/.test(c);

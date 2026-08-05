@@ -175,6 +175,14 @@ describe("bash-guard hook", () => {
         ],
         ["merger", "make test-e2e"],
         ["", "make test-e2e-ci"],
+        // Bringing the stack UP is worse than running the suite: observed on a real
+        // migration, `make start-e2e` never returns (it backgrounds a dev server that
+        // holds the pipe open), rm -rf's the e2e database out from under a human, and
+        // starts the shared stack the slot-leased isolated one exists to replace.
+        ["developer", "make start-e2e"],
+        ["orchestrator", "make start-supabase-e2e"],
+        ["", "make stop-e2e"],
+        ["", "make start-e2e 2>&1 | tail -30"],
       ];
 
       test.each(e2eCases)("%s running '%s' → blocked", (agent, command) => {
@@ -182,6 +190,14 @@ describe("bash-guard hook", () => {
         expect(r.status).toBe(0);
         expect(isBlocked(r)).toBe(true);
       });
+
+      // The token match must not swallow unrelated make targets.
+      test.each(["make lint", "make build", "make install", "make typecheck"])(
+        "'%s' is not caught by the e2e token match",
+        (command) => {
+          expect(isBlocked(runHook("merger", command))).toBe(false);
+        },
+      );
 
       test("dropping e2e from the config unblocks it again", () => {
         const noE2e = {
