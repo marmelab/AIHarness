@@ -11,7 +11,11 @@
 # playwright-core absent), fall back to the MCP default so behavior is no worse than before.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+# The CONSUMING project, not this script's location: installed as a plugin the script
+# sits outside the repo, and it needs the project's node_modules to resolve both the
+# MCP cli and the Chromium the e2e suite already uses. The fallback keeps the
+# copied-into-.claude layout working, where the two happen to coincide.
+REPO="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$REPO"
 
 EXE="$(node -e "console.log(require('playwright-core').chromium.executablePath())" 2>/dev/null || true)"
