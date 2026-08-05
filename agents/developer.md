@@ -11,16 +11,27 @@ tools:
   - Grep
   - Skill
   - mcp__playwright__browser_navigate
+  - mcp__plugin_aiharness_playwright__browser_navigate
   - mcp__playwright__browser_snapshot
+  - mcp__plugin_aiharness_playwright__browser_snapshot
   - mcp__playwright__browser_click
+  - mcp__plugin_aiharness_playwright__browser_click
   - mcp__playwright__browser_type
+  - mcp__plugin_aiharness_playwright__browser_type
   - mcp__playwright__browser_fill_form
+  - mcp__plugin_aiharness_playwright__browser_fill_form
   - mcp__playwright__browser_select_option
+  - mcp__plugin_aiharness_playwright__browser_select_option
   - mcp__playwright__browser_press_key
+  - mcp__plugin_aiharness_playwright__browser_press_key
   - mcp__playwright__browser_wait_for
+  - mcp__plugin_aiharness_playwright__browser_wait_for
   - mcp__playwright__browser_take_screenshot
+  - mcp__plugin_aiharness_playwright__browser_take_screenshot
   - mcp__playwright__browser_console_messages
+  - mcp__plugin_aiharness_playwright__browser_console_messages
   - mcp__playwright__browser_close
+  - mcp__plugin_aiharness_playwright__browser_close
   - LSP
 ---
 
