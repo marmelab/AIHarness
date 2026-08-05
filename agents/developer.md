@@ -10,27 +10,16 @@ tools:
   - Glob
   - Grep
   - Skill
-  - mcp__playwright__browser_navigate
   - mcp__plugin_aiharness_playwright__browser_navigate
-  - mcp__playwright__browser_snapshot
   - mcp__plugin_aiharness_playwright__browser_snapshot
-  - mcp__playwright__browser_click
   - mcp__plugin_aiharness_playwright__browser_click
-  - mcp__playwright__browser_type
   - mcp__plugin_aiharness_playwright__browser_type
-  - mcp__playwright__browser_fill_form
   - mcp__plugin_aiharness_playwright__browser_fill_form
-  - mcp__playwright__browser_select_option
   - mcp__plugin_aiharness_playwright__browser_select_option
-  - mcp__playwright__browser_press_key
   - mcp__plugin_aiharness_playwright__browser_press_key
-  - mcp__playwright__browser_wait_for
   - mcp__plugin_aiharness_playwright__browser_wait_for
-  - mcp__playwright__browser_take_screenshot
   - mcp__plugin_aiharness_playwright__browser_take_screenshot
-  - mcp__playwright__browser_console_messages
   - mcp__plugin_aiharness_playwright__browser_console_messages
-  - mcp__playwright__browser_close
   - mcp__plugin_aiharness_playwright__browser_close
   - LSP
 ---
@@ -104,9 +93,11 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
    Resolve any conflicts, then `git add` + `git rebase --continue`. Commit the result if needed.
    Only proceed once `git status` shows a clean tree on top of the latest `session/<SESSION_SHORT_ID>`.
 5. **Emit OUTPUT CONTRACT** — your very last line of output:
+
    ```
    DONE: branch=<BRANCH_NAME> commit=<short_sha> files=[<comma-separated modified paths, relative to repo root>]
    ```
+
    The SubagentStop validation chain runs typecheck + prettier + lint + unit before your stop is accepted. If validation fails, fix the issues, commit, and stop again.
 
    If anything is unresolvably broken, emit: `FAILED: <one-line reason>`

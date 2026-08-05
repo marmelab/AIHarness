@@ -85,8 +85,9 @@ if (existsSync(mcpPath)) {
 
 // An agent that lists a browser tool under the WRONG name simply does not get it, silently:
 // the developer hand-rolled a chromium script instead, because a plugin-provided server is
-// exposed as mcp__plugin_<plugin>_<server>__<tool>, not mcp__<server>__<tool>. If this plugin
-// declares MCP servers, every agent asking for one of their tools must use the namespaced form.
+// exposed as mcp__plugin_<plugin>_<server>__<tool>, not mcp__<server>__<tool>. This harness
+// ships as a plugin, so for a server it declares the bare form grants nothing: it is not a
+// second spelling to keep alongside the namespaced one, it is a declaration that never matches.
 const pluginName = JSON.parse(
   readFileSync(join(ROOT, ".claude-plugin", "plugin.json"), "utf8"),
 ).name;
@@ -99,11 +100,10 @@ if (existsSync(mcpPath)) {
       const body = readFileSync(join(agentsDir, f), "utf8");
       for (const server of servers) {
         const bare = new RegExp(`^  - mcp__${server}__(\\S+)$`, "gm");
-        for (const m of body.matchAll(bare)) {
-          const ns = `mcp__plugin_${pluginName}_${server}__${m[1]}`;
-          if (!body.includes(ns))
-            misnamedTools.push(`agents/${f}: ${m[0].trim()} without ${ns}`);
-        }
+        for (const m of body.matchAll(bare))
+          misnamedTools.push(
+            `agents/${f}: ${m[0].trim()} -> mcp__plugin_${pluginName}_${server}__${m[1]}`,
+          );
       }
     }
   }
@@ -112,7 +112,7 @@ if (existsSync(mcpPath)) {
 let failed = false;
 if (misnamedTools.length) {
   console.error(
-    `check-hooks-wiring: ${misnamedTools.length} agent tool(s) declared only under the bare MCP name, so a plugin-provided server never grants them:`,
+    `check-hooks-wiring: ${misnamedTools.length} agent tool(s) declared under a bare MCP name this plugin never exposes, so they are silently not granted:`,
   );
   for (const m of misnamedTools) console.error(`  ${m}`);
   failed = true;
