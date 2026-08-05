@@ -58,7 +58,16 @@ beforeEach(() => {
   g(APP_DIR, "branch", `session/${SHORT}`);
 
   WT = join(TMP_ROOT, sanitizePath(APP_DIR), SESSION_ID, "simple");
-  g(APP_DIR, "worktree", "add", "-q", "-b", `${SHORT}/simple`, WT, `session/${SHORT}`);
+  g(
+    APP_DIR,
+    "worktree",
+    "add",
+    "-q",
+    "-b",
+    `${SHORT}/simple`,
+    WT,
+    `session/${SHORT}`,
+  );
 
   env = { ...process.env, APP_DIR, HARNESS_TMP_ROOT: TMP_ROOT };
   delete env.VALIDATE_DRY_RUN;
@@ -91,6 +100,10 @@ describe("the format step's auto-commit", () => {
     const r = stop();
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("Commit your work before stopping");
+    // Labelled for what it is: prettier has not run yet, so calling it a prettier
+    // failure sent the agent looking in the wrong place.
+    expect(r.stderr).toContain("uncommitted");
+    expect(r.stderr).not.toContain("prettier failed");
     // And crucially: it did NOT commit on the agent's behalf.
     expect(log()[0]).toContain("seed");
     expect(g(WT, "status", "--porcelain").stdout.trim()).not.toBe("");

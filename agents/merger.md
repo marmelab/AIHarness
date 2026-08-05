@@ -79,11 +79,15 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
    The integration worktree is `<WORKTREE_BASE>/_session` (checked out on `session/<SESSION_SHORT_ID>`). `$CLAUDE_PROJECT_DIR` stays on main for the demo.
    ```bash
    cd <WORKTREE_BASE>/_session \
-     && git merge --no-ff <BRANCH_NAME> -m "<type>(<TASK_ID>): <ticket title>"
+     && git merge --no-ff <BRANCH_NAME> -m "merge(<TASK_ID>): <ticket title>"
    ```
-   `<type>` = ticket's `type` field (feat / fix / chore). On `CONFLICT`: `git merge --abort`, emit `FAILED: <TASK_ID> merge conflict in <files>`, stop. Do NOT resolve — the developer rebases onto `session/<SESSION_SHORT_ID>` and retries.
+   `merge(...)`, NOT the ticket's `feat` / `fix` / `chore` type: this is a merge commit, and
+   the developer's own commits already carry the conventional type. Giving the merge a
+   `feat(...)` subject made a changelog count the same change twice, once from the developer
+   commit and once from the merge, and it disagreed with Stage B's `merge(session): <short>`.
+   Keep the ticket title, it is what makes the merge readable in the graph. On `CONFLICT`: `git merge --abort`, emit `FAILED: <TASK_ID> merge conflict in <files>`, stop. Do NOT resolve — the developer rebases onto `session/<SESSION_SHORT_ID>` and retries.
 
-   **MIGRATION mode with `APPROVAL_TRAILER`**: append it as a second commit paragraph so the migration's approval provenance is recorded in git history (traceable in the commit), e.g. `git merge --no-ff <BRANCH_NAME> -m "chore(MIGRATION): apply approved schema change" -m "<APPROVAL_TRAILER>"`.
+   **MIGRATION mode with `APPROVAL_TRAILER`**: append it as a second commit paragraph so the migration's approval provenance is recorded in git history (traceable in the commit), e.g. `git merge --no-ff <BRANCH_NAME> -m "merge(MIGRATION): apply approved schema change" -m "<APPROVAL_TRAILER>"`.
 
 3. **Update ticket status** (skip when `TASK_ID` is `SIMPLE` / `MIGRATION` / `ROLLBACK` or `TICKETS_DIR` is absent)
    ```bash
