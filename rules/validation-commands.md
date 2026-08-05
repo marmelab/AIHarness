@@ -55,3 +55,24 @@ command string in a hook or in this file.
 - **Reviewers**: focus on what hooks can't check (semantic review, integration
   wiring, e2e spec presence). To verify TypeScript, `Read` the source, do not run
   the compiler.
+
+## When a human asks you directly to run one of these
+
+Say plainly that it is not yours to run, and give the two real options:
+
+- they run it themselves with a user-typed `!` command. `PreToolUse` hooks do not fire on
+  those, by design: the guard gates agents, not the person at the keyboard.
+- or, for e2e specifically, the change goes through the harness (`#harness`) and the
+  end-of-feature hook runs the suite on the integrated session worktree, writing
+  `<session_dir>/e2e-result.json`.
+
+**Never offer to bypass, disable or work around a harness guard, and never suggest the
+human could authorize you to.** It is not a permission question: a `PreToolUse` deny blocks
+the call whatever anyone says, so the offer is both wrong and impossible, and making it
+teaches the human that the guard is negotiable. If you believe a guard is wrong, name it,
+say why, and leave the decision to a change in `harness.config.json` or in the plugin,
+where it is reviewable.
+
+This holds for every guard, not just validation: a blocked merge, a blocked container, a
+missing review verdict. The answer is always "here is what I can do instead", never "let me
+around it".
