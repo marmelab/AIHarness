@@ -1,7 +1,11 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { getBaseBranch, getWorktreeChangeSummary, getWorktreePaths } from "./git.mjs";
+import {
+  getBaseBranch,
+  getWorktreeChangeSummary,
+  getWorktreePaths,
+} from "./git.mjs";
 import { bash, exec } from "./process.mjs";
 import { loadConfig, validationSteps } from "./config.mjs";
 import { appendProgress } from "./progress-log.mjs";
@@ -18,7 +22,10 @@ export function getActiveWorktrees(ctx, only = "") {
 
 // Pure query — never exits. An empty list with a non-empty skipReason means
 // there is nothing to validate.
-function getWorktreesToValidate(ctx, { skipAdrOnly = false, only = "", base = "" } = {}) {
+function getWorktreesToValidate(
+  ctx,
+  { skipAdrOnly = false, only = "", base = "" } = {},
+) {
   if (!existsSync(ctx.repo)) {
     return { worktrees: [], skipReason: "cd_failed" };
   }
@@ -32,7 +39,8 @@ function getWorktreesToValidate(ctx, { skipAdrOnly = false, only = "", base = ""
   // under-report a worktree's delta whenever the base branch has diverged from
   // the session branch. Falls back to the repo base branch when no override.
   const effectiveBase = base || getBaseBranch();
-  const isAdrOnly = (files) => files.length > 0 && files.every((f) => f.startsWith("adr/"));
+  const isAdrOnly = (files) =>
+    files.length > 0 && files.every((f) => f.startsWith("adr/"));
   const worktrees = active.filter((wt) => {
     const { dirty, changedFiles } = getWorktreeChangeSummary(wt, effectiveBase);
     if (!dirty) {
@@ -45,7 +53,10 @@ function getWorktreesToValidate(ctx, { skipAdrOnly = false, only = "", base = ""
     }
     return true;
   });
-  return { worktrees, skipReason: worktrees.length === 0 ? "no_dirty_worktree" : "" };
+  return {
+    worktrees,
+    skipReason: worktrees.length === 0 ? "no_dirty_worktree" : "",
+  };
 }
 
 const tailLines = (text, n) => text.split("\n").slice(-n).join("\n");
@@ -70,7 +81,10 @@ const tryUnlink = (path) => {
 
 function runVitest(wt, configFile, projects = [], changedSince = "") {
   const projectTag = projects.length ? `-${projects.join("-")}` : "";
-  const out = join(tmpdir(), `vitest-${basename(configFile)}${projectTag}-${process.pid}.out`);
+  const out = join(
+    tmpdir(),
+    `vitest-${basename(configFile)}${projectTag}-${process.pid}.out`,
+  );
   const projectFlags = projects.map((p) => `--project ${p}`).join(" ");
   // Scope to tests related to THIS worktree's diff since `changedSince` (the session
   // branch it forked from), so a ticket runs only its own affected tests, not the whole
@@ -106,7 +120,10 @@ export function scopedLintFiles(changedFiles, cwd, extensions) {
 // `command` is the eslint invocation prefix (e.g. `npx eslint`); files are
 // appended here, so the config command must NOT carry its own file glob.
 function runEslintScoped(cwd, base, command, extensions, tail) {
-  const { changedFiles } = getWorktreeChangeSummary(cwd, base || getBaseBranch());
+  const { changedFiles } = getWorktreeChangeSummary(
+    cwd,
+    base || getBaseBranch(),
+  );
   const files = scopedLintFiles(changedFiles, cwd, extensions);
   if (files.length === 0) return { ok: true };
   const out = join(tmpdir(), `eslint-${process.pid}.out`);
@@ -145,8 +162,17 @@ function runStep(ctx, step, { cwd, base }) {
   const tail = TAIL_LINES[step.kind] ?? 40;
 
   if (step.runner === "vitest") {
-    const r = runVitest(cwd, step.config, step.projects, step.changedScoped ? base : "");
-    if (r.timedOut) return { ok: false, output: "TIMEOUT (>180s) -- vitest did not exit. Tests may be hanging." };
+    const r = runVitest(
+      cwd,
+      step.config,
+      step.projects,
+      step.changedScoped ? base : "",
+    );
+    if (r.timedOut)
+      return {
+        ok: false,
+        output: "TIMEOUT (>180s) -- vitest did not exit. Tests may be hanging.",
+      };
     return r.status === 0 ? { ok: true } : { ok: false, output: r.output };
   }
 
@@ -155,12 +181,40 @@ function runStep(ctx, step, { cwd, base }) {
     return runEslintScoped(cwd, base, step.command, exts, tail);
   }
 
+  // A dirty tree BEFORE the formatter runs means the agent stopped without committing.
+  // The auto-commit below used `git add -A`, so it swept that work into a commit labelled
+  // "auto-apply prettier": observed on a real run where a one-line rename landed with a
+  // style message and no developer commit at all. The history then lies to review, to
+  // /harness-diff and to the revert path. Reject the stop instead: committing is the
+  // agent's contract, and the format step must only ever commit formatting.
+  const dirtyBefore =
+    step.kind === "format" &&
+    step.autoCommit &&
+    exec("git", ["-C", cwd, "status", "--porcelain"]).stdout.trim() !== "";
+  if (dirtyBefore) {
+    return {
+      ok: false,
+      output:
+        "Uncommitted changes in the worktree. Commit your work before stopping: the " +
+        "output contract requires a commit sha, and the formatting step must not commit " +
+        "your changes for you under a `style(...)` message.\n" +
+        tailLines(exec("git", ["-C", cwd, "status", "--short"]).stdout, 20),
+    };
+  }
+
   const r = bash(`${step.command} 2>&1`, { cwd });
   if (r.status === 0) {
     if (step.kind === "format" && step.autoCommit) {
+      // Only reachable with a clean tree above, so anything dirty now IS formatting.
       if (exec("git", ["-C", cwd, "diff", "--quiet"]).status !== 0) {
         exec("git", ["-C", cwd, "add", "-A"]);
-        exec("git", ["-C", cwd, "commit", "-m", `style(${basename(cwd)}): auto-apply prettier`]);
+        exec("git", [
+          "-C",
+          cwd,
+          "commit",
+          "-m",
+          `style(${basename(cwd)}): auto-apply prettier`,
+        ]);
         ctx.log(`auto-prettier committed wt=${cwd}`);
       }
     }
@@ -189,7 +243,11 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
   }
   if (process.env.VALIDATE_DRY_RUN === "fail") {
     ctx.log("DRY_RUN=fail, simulating a failure");
-    return { ok: false, step: "dry-run", output: "Validation failed (simulated)." };
+    return {
+      ok: false,
+      step: "dry-run",
+      output: "Validation failed (simulated).",
+    };
   }
 
   let steps;
@@ -225,7 +283,11 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
       if (!r.ok) {
         progress(`[validate:${label}] ${step.id} FAILED`);
         ctx.log(`FAIL step=${step.id} wt=${wt}\n${r.output}`);
-        return { ok: false, step: step.id, output: `=== ${step.id} failed in ${wt} ===\n${r.output}\n` };
+        return {
+          ok: false,
+          step: step.id,
+          output: `=== ${step.id} failed in ${wt} ===\n${r.output}\n`,
+        };
       }
     }
     progress(`[validate:${label}] checks passed`);
