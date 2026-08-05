@@ -7,11 +7,12 @@
 // stdout (NOT exit 2). An allowed dispatch exits 0 with no decision JSON.
 
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   rmSync,
   utimesSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -62,6 +63,14 @@ const run = (
   };
 };
 
+// Seed a plan in a TICKETS_DIR. The planner debounce fires only when a plan EXISTS, so a
+// test that expects a second planner to be blocked has to have produced one first.
+const seedPlan = (dir) => {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "TASK-001.json"), JSON.stringify({ id: "TASK-001" }));
+  return dir;
+};
+
 // Backdate every marker so the next dispatch sees it as outside the debounce
 // window (and a planner marker as stale).
 const ageMarkers = (secondsAgo) => {
@@ -89,8 +98,10 @@ afterAll(() => rmSync(TMP, { recursive: true, force: true }));
 
 describe("block-duplicate-dispatch — planner", () => {
   test("allows the first planner, blocks the second for the same TICKETS_DIR", () => {
-    const p = `TICKETS_DIR=${join(TMP, "tickets")}`;
+    const dir = join(TMP, "tickets");
+    const p = `TICKETS_DIR=${dir}`;
     expect(run(p, "planner").blocked).toBe(false);
+    seedPlan(dir); // the first planner produced a plan
     expect(run(p, "planner").blocked).toBe(true);
   });
 
@@ -170,6 +181,73 @@ describe("block-duplicate-dispatch — pass-through", () => {
   });
 });
 
+describe("block-duplicate-dispatch — the planner marker means A PLAN EXISTS", () => {
+  // A marker records that a planner was DISPATCHED. A planner that died before writing
+  // anything (observed live: lost to a transient API 529 overload) leaves the marker with no
+  // tickets, and refusing the retry then wedges planning for the whole stale window. The
+  // invariant is "never overwrite an existing plan", so with no plan there is nothing to
+  // protect.
+  const ticketsFor = (name) => {
+    const dir = join(TMP, name);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+
+  test("a retry is allowed when the first planner produced no tickets", () => {
+    const dir = ticketsFor("tickets-empty");
+    const prompt = `TICKETS_DIR=${dir}`;
+    const CALLER_A = "retry-orch";
+    expect(run(prompt, "planner", CALLER_A).blocked).toBe(false); // first
+    expect(run(prompt, "planner", CALLER_A).blocked).toBe(false); // retry, no plan yet
+    expect(run(prompt, "planner", CALLER_A).blocked).toBe(false); // and again
+  });
+
+  test("a second planner IS blocked once a plan exists", () => {
+    const dir = ticketsFor("tickets-planned");
+    const prompt = `TICKETS_DIR=${dir}`;
+    const CALLER_B = "planned-orch";
+    expect(run(prompt, "planner", CALLER_B).blocked).toBe(false);
+    writeFileSync(
+      join(dir, "TASK-001.json"),
+      JSON.stringify({ id: "TASK-001" }),
+    );
+    expect(run(prompt, "planner", CALLER_B).blocked).toBe(true);
+  });
+
+  test("the block message says a plan exists, so the reader knows why", () => {
+    const dir = ticketsFor("tickets-msg");
+    const prompt = `TICKETS_DIR=${dir}`;
+    const CALLER_C = "msg-orch";
+    run(prompt, "planner", CALLER_C);
+    writeFileSync(join(dir, "TASK-002.json"), "{}");
+    const r = spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        session_id: SESSION_ID,
+        agent_id: CALLER_C,
+        tool_input: {
+          subagent_type: "planner",
+          prompt,
+          run_in_background: false,
+        },
+      }),
+      env,
+      encoding: "utf8",
+    });
+    expect(r.stdout).toContain("a plan exists");
+  });
+
+  // A file that merely looks ticket-ish is not a plan.
+  test("a non-ticket file in the dir does not count as a plan", () => {
+    const dir = ticketsFor("tickets-noise");
+    const prompt = `TICKETS_DIR=${dir}`;
+    const CALLER_D = "noise-orch";
+    run(prompt, "planner", CALLER_D);
+    writeFileSync(join(dir, "notes.md"), "not a ticket");
+    writeFileSync(join(dir, "TASK-abc.json"), "{}");
+    expect(run(prompt, "planner", CALLER_D).blocked).toBe(false);
+  });
+});
+
 describe("block-duplicate-dispatch — agreement with force-foreground", () => {
   // The debounce must cover exactly the dispatches that PROCEED. force-foreground denies
   // only an explicit true, so an explicit true is the only form to skip: recording a marker
@@ -180,6 +258,7 @@ describe("block-duplicate-dispatch — agreement with force-foreground", () => {
     const FF = "ff-orch"; // unique caller: no marker collision with earlier tests
     expect(run(p, "planner", FF, true).blocked).toBe(false); // denied form -> skipped, no marker
     expect(run(p, "planner", FF, false).blocked).toBe(false); // the retry proceeds
+    seedPlan(join(TMP, "tickets-ff"));
     expect(run(p, "planner", FF, false).blocked).toBe(true); // a genuine 2nd planner is blocked
   });
 
@@ -191,6 +270,7 @@ describe("block-duplicate-dispatch — agreement with force-foreground", () => {
     const p = `TICKETS_DIR=${join(TMP, "tickets-absent")}`;
     const CALLER = "absent-orch";
     expect(run(p, "planner", CALLER, "absent").blocked).toBe(false); // first one proceeds
+    seedPlan(join(TMP, "tickets-absent"));
     expect(run(p, "planner", CALLER, "absent").blocked).toBe(true); // second is caught
   });
 });

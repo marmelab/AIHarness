@@ -17,6 +17,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -92,10 +93,43 @@ if (d.subagentType === "planner") {
       // ignore — fall through to the existence check
     }
   }
+  // A marker records that a planner was DISPATCHED, which is not the same as "a plan
+  // exists". A planner that died before writing anything (observed: lost to a transient API
+  // 529 overload) leaves the marker behind with no tickets, and refusing the retry then
+  // wedges planning for the whole stale window with nothing to show for it.
+  //
+  // The invariant this guard actually protects, per its own message, is "never overwrite an
+  // existing plan". So it fires only when a plan exists: no TASK-*.json means there is
+  // nothing to overwrite and the retry is legitimate.
+  const planExists = () => {
+    for (const dir of [ticketsDir, ctx.sessionDir]) {
+      if (!dir || !existsSync(dir)) continue;
+      try {
+        if (readdirSync(dir).some((f) => /^TASK-\d+\.json$/.test(f)))
+          return true;
+      } catch {
+        /* unreadable -> treat as no plan, the retry is the safer outcome */
+      }
+    }
+    return false;
+  };
+
+  if (existsSync(marker) && !planExists()) {
+    // Refresh the marker so the retry is itself recorded, then let it through.
+    try {
+      writeFileSync(marker, `${caller} ${ticketsDir}\n`);
+    } catch {
+      /* best effort */
+    }
+    ctx.accept(
+      `planner retry allowed: marker present but no plan was produced (ticketsDir=${ticketsDir || "(session default)"})`,
+    );
+  }
+
   if (existsSync(marker)) {
     ctx.block({
       reason:
-        `A \`planner\` has ALREADY been dispatched for this request (TICKETS_DIR=${ticketsDir || "(session default)"}). ` +
+        `A \`planner\` has ALREADY been dispatched for this request AND a plan exists (TICKETS_DIR=${ticketsDir || "(session default)"}). ` +
         `Do NOT dispatch a second planner — a re-plan overwrites the existing TASK-*.json while the wave may already be running against them. ` +
         `Read the tickets already in TICKETS_DIR and continue into STATE B with them. ` +
         `If the first plan looks wrong, fix the ticket JSON in place — do not re-run the planner.`,

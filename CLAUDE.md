@@ -27,6 +27,10 @@ a style preference: `completion-invariant` looked for verdict flags in a directo
 never existed and was inert for months, because it had no test and a guard that never
 fires reports nothing.
 
+`rules/hook-authoring.md` carries the rules that came out of nine defects found by running the
+harness rather than reading it. Read it before changing a hook; it is scoped to `hooks/**` so it
+loads only then.
+
 Two invariants to preserve:
 
 - **Fail closed on identity, fail open on ignorance.** A guard that knows who the caller is
