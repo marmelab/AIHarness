@@ -38,7 +38,9 @@ try {
 // shelling out `docker run`, so it is unaffected either way; this exception covers
 // operating its containers by hand.
 const referencesAllowedStack = (c) =>
-  allowed.some((name) => new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(c));
+  allowed.some((name) =>
+    new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(c),
+  );
 
 if (launchesContainer(cmd) && !referencesAllowedStack(cmd)) {
   ctx.block({

@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { createHookContext } from "./lib/context.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { pipelineRoleSet, debounceRoleSet } from "./lib/teams.mjs";
+import { isExplicitlyBackgrounded } from "./lib/dispatch-parse.mjs";
 
 // Sourced from harness.config.json (config.roles debounce/pipeline flags) via
 // teams.mjs, so these sets and force-foreground's share one source of truth.
@@ -52,19 +53,23 @@ try {
 
 const sha = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
 
-// A pipeline dispatch WITHOUT an explicit run_in_background:false will be DENIED by
-// force-foreground-orchestrator-dispatch and re-issued with false. Do NOT record or
-// check a marker for it here: otherwise the denied attempt's marker would reject the
-// corrective retry as a "duplicate" (a regression from force-foreground's deny-and-retry,
-// seen when the planner never ran yet its marker blocked the
-// retry for 60 min). Only debounce dispatches that will actually proceed (rib === false).
+// Only debounce dispatches that will actually PROCEED. An explicitly-backgrounded one is
+// denied by force-foreground-orchestrator-dispatch and re-issued, so recording a marker for
+// it would reject the corrective retry as a "duplicate" (seen once: the planner never ran,
+// yet its marker blocked the retry for 60 min).
+//
+// This used to read `run_in_background !== false`, which silently disabled the whole
+// debounce: a nested subagent's Agent tool does not expose the parameter, so the condition
+// was always true and every pipeline role exited here. Observed as two planner dispatches
+// twelve seconds apart with no log line from this hook at all. The predicate is shared with
+// force-foreground now, so the two cannot drift apart again.
 const PIPELINE_ROLES = pipelineRoleSet();
 const childRole = PIPELINE_ROLES.has(d.subagentType)
   ? d.subagentType
   : PIPELINE_ROLES.has(d.role)
     ? d.role
     : "";
-if (childRole && input.tool_input?.run_in_background !== false) process.exit(0);
+if (childRole && isExplicitlyBackgrounded(input)) process.exit(0);
 
 // ---- Concern 1: at most one planner per request -------------------------------
 if (d.subagentType === "planner") {

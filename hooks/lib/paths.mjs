@@ -26,10 +26,9 @@ export function sanitizePath(p) {
 // a project's .claude/. Checked in that order, falling back to the project path so the
 // caller always gets something to report a missing file against.
 export function harnessFile(...parts) {
-  const roots = [
-    process.env.CLAUDE_PLUGIN_ROOT,
-    join(REPO, ".claude"),
-  ].filter(Boolean);
+  const roots = [process.env.CLAUDE_PLUGIN_ROOT, join(REPO, ".claude")].filter(
+    Boolean,
+  );
   for (const root of roots) {
     const candidate = join(root, ...parts);
     if (existsSync(candidate)) return candidate;

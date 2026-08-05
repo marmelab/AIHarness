@@ -21,7 +21,10 @@
 
 import { readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
-import { parseDispatch } from "./lib/dispatch-parse.mjs";
+import {
+  isExplicitlyBackgrounded,
+  parseDispatch,
+} from "./lib/dispatch-parse.mjs";
 import { pipelineRoleSet } from "./lib/teams.mjs";
 
 // Pipeline roles whose result the orchestrator MUST consume in the same turn come
@@ -72,9 +75,14 @@ try {
   // before: it had been silently inert (it looked for verdict flags in a directory that
   // never existed) until it was fixed and given tests.
   const rib = input.tool_input?.run_in_background;
-  if (rib === false) ctx.accept(`${childRole} foreground (explicit false)`);
-  if (rib === undefined)
-    ctx.accept(`${childRole} accepted (runtime exposes no run_in_background)`);
+  // Shared with block-duplicate-dispatch, which must debounce exactly what proceeds here.
+  if (!isExplicitlyBackgrounded(input)) {
+    ctx.accept(
+      rib === false
+        ? `${childRole} foreground (explicit false)`
+        : `${childRole} accepted (runtime exposes no run_in_background)`,
+    );
+  }
 
   ctx.block({
     reason:

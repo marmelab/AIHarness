@@ -25,10 +25,15 @@ export function createHookContext(input, name = "hook") {
   // in PostToolUse/PreToolUse contexts; for SubagentStart the env is the parent's,
   // so fall back to i.agent_name which Claude Code populates with the child's name.
   const agentName = process.env.CLAUDE_AGENT_NAME || clean(i.agent_name) || "";
-  const chatSessionId = process.env.CHAT_SESSION_DIR ? basename(process.env.CHAT_SESSION_DIR) : "";
+  const chatSessionId = process.env.CHAT_SESSION_DIR
+    ? basename(process.env.CHAT_SESSION_DIR)
+    : "";
 
   const sessionId =
-    clean(i.session_id) || process.env.CLAUDE_CODE_SESSION_ID || chatSessionId || "default";
+    clean(i.session_id) ||
+    process.env.CLAUDE_CODE_SESSION_ID ||
+    chatSessionId ||
+    "default";
   const agentType = clean(i.agent_type) || agentName;
 
   const sessionShort = sessionId.split("-")[0];
@@ -82,7 +87,9 @@ export function createHookContext(input, name = "hook") {
     rmSync(target, { recursive: true, force: true });
     if (exec("cp", ["-a", source, target]).status !== 0) {
       rmSync(target, { recursive: true, force: true });
-      throw new Error(`node_modules provisioning failed for ${wt} - cp -al and cp -a both failed`);
+      throw new Error(
+        `node_modules provisioning failed for ${wt} - cp -al and cp -a both failed`,
+      );
     }
   };
 
