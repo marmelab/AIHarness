@@ -1,4 +1,11 @@
-// Tests for validate-on-stop.mjs — dry-run short-circuits (VALIDATE_DRY_RUN=1 accepts, =fail exits 2) and the no-active-worktree accept, without running real tools.
+// Tests for validate-on-stop.mjs: the dry-run short-circuits (VALIDATE_DRY_RUN=1 accepts,
+// =fail exits 2) and the no-active-worktree accept, without running real tools.
+//
+// The payload carries `developer-TASK-001`, so the hook's three identity gates all pass
+// and the chain is actually reached. Whose stop it is now decides whether anything runs at
+// all (see the hook's header), so a payload with no attributable worktree never gets as
+// far as the dry-run switch. The gates themselves are covered in
+// validation-scope.test.mjs.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +25,7 @@ afterAll(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-const INPUT = '{"session_id":"test-1234","agent_type":"developer"}';
+const INPUT = '{"session_id":"test-1234","agent_type":"developer-TASK-001"}';
 
 const runHook = (dryRun) => {
   const env = {

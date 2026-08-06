@@ -24,6 +24,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { sanitizePath } from "../lib/paths.mjs";
+import {
+  runtimeLayout,
+  spawnAgent,
+  stopPayload,
+} from "./fixtures/subagent-stop.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STOP_HOOK = join(HERE, "..", "validate-on-stop.mjs");
@@ -32,7 +37,7 @@ const SESSION_ID = "gv1a2b3c-1111-2222-3333-444455556666";
 const SHORT = "gv1a2b3c";
 const LIMIT = 5;
 
-let TMP, APP_DIR, TMP_ROOT, SESSION_DIR, WT, env;
+let TMP, APP_DIR, TMP_ROOT, SESSION_DIR, WT, env, layout;
 
 const g = (cwd, ...args) =>
   spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -81,11 +86,21 @@ beforeEach(() => {
   g(WT, "add", "-A");
   g(WT, "commit", "-q", "-m", "feat(TASK-001): change");
 
+  layout = runtimeLayout(join(TMP, "transcripts"), SESSION_ID);
+  spawnAgent(
+    layout,
+    "a00000000000000051",
+    { agentType: "developer", description: "Implement TASK-001: change" },
+    "ROLE: developer\nTASK_ID: TASK-001\n",
+  );
+
   env = { ...process.env, APP_DIR, HARNESS_TMP_ROOT: TMP_ROOT };
   delete env.VALIDATE_DRY_RUN;
   delete env.VALIDATE_WORKTREE;
+  delete env.VALIDATE_NO_CACHE;
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CHAT_SESSION_DIR;
+  delete env.CLAUDE_AGENT_NAME;
 });
 
 afterEach(() => {
@@ -93,13 +108,12 @@ afterEach(() => {
   rmSync(TMP, { recursive: true, force: true });
 });
 
+// The TASK-001 developer's stop, in the shape the runtime sends: empty agent_type, the
+// MAIN session transcript, and the identity carried by agent_id. The hook attributes the
+// worktree from the spawn meta's description, which is what scopes the chain to TASK-001.
 const stop = () =>
   spawnSync("node", [STOP_HOOK], {
-    input: JSON.stringify({
-      session_id: SESSION_ID,
-      hook_event_name: "SubagentStop",
-      transcript_path: "/nonexistent.jsonl",
-    }),
+    input: JSON.stringify(stopPayload(layout, "a00000000000000051")),
     env,
     encoding: "utf8",
   });
