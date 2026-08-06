@@ -109,7 +109,41 @@ if (existsSync(mcpPath)) {
   }
 }
 
+// Order within one matcher group, where a later hook depends on an earlier one having run.
+// record-review-verdict writes the review verdict flag; e2e-on-feature-review and
+// block-merger-without-review read it. Nothing here relies on that ordering for
+// CORRECTNESS (the two verdict consumers parse the verdict themselves through
+// lib/verdict.mjs, precisely so a same-event write is never a dependency), but the flag
+// should exist before a 15-minute suite starts rather than after it, so the order is
+// declared here and checked.
+const ORDERED_PAIRS = [
+  ["hooks/record-review-verdict.mjs", "hooks/e2e-on-feature-review.mjs"],
+];
+const misordered = [];
+for (const [event, entries] of Object.entries(manifest.hooks ?? {})) {
+  for (const entry of entries) {
+    const seq = (entry.hooks ?? []).map((h) =>
+      String(h.command ?? "").replace(/^\$\{CLAUDE_PLUGIN_ROOT\}\//, ""),
+    );
+    for (const [first, second] of ORDERED_PAIRS) {
+      const a = seq.indexOf(first);
+      const b = seq.indexOf(second);
+      if (a !== -1 && b !== -1 && a > b)
+        misordered.push(
+          `${event} matcher "${entry.matcher ?? "*"}": ${first} must be registered before ${second}`,
+        );
+    }
+  }
+}
+
 let failed = false;
+if (misordered.length) {
+  console.error(
+    `check-hooks-wiring: ${misordered.length} hook(s) registered out of the required order:`,
+  );
+  for (const m of misordered) console.error(`  ${m}`);
+  failed = true;
+}
 if (misnamedTools.length) {
   console.error(
     `check-hooks-wiring: ${misnamedTools.length} agent tool(s) declared under a bare MCP name this plugin never exposes, so they are silently not granted:`,
