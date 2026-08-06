@@ -29,11 +29,20 @@ import {
 } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
 import { getFirstTaskId, isQualityReviewer } from "./lib/teams.mjs";
-import { readAgentMeta } from "./lib/agent-meta.mjs";
-import { reviewFlag, reviewsDir } from "./lib/reviews.mjs";
+import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
+import { reviewMode } from "./lib/review-mode.mjs";
+import { FEATURE_KEY, reviewFlag, reviewsDir } from "./lib/reviews.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "record-review-verdict");
+
+// The STOPPING AGENT'S OWN transcript, not the payload's transcript_path: in this
+// runtime that field names the MAIN session transcript, which holds every dispatch
+// prompt and every orchestrator message of the session. Scanning it for `ROLE:` /
+// `TASK_ID:` returned whatever was dispatched FIRST, and its "last assistant text" is
+// the orchestrator's, not the reviewer's. "" when identity is unresolvable, which is
+// safer than reading the wrong agent's words: the flag is then left untouched.
+const transcript = agentTranscriptPath(input);
 
 // Role + task from the (suffixed) agent identity, e.g. quality-reviewer-TASK-001.
 const ids = [ctx.agentName, ctx.agentType].filter(Boolean);
@@ -67,11 +76,10 @@ if (!role || !task) {
 // prompt in the transcript. Done unconditionally: lastAssistantText() returns
 // early on last_assistant_message, bypassing its own recovery (→ task=UNKNOWN).
 if (!role || !task) {
-  const tp = input.agent_transcript_path || input.transcript_path;
-  if (tp && existsSync(tp)) {
+  if (transcript && existsSync(transcript)) {
     let body = "";
     try {
-      body = readFileSync(tp, "utf8");
+      body = readFileSync(transcript, "utf8");
     } catch {
       body = "";
     }
@@ -101,11 +109,10 @@ const lastAssistantText = () => {
   ) {
     return input.last_assistant_message;
   }
-  const tp = input.agent_transcript_path || input.transcript_path;
-  if (!tp || !existsSync(tp)) return "";
+  if (!transcript || !existsSync(transcript)) return "";
   let body = "";
   try {
-    body = readFileSync(tp, "utf8");
+    body = readFileSync(transcript, "utf8");
   } catch {
     return "";
   }
@@ -168,6 +175,15 @@ const lastAssistantText = () => {
 // A line that is neither a clean marker nor a feedback bullet is skipped (keep
 // scanning up); if none is found the verdict is UNKNOWN and the flag is untouched.
 const src = lastAssistantText();
+
+// The end-of-feature review has NO ticket, so every TASK-id recovery above comes back
+// empty and the flag could not be keyed at all: the hook logged task=UNKNOWN and left
+// the verdict unrecorded, which is exactly the flag e2e-on-feature-review gates the
+// suite on. A reviewer whose dispatch carried `MODE: feature-review` is keyed on the
+// shared FEATURE sentinel instead. Reviewer role only: a developer or merger stop must
+// never be able to write a review verdict.
+if (role && !task && reviewMode(input) === "feature-review") task = FEATURE_KEY;
+
 const isApproved = (l) => l.replace(/[.!\s]+$/, "") === "APPROVED";
 const isRejected = (l) => /^REJECTED:/.test(l);
 let verdict = "";
@@ -190,12 +206,12 @@ for (let i = verdictLines.length - 1; i >= 0; i--) {
 // so logging non-reviewer stops (developer/merger/planner/…) is pure noise.
 // `role` found OR a verdict in the final message ⇒ this was a reviewer.
 if (role || verdict) {
-  const _tp = input.agent_transcript_path || input.transcript_path || "";
+  const meta = readAgentMeta(input);
   ctx.log(
     `role=${role || "UNKNOWN"} task=${task || "UNKNOWN"} verdict=${verdict || "UNKNOWN"}` +
       (role && task && verdict
         ? ""
-        : ` | DIAG tp_exists=${Boolean(_tp && existsSync(_tp))} last_msg=${input.last_assistant_message ? "present" : "absent"}`),
+        : ` | DIAG identity=${meta ? meta.source : "unresolved"} agent_transcript=${transcript ? "resolved" : "unresolved"} last_msg=${input.last_assistant_message ? "present" : "absent"}`),
   );
 }
 
