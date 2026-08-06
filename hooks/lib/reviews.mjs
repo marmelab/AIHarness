@@ -25,6 +25,13 @@ import { join } from "node:path";
 
 export const REVIEW_ROLES = ["quality-reviewer"];
 
+// The end-of-feature review has no ticket, so its verdict flag is keyed on this
+// sentinel instead of a TASK id: <sessionDir>/reviews/FEATURE-quality-reviewer.
+// Shared because three places must agree on the spelling: e2e-on-feature-review reads
+// the flag to decide whether to launch the suite, record-review-verdict writes it, and
+// the quality-reviewer agent touches it as the primary writer.
+export const FEATURE_KEY = "FEATURE";
+
 export const reviewsDir = (ctx) =>
   join(process.env.CHAT_SESSION_DIR || ctx.sessionDir, "reviews");
 
