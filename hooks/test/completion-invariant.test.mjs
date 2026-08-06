@@ -1,10 +1,21 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { sanitizePath } from "../lib/paths.mjs";
+import {
+  runtimeLayout,
+  spawnAgent,
+  stopPayload,
+} from "./fixtures/subagent-stop.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, "..", "completion-invariant.mjs");
@@ -150,6 +161,53 @@ describe("completion-invariant — red e2e", () => {
   test("ignores a red suite from an earlier request, whose commit has moved on", () => {
     writeE2eResult("failed", "0000000000000000000000000000000000000000");
     expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
+  });
+
+  test.each(["orchestrator", "aiharness:orchestrator"])(
+    "recognises a %s stop on the runtime's real payload shape",
+    (agentType) => {
+      // The audited run logged `not orchestrator (unknown)` 35 times: the payload's
+      // transcript_path names the MAIN session transcript, so the sibling-meta lookup
+      // never resolved and this invariant was never checked once. Identity now comes
+      // from the payload's agent_id.
+      writeE2eResult("failed");
+      const layout = runtimeLayout(
+        join(TMP, `rt-${sanitizePath(agentType)}`),
+        SESSION_ID,
+      );
+      spawnAgent(
+        layout,
+        "a00000000000000031",
+        { agentType, description: "orchestrate the feature" },
+        "ROLE: orchestrator\nMODE: wave\n",
+      );
+      const r = spawnSync("node", [HOOK], {
+        input: JSON.stringify(stopPayload(layout, "a00000000000000031")),
+        env,
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(2);
+      expect(readFileSync(join(sessionDir, "hooks.log"), "utf8")).not.toContain(
+        "not orchestrator",
+      );
+    },
+  );
+
+  test("says so when identity is unresolvable, instead of blaming the role", () => {
+    writeE2eResult("failed");
+    const r = spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        session_id: SESSION_ID,
+        hook_event_name: "SubagentStop",
+        agent_type: "",
+      }),
+      env,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(sessionDir, "hooks.log"), "utf8")).toContain(
+      "identity unresolvable",
+    );
   });
 
   test("keeps the e2e budget separate from the orphan-branch budget", () => {

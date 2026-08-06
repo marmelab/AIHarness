@@ -7,6 +7,14 @@
 // TASK_ID is anchored at line start and only accepts TASK-<n> | SIMPLE | MIGRATION
 // | PROMOTE | ROLLBACK, so prose mentioning another ticket (e.g. "TASK-001 is
 // merged; now merge this one") can never mis-key a gate.
+//
+// `subagentType` is normalised through bareRole, because it is the ONE field here the
+// runtime fills in rather than the dispatch prompt. Four gates compare it to a literal
+// role (`!== "developer"`, `!== "merger"`), and a namespaced `aiharness:developer`
+// would switch every one of them off in the same silent way the stop-side predicates
+// went inert. Normalising costs nothing when the value is already bare.
+
+import { bareRole } from "./teams.mjs";
 
 // Whether a dispatch is EXPLICITLY backgrounded, which is the only case
 // force-foreground-orchestrator-dispatch denies. Absent is not the same thing: a nested
@@ -35,7 +43,7 @@ export function parseDispatch(input) {
     // "" for the main orchestrator; the agent's own type for a subagent-issued
     // dispatch (none of the ticket agents can dispatch, so this is informational).
     callerAgentType: String(input?.agent_type ?? ""),
-    subagentType: String(ti.subagent_type ?? ""),
+    subagentType: bareRole(ti.subagent_type),
     name: String(ti.name ?? ""),
     isolation: String(ti.isolation ?? ""),
     runInBackground: Boolean(ti.run_in_background),

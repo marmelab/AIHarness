@@ -14,6 +14,13 @@ harness, never by reading it.
 `run_in_background` is absent for a nested subagent. `agent_type` is empty. `agentType` from
 the agent meta arrives namespaced (`aiharness:developer`). `last_assistant_message` is absent.
 
+A field can also be present and mean something else. At `SubagentStop`, `transcript_path`
+names the MAIN SESSION transcript, not the stopping agent's. So the sibling-meta lookup built
+on it resolved 0 times out of 202 in one run, and reading it for a `MODE:` line, a `TASK_ID`
+or a final `APPROVED` answers with whatever happened FIRST in the session. Identity and the
+agent's own transcript both come from `lib/agent-meta.mjs`, which resolves them from the
+payload's `agent_id`; never re-derive either from `transcript_path`.
+
 Requiring such a field breaks in one of two directions, both bad:
 
 - **fail-closed** on absence and the guard is unsatisfiable. `force-foreground` demanded an
@@ -78,3 +85,9 @@ A guard that treats "not my role" as "not my business" is indistinguishable from
 is broken. Log what you decided and on what basis, even when accepting, so
 `grep '\[my-hook\]' hooks.log` answers "did it run, and what did it see". Absence of a line
 must mean absence of a run, nothing else.
+
+"On what basis" includes how sure you are. `completion-invariant` logged
+`not orchestrator (unknown)` 35 times in one run, and the line covered both a resolved
+non-orchestrator (the guard working) and an identity nobody could resolve (the guard off).
+`readAgentMeta` returns the `source` that answered for exactly this reason: log it, and when
+identity is unresolvable say that instead of naming a role you never read.

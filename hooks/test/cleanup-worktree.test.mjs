@@ -7,6 +7,7 @@
 import {
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   writeFileSync,
   existsSync,
   rmSync,
@@ -18,6 +19,11 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { sanitizePath } from "../lib/paths.mjs";
+import {
+  runtimeLayout,
+  spawnAgent,
+  stopPayload,
+} from "./fixtures/subagent-stop.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SETUP = join(HERE, "..", "setup-worktree.mjs");
@@ -125,4 +131,48 @@ describe("cleanup-worktree removal semantics", () => {
       g("show-ref", "--verify", "--quiet", `refs/heads/session/${SS}`).status,
     ).toBe(0);
   });
+});
+
+// The sweep is the MERGER's post-merge step, and the role test used to be
+// `agentType !== "merger"`. A plugin-provided agent arrives NAMESPACED, so the compare
+// never matched `aiharness:merger` and the skip fired on the merger's own stop as
+// readily as on a developer's. Only idempotence hid it.
+describe("cleanup-worktree skips by role, through bareRole", () => {
+  let seq = 0;
+  // A fresh session id per case, so each run writes its own hooks.log.
+  const stop = (agentType) => {
+    const sessionId = `ab${seq++}0ef56-1111-2222-3333-444455556666`;
+    const layout = runtimeLayout(join(TMP, `rt${seq}`), sessionId);
+    spawnAgent(
+      layout,
+      "a00000000000000041",
+      { agentType, description: "Merge TASK-001" },
+      "ROLE: merger\nTASK_ID: TASK-001\n",
+    );
+    spawnSync("node", [CLEANUP], {
+      input: JSON.stringify(stopPayload(layout, "a00000000000000041")),
+      env,
+      encoding: "utf8",
+    });
+    const log = join(
+      join(TMP, "scratch"),
+      sanitizePath(APP_DIR),
+      sessionId,
+      "hooks.log",
+    );
+    return existsSync(log) ? readFileSync(log, "utf8") : "";
+  };
+
+  test.each(["merger", "aiharness:merger"])("%s proceeds to the sweep", (t) => {
+    expect(stop(t)).not.toContain("cleanup runs on merger stops");
+  });
+
+  test.each(["developer", "aiharness:developer"])(
+    "%s is skipped, and the log says on what basis",
+    (t) => {
+      const log = stop(t);
+      expect(log).toContain("cleanup runs on merger stops");
+      expect(log).toContain("via agent-id");
+    },
+  );
 });

@@ -43,10 +43,19 @@ try {
 
   // Only the orchestrator's stop is our concern. SubagentStop matchers do not reliably
   // filter (see cleanup-worktree) and agent_type in the payload is empty, so identify
-  // via the sibling meta.json. Any doubt -> accept (never block a non-orchestrator stop).
+  // via the agent meta. Any doubt -> accept (never block a non-orchestrator stop).
+  //
+  // The log says which STRATEGY answered, because "unknown" used to mean two different
+  // things and the run that surfaced this bug printed it 35 times: a resolved
+  // non-orchestrator (working as intended) and an identity nobody could resolve (this
+  // invariant is off). Only the second is a defect, and they were indistinguishable.
   const meta = readAgentMeta(payload);
   if (!meta || !isOrchestrator(meta.agentType)) {
-    ctx.accept(`not orchestrator (${meta?.agentType || "unknown"})`);
+    ctx.accept(
+      meta
+        ? `not orchestrator (${meta.agentType} via ${meta.source})`
+        : "identity unresolvable, invariant not checked",
+    );
   }
 
   // No session branch yet -> nothing could be orphaned.

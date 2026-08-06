@@ -21,14 +21,13 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { harnessFile } from "./lib/paths.mjs";
-import { readAgentMeta } from "./lib/agent-meta.mjs";
 import { appendProgress } from "./lib/progress-log.mjs";
 import { bash } from "./lib/process.mjs";
 import { git } from "./lib/git.mjs";
-import { reviewFlag } from "./lib/reviews.mjs";
+import { isFeatureReview } from "./lib/review-mode.mjs";
+import { FEATURE_KEY, reviewFlag } from "./lib/reviews.mjs";
 import { sessionBranch, sessionWorktreePath } from "./lib/topology.mjs";
 
-const FEATURE_REVIEW_KEY = "FEATURE";
 const E2E_TIMEOUT_MS = 15 * 60 * 1000;
 
 // Mirrors reviews.mjs: on a managed launcher the orchestrator's <session_dir> is
@@ -40,31 +39,9 @@ const e2eResultPath = (ctx) =>
 const classify = (status, output) =>
   status !== 0 ? "failed" : /^SKIP:/m.test(output) ? "skipped" : "passed";
 
-// The dispatch prompt's `MODE:` line is the precise signal, and unlike the reviewer's
-// FINAL message it is written at the top of the transcript, so it is long flushed by
-// the time we stop. Read it first and let a `feature-smoke` match END the lookup: the
-// smoke dispatch has no description template, so an improvised description containing
-// "feature-review" would otherwise trigger a second, duplicate suite run.
-function reviewMode(input) {
-  const tp = input.agent_transcript_path || input.transcript_path;
-  if (tp && existsSync(tp)) {
-    try {
-      const m = readFileSync(tp, "utf8").match(
-        /MODE:\s*(feature-review|feature-smoke)/,
-      );
-      if (m) return m[1];
-    } catch {
-      // fall through to the dispatch description
-    }
-  }
-  const meta = readAgentMeta(input);
-  return meta && /feature-review/i.test(meta.description)
-    ? "feature-review"
-    : "";
-}
-
-const isFeatureReview = (input) => reviewMode(input) === "feature-review";
-
+// Which review mode this was (`MODE: feature-review` vs `feature-smoke`) now lives in
+// lib/review-mode.mjs, shared with record-review-verdict so the hook that RUNS the
+// suite and the hook that RECORDS the verdict it gates on cannot disagree.
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "e2e-on-feature-review");
 
@@ -79,7 +56,7 @@ try {
   // best-effort
 }
 
-const flag = reviewFlag(ctx, FEATURE_REVIEW_KEY, "quality-reviewer");
+const flag = reviewFlag(ctx, FEATURE_KEY, "quality-reviewer");
 if (!existsSync(flag)) {
   ctx.accept("feature-review not APPROVED -> e2e not launched");
 }
