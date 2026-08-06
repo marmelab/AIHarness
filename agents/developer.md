@@ -64,6 +64,33 @@ Your spawn prompt provides: `TASK_ID`, `WORKTREE_PATH`, `BRANCH_NAME`, `TICKET_F
 
 Output format: `.claude/rules/agent-output-format.md`.
 
+## END OF TURN: HARD PRECONDITION
+
+**Your stop is invalid while `git status --porcelain` is non-empty. Commit before ending ANY
+turn.** Not only the last one: every turn.
+
+Run it as your final check, in the worktree:
+
+```bash
+cd <WORKTREE_PATH> && git status --porcelain
+```
+
+Empty output, then stop. Non-empty, then commit (or `git restore` what you did not mean to
+change) and check again.
+
+This is a precondition, not advice. Two things follow from breaking it, and neither is
+recoverable by you:
+
+- the SubagentStop chain refuses the stop, twice, and then commits your work itself under
+  `chore(TASK-XXX): commit work the TASK-XXX agent left uncommitted`. Your ticket then has
+  a commit you did not write and did not word.
+- untracked binary artifacts (Playwright/vitest failure screenshots under
+  `test-results/`) are deliberately left out of that commit, so the tree stays dirty and
+  the next stop starts the same cycle.
+
+A `HESITATIONS` line, a `FAILED:` report, a mid-turn pause to ask something: all of them
+are stops. Commit first.
+
 ## OUTPUT CONTRACT (required)
 
 Your very last line of output MUST be exactly one of:

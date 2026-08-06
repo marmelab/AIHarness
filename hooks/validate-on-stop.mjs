@@ -1,11 +1,35 @@
 #!/usr/bin/env node
-// SubagentStop — full validation chain (prettier auto-fix, typecheck, lint, unit app/functions) on active worktrees with changes; exit 2 keeps the subagent alive to fix and commit. e2e is NOT in this chain (end-of-feature only, run by the orchestrator via e2e-smoke.sh). VALIDATE_DRY_RUN=1 skips the chain; =fail simulates a failure.
+// SubagentStop: run the validation chain (format auto-fix, typecheck, lint, unit) on the
+// worktree of the agent that just stopped. exit 2 keeps that subagent alive to fix and
+// commit. e2e is NOT in this chain (end-of-feature only, launched by
+// e2e-on-feature-review). VALIDATE_DRY_RUN=1 skips the chain; =fail simulates a failure.
+//
+// This hook fires on EVERY subagent stop (the SubagentStop matcher does not filter and
+// `agent_type` in the payload is empty), so deciding whose stop it is IS the hook. Three
+// gates, in order, each accepting with a logged reason:
+//
+//   1. Identity unresolvable  -> accept. lib/agent-meta.mjs has already logged one loud
+//                                WARN for the session; there is nothing to attribute.
+//   2. Not a validate role    -> accept. A reviewer, merger, planner or orchestrator owns
+//                                no worktree, so its stop has nothing to validate.
+//   3. No attributable worktree -> accept. A developer whose ticket cannot be recovered
+//                                is not a licence to validate its siblings' work.
+//
+// There is no unscoped fallback. Sweeping every session worktree is strictly worse than
+// validating none: it re-runs work nobody asked for, and it applies the formatter's
+// auto-commit to trees whose own developer is still mid-edit (the "shared brakes" failure
+// this scoping exists to prevent).
 
 import { existsSync, readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
 import { git } from "./lib/git.mjs";
-import { getFirstTaskId } from "./lib/teams.mjs";
-import { readAgentMeta } from "./lib/agent-meta.mjs";
+import {
+  bareRole,
+  getFirstTaskId,
+  matchesRole,
+  validateRoleSet,
+} from "./lib/teams.mjs";
+import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
 import {
   sessionBranch,
   simpleWorktreePath,
@@ -22,40 +46,49 @@ try {
   payload = {};
 }
 
-// Scope validation to the stopping subagent's OWN worktree: a per-ticket
-// developer-TASK-XXX validates <base>/TASK-XXX, a single-shot simple developer (on
-// the <short>/simple branch — rollback / migration) validates <base>/simple. Avoids the
-// "shared brakes" failure where one ticket's broken state blocks an unrelated
-// developer and N stops each re-validate every session worktree. Falls back to
-// all session worktrees when the identity can't be resolved.
-const ids = [ctx.agentName, ctx.agentType].filter(Boolean);
-let taskId = ids.map(getFirstTaskId).find(Boolean) || "";
-// A single-shot simple developer runs on the shared <base>/simple worktree; its agent
-// name carries no TASK suffix, so it's recovered from the dispatch prompt below.
-let isSimple = false;
-
-// Reliable identity at SubagentStop: the sibling <agent>.meta.json (written at
-// spawn, so it exists even when the big transcript JSONL hasn't been flushed yet —
-// a real race here). Its `description` carries the ticket (e.g. "Implement
-// TASK-002: …"). Use it to scope validation to THIS dev's worktree instead of
-// re-validating every session worktree (wt=all) on every stop.
-if (!taskId) {
-  const meta = readAgentMeta(payload);
-  if (meta) {
-    const m = meta.description.match(/TASK-\d+/);
-    if (m) taskId = m[0];
-  }
+// --- gate 1: who stopped ------------------------------------------------------------
+// Mirrors cleanup-worktree: the payload's own identity fields when the runtime fills
+// them, else the spawn meta resolved by lib/agent-meta.mjs.
+const meta = readAgentMeta(payload);
+const identity =
+  [ctx.agentName, ctx.agentType, meta && meta.agentType].find(Boolean) || "";
+if (!identity) {
+  ctx.accept("identity unresolvable, nothing validated");
 }
 
-// No suffixed agent name in this harness → recover the TASK_ID (or the single-shot
-// simple flow) from the dispatch prompt in the transcript, to scope validation to
-// this dev's worktree (not wt=all).
-if (!taskId) {
-  const tp = payload.agent_transcript_path || payload.transcript_path;
+// --- gate 2: is validation this role's business --------------------------------------
+const validateRoles = validateRoleSet();
+if (!matchesRole(identity, validateRoles)) {
+  ctx.accept(
+    `skip: ${identity} stop (validation runs on ${[...validateRoles].join("/")})`,
+  );
+}
+
+// --- gate 3: which worktree is theirs -----------------------------------------------
+// A per-ticket developer validates <base>/TASK-XXX; a single-shot developer on the
+// <short>/simple branch (rollback / migration) validates <base>/simple.
+const ids = [ctx.agentName, ctx.agentType].filter(Boolean);
+let taskId = ids.map(getFirstTaskId).find(Boolean) || "";
+// The simple-developer ROLE names its worktree on its own. A plain `developer` can also
+// be dispatched onto /simple (the e2e-fix flow does exactly that), which is what the
+// BRANCH_NAME scan below is for.
+let isSimple = bareRole(identity).startsWith("simple-developer");
+
+// The dispatch description carries the ticket ("Implement TASK-002: ...").
+if (!taskId && meta) {
+  const m = meta.description.match(/TASK-\d+/);
+  if (m) taskId = m[0];
+}
+
+// Last resort: the dispatch contract at the top of the agent's OWN transcript. Resolved
+// through agentTranscriptPath, never the payload's transcript_path: that names the MAIN
+// session transcript, which carries every dispatch of the session, so scanning it
+// attributes the FIRST ticket dispatched to whoever happens to stop.
+if (!taskId && !isSimple) {
+  const tp = agentTranscriptPath(payload);
   if (tp && existsSync(tp)) {
     try {
-      const body = readFileSync(tp, "utf8");
-      for (const line of body.split("\n")) {
+      for (const line of readFileSync(tp, "utf8").split("\n")) {
         const m =
           line.match(/TASK_ID[:=\s]+(TASK-\d+)/) ||
           line.match(/TICKET_FILE[=:\s]+\S*(TASK-\d+)/);
@@ -63,12 +96,10 @@ if (!taskId) {
           taskId = m[1];
           break;
         }
-        if (/BRANCH_NAME[:=\s]+\S+\/simple\b/.test(line)) {
-          isSimple = true;
-        }
+        if (/BRANCH_NAME[:=\s]+\S+\/simple\b/.test(line)) isSimple = true;
       }
     } catch {
-      // best-effort — fall back to all-worktree validation below
+      // best-effort: gate 3 below accepts when nothing was attributable
     }
   }
 }
@@ -79,14 +110,19 @@ const ownWorktree = taskId
     ? simpleWorktreePath(ctx)
     : "";
 
-// Diff each worktree against session/<short>, not the repo's checked-out base
-// branch, so validation sees a per-ticket developer's OWN change set. (A
-// single-shot simple developer is the exception: resolving-rollback-conflicts does
-// `git reset --hard <BASE_BRANCH>`, re-forking <short>/simple onto the default
-// branch, so its diff against session/<short> can span unrelated files — accepted
-// noise, since the rollback's whole point is to diverge from the session.)
-// Empty base → validation.mjs falls back to the repo base branch (e.g. before the
-// session branch exists).
+if (!ownWorktree) {
+  ctx.accept(
+    `no worktree attributable to ${identity} (identity via ${meta ? meta.source : "payload"}), nothing validated`,
+  );
+}
+
+// Diff the worktree against session/<short>, not the repo's checked-out base branch, so
+// validation sees this ticket's OWN change set. (A single-shot simple developer is the
+// exception: resolving-rollback-conflicts does `git reset --hard <BASE_BRANCH>`,
+// re-forking <short>/simple onto the default branch, so its diff against
+// session/<short> can span unrelated files. Accepted noise, since the rollback's whole
+// point is to diverge from the session.) Empty base -> validation.mjs falls back to the
+// repo base branch (e.g. before the session branch exists).
 const sessionRef = sessionBranch(ctx);
 const base =
   git(["show-ref", "--verify", "--quiet", `refs/heads/${sessionRef}`])
@@ -95,17 +131,23 @@ const base =
     : "";
 
 ctx.log(
-  `START REPO=${ctx.repo} MODE=${process.env.MODE || ""} wt=${ownWorktree || "all"} base=${base || "repo-default"}`,
+  `START role=${identity} wt=${ownWorktree} base=${base || "repo-default"} MODE=${process.env.MODE || ""}`,
 );
 
-const result = runValidationSteps(ctx, { worktree: ownWorktree, base });
+const result = runValidationSteps(ctx, {
+  worktree: ownWorktree,
+  base,
+  // The worktree this stop OWNS. validation.mjs refuses to consume a dirty-work budget
+  // or to commit anything in a worktree that is not it.
+  owner: ownWorktree,
+});
 
 if (!result.ok) {
   ctx.fail(
-    `Validation failed at step '${result.step}' — fix the errors and commit before completing:\n` +
+    `Validation failed at step '${result.step}'. Fix the errors and commit before completing:\n` +
       result.output,
     { log: `step=${result.step}` },
   );
 }
 
-ctx.accept(result.skipReason || `OK (${ownWorktree || "all worktrees"})`);
+ctx.accept(result.skipReason || `OK (${ownWorktree})`);

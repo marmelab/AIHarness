@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -14,17 +16,28 @@ import {
 } from "./git.mjs";
 import { bash, exec } from "./process.mjs";
 import { loadConfig, validationSteps } from "./config.mjs";
+import { acquireLock } from "./lock.mjs";
 import { appendProgress } from "./progress-log.mjs";
 import { clearValidationGaveUp, validationGaveUpFlag } from "./reviews.mjs";
+import { sessionWorktreePath } from "./topology.mjs";
 
-// `only` narrows to a single worktree when the caller already knows it
-// (validate-on-stop scoping to the stopping agent's own task worktree);
-// VALIDATE_WORKTREE is the test override. Either falls back to all session
-// worktrees when the path is gone.
+// `only` narrows to the worktree the caller has already attributed to the stopping agent;
+// VALIDATE_WORKTREE is the test override.
+//
+// A narrowed path that no longer exists returns NOTHING, never every session worktree: a
+// stop nobody can attribute must not sweep its siblings' trees, re-running work nobody
+// asked for and running the formatter's auto-commit over developers who are mid-edit.
+//
+// The un-narrowed listing excludes the _session worktree. That one belongs to the merger:
+// it holds integrated work whose own tickets were each validated on their own branch, and
+// nobody stops "as" _session, so validating it only duplicates work already done.
 export function getActiveWorktrees(ctx, only = "") {
   const narrowed = only || process.env.VALIDATE_WORKTREE || "";
-  if (narrowed && existsSync(narrowed)) return [narrowed];
-  return getWorktreePaths().filter((p) => p.startsWith(ctx.worktreeBase + "/"));
+  if (narrowed) return existsSync(narrowed) ? [narrowed] : [];
+  const session = sessionWorktreePath(ctx);
+  return getWorktreePaths().filter(
+    (p) => p.startsWith(ctx.worktreeBase + "/") && p !== session,
+  );
 }
 
 // Pure query — never exits. An empty list with a non-empty skipReason means
@@ -195,11 +208,10 @@ function giveUp(ctx, cwd, stepId, attempts, output) {
 // Sugar: the label a successful step clears its counter under.
 const id0 = (step, r) => r.step ?? step.id;
 
-// The validation chain is the one enforcement with no budget: it refuses the stop for as long
-// as a step fails. That is right in principle, a green stop is the contract, but with no exit
-// it wedges. Observed on a real run: 35 validation cycles over 52 minutes on one ticket, a
-// developer thrashing on an ambiguous test locator, no signal to the orchestrator and no way
-// for the agent to give up (validate-on-stop does not read the FAILED contract line).
+// A green stop is the contract, so refusing a red one is right in principle. With no budget
+// it wedges: a developer thrashing on one failing step is refused forever, with no signal to
+// the orchestrator and no way to give up (validate-on-stop does not read the FAILED contract
+// line).
 //
 // So: count consecutive failures per worktree AND per step, because a developer that fixes
 // lint and then breaks a test should not inherit the lint budget. Past the limit, release the
@@ -239,6 +251,68 @@ const clearStepFails = (ctx, cwd, stepId) => {
   }
 };
 
+// --- green cache --------------------------------------------------------------------
+// A worktree whose HEAD and working-tree state are byte-for-byte what a green chain
+// already validated has nothing new to check, so the chain is skipped. Without it a
+// developer that stops several times without changing anything pays for the full chain
+// every time.
+//
+// The key is HEAD plus a hash of `git status --porcelain`, so it covers both "committed
+// nothing new" and "edited nothing new": either one changing is a cache miss. Only ever
+// written after a FULLY green chain, so a cached hit can never stand in for a step that
+// failed or gave up. Advisory, like every other marker under breaker/: an unreadable or
+// unwritable cache just means the chain runs.
+const greenCacheFile = (ctx, cwd) => {
+  const dir = join(ctx.sessionDir, "breaker");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best effort */
+  }
+  return join(dir, `validated-${basename(cwd)}`);
+};
+
+// Where the per-worktree chain locks live. Under the session dir, so a lock is never a
+// file inside the tree being validated. Created eagerly because acquireLock's mkdir needs
+// its parent to exist.
+const lockRoot = (ctx) => {
+  const dir = join(ctx.sessionDir, "locks");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best effort: acquireLock then fails to create and the chain runs unlocked */
+  }
+  return dir;
+};
+
+const worktreeState = (cwd) => {
+  const head = exec("git", ["-C", cwd, "rev-parse", "HEAD"]).stdout.trim();
+  const porcelain = exec("git", ["-C", cwd, "status", "--porcelain"]).stdout;
+  if (!head) return ""; // no HEAD yet: never cacheable
+  return `${head} ${createHash("sha1").update(porcelain).digest("hex")}`;
+};
+
+const isCachedGreen = (ctx, cwd, state) => {
+  if (!state || process.env.VALIDATE_NO_CACHE === "1") return false;
+  try {
+    return readFileSync(greenCacheFile(ctx, cwd), "utf8").trim() === state;
+  } catch {
+    return false;
+  }
+};
+
+// Recomputed, not passed in: the format step's auto-commit moves HEAD, so the state to
+// remember is the one the chain LEFT behind, not the one it started from.
+const recordGreen = (ctx, cwd) => {
+  const state = worktreeState(cwd);
+  if (!state) return;
+  try {
+    writeFileSync(greenCacheFile(ctx, cwd), `${state}\n`);
+  } catch {
+    /* best effort */
+  }
+};
+
 // Per-worktree budget for "you stopped without committing" rejections. Scoped per worktree
 // because sibling developers stop independently, and under the session's breaker/ dir like
 // the other bounded rejections.
@@ -274,10 +348,60 @@ const clearDirtyRejects = (ctx, cwd) => {
   }
 };
 
+// Untracked paths in `cwd`, split into the ones a commit may take and the ones it must
+// not. A binary file is anything with a NUL byte in its first 8k, which is how git itself
+// decides. Source belongs in a commit; a test run's image artifacts (Playwright / vitest
+// failure screenshots) never do. Committing them bloats the ticket branch and turns any
+// later rebase into a conflict nobody can resolve by reading.
+function splitUntracked(cwd) {
+  const out = exec("git", [
+    "-C",
+    cwd,
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+  ]).stdout;
+  const text = [];
+  const binary = [];
+  for (const rel of out.split("\n").filter(Boolean)) {
+    const abs = join(cwd, rel);
+    let isBinary = false;
+    try {
+      if (statSync(abs).isDirectory()) continue;
+      const buf = readFileSync(abs);
+      isBinary = buf.subarray(0, 8000).includes(0);
+    } catch {
+      isBinary = true; // unreadable: do not commit it
+    }
+    (isBinary ? binary : text).push(rel);
+  }
+  return { text, binary };
+}
+
+// Stage what a validation-owned commit is allowed to contain: modifications and deletions
+// of TRACKED files, plus untracked TEXT files when `withUntracked`. Never `git add -A`.
+// The formatter only ever rewrites files that are already tracked, so the post-format
+// commit passes withUntracked=false and cannot sweep anything else in.
+function stageForCommit(cwd, { withUntracked }) {
+  exec("git", ["-C", cwd, "add", "-u"]);
+  if (!withUntracked) return { binary: [] };
+  const { text, binary } = splitUntracked(cwd);
+  if (text.length) exec("git", ["-C", cwd, "add", "--", ...text]);
+  return { binary };
+}
+
 // Run ONE config-declared step in `cwd`. Returns { ok } or { ok:false, output }.
 // The step id is the caller's fail-report label, so config ids (prettier,
 // typecheck, unit-app, unit-fn, e2e) ARE the reported step names.
-function runStep(ctx, step, { cwd, base }) {
+//
+// `owner` is the worktree the STOPPING agent owns. Anything that mutates a repository
+// (the dirty-work budget, the fallback commit, the formatter's commit) is gated on
+// cwd === owner, so this chain can never write into a worktree whose own agent is still
+// working. validate-on-stop already narrows to one worktree, which makes that unreachable
+// in practice; the gate makes it structural, so a caller that passes a wider set cannot
+// reintroduce it.
+function runStep(ctx, step, { cwd, base, owner = "" }) {
+  const owns = owner !== "" && cwd === owner;
   const tail = TAIL_LINES[step.kind] ?? 40;
 
   if (step.runner === "vitest") {
@@ -300,11 +424,10 @@ function runStep(ctx, step, { cwd, base }) {
     return runEslintScoped(cwd, base, step.command, exts, tail);
   }
 
-  // A dirty tree BEFORE the formatter runs means the agent stopped without committing.
-  // The auto-commit below used `git add -A`, so it swept that work into a commit labelled
-  // "auto-apply prettier": observed on a real run where a one-line rename landed with a
-  // style message and no developer commit at all. The history then lies to review, to
-  // /harness-diff and to the revert path.
+  // A dirty tree BEFORE the formatter runs means the agent stopped without committing. It
+  // must not be swept into the formatter's commit: the agent's real work would land under
+  // a `style(...)` subject with no developer commit at all, and the history would then lie
+  // to review, to /harness-diff and to the revert path.
   //
   // Rejecting the stop is the enforcement, BOUNDED. Nothing in the harness forbids an
   // agent from committing (verified against every Bash guard), but a commit can still fail
@@ -313,10 +436,17 @@ function runStep(ctx, step, { cwd, base }) {
   // the same shape as the foreground gate that had to be relaxed. So: reject twice, then
   // commit the work with an HONEST message and let the stop through. The contract is
   // enforced in the normal case and the history never lies in either case.
+  //
+  // Both halves are OWNER-ONLY. A dirty tree that is not ours is somebody else still
+  // working: not a contract breach, nothing to reject, and certainly nothing to commit.
   if (step.kind === "format" && step.autoCommit) {
     const dirty =
       exec("git", ["-C", cwd, "status", "--porcelain"]).stdout.trim() !== "";
-    if (!dirty) {
+    if (dirty && !owns) {
+      ctx.log(
+        `dirty but not ours, left alone wt=${cwd} owner=${owner || "none"}`,
+      );
+    } else if (!dirty) {
       clearDirtyRejects(ctx, cwd);
     } else {
       const rejects = readDirtyRejects(ctx, cwd);
@@ -335,28 +465,36 @@ function runStep(ctx, step, { cwd, base }) {
             tailLines(exec("git", ["-C", cwd, "status", "--short"]).stdout, 20),
         };
       }
-      // Still uncommitted after the budget: never wedge. Commit it, but say what it is.
-      exec("git", ["-C", cwd, "add", "-A"]);
+      // Still uncommitted after the budget: never wedge. Commit it, but say whose work it
+      // is and what was deliberately left out of it.
+      const task = basename(cwd);
+      const { binary } = stageForCommit(cwd, { withUntracked: true });
       exec("git", [
         "-C",
         cwd,
         "commit",
         "-m",
-        `chore(${basename(cwd)}): commit work the agent left uncommitted`,
+        `chore(${task}): commit work the ${task} agent left uncommitted`,
       ]);
       clearDirtyRejects(ctx, cwd);
       ctx.log(
-        `uncommitted work persisted after ${rejects} rejection(s), committed wt=${cwd}`,
+        `uncommitted work persisted after ${rejects} rejection(s), committed wt=${cwd}` +
+          (binary.length
+            ? ` (left untracked binary artifacts: ${binary.slice(0, 5).join(", ")})`
+            : ""),
       );
     }
   }
 
   const r = bash(`${step.command} 2>&1`, { cwd });
   if (r.status === 0) {
-    if (step.kind === "format" && step.autoCommit) {
-      // Only reachable with a clean tree above, so anything dirty now IS formatting.
+    if (step.kind === "format" && step.autoCommit && owns) {
+      // Reached with a clean tree (or one the fallback above just committed), so a
+      // TRACKED file that differs now was rewritten by the formatter. Stage exactly
+      // those: `git add -A` here is what let untracked artifacts ride along under a
+      // `style(...)` subject, including the ones the fallback deliberately left behind.
       if (exec("git", ["-C", cwd, "diff", "--quiet"]).status !== 0) {
-        exec("git", ["-C", cwd, "add", "-A"]);
+        stageForCommit(cwd, { withUntracked: false });
         exec("git", [
           "-C",
           cwd,
@@ -385,7 +523,10 @@ function runStep(ctx, step, { cwd, base }) {
 // e2e is end-of-feature only, run by the orchestrator on the session worktree).
 // VALIDATE_DRY_RUN=1 skips everything, =fail simulates a failure. A malformed
 // config fails closed. Returns { ok:true, skipReason? } or { ok:false, step, output }.
-export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
+export function runValidationSteps(
+  ctx,
+  { worktree = "", base = "", owner = "" } = {},
+) {
   if (process.env.VALIDATE_DRY_RUN === "1") {
     ctx.log("DRY_RUN=1, skipping validation");
     return { ok: true, skipReason: "dry_run" };
@@ -424,80 +565,40 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
   const progress = (line) => appendProgress(ctx.sessionDir, line);
 
   for (const wt of worktrees) {
-    const label = basename(wt);
-    // A step that gave up releases the stop and continues, so the loop still reaches its end.
-    // Without this flag the "green" path below would then clear the marker just written.
-    let gaveUpHere = false;
-    for (const step of perWorktree) {
-      if (stepSkipped(ctx, step)) continue;
-      progress(`[validate:${label}] ${step.id}…`);
-      const r = runStep(ctx, step, { cwd: wt, base });
-      if (!r.ok) {
-        // A step may report its own label when the failure is not its command failing
-        // (the uncommitted-work check runs before the formatter, so calling it
-        // "prettier" would point the agent at the wrong thing).
-        const id = r.step ?? step.id;
-
-        // A step that reports its OWN label also owns its OWN budget and its own recovery
-        // (the uncommitted-work check rejects twice, then commits honestly). Counting it here
-        // as well gave one condition two counters with different limits, and a message that
-        // said `attempt 2/2` in its body while the log said `attempt=2/5`. Contradictory
-        // advice is worse than none. So the generic budget covers only the steps with no
-        // budget of their own: a failing command, where the agent must reach green or be
-        // stopped.
-        if (r.step) {
-          progress(`[validate:${label}] ${id} FAILED`);
-          ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
-          return {
-            ok: false,
-            step: id,
-            output: `=== ${id} failed in ${wt} ===\n${r.output}\n`,
-          };
-        }
-
-        const fails = readStepFails(ctx, wt, id) + 1;
-        writeStepFails(ctx, wt, id, fails);
-        progress(
-          `[validate:${label}] ${id} FAILED (${fails}/${STEP_FAIL_LIMIT})`,
-        );
-        ctx.log(
-          `FAIL step=${id} wt=${wt} attempt=${fails}/${STEP_FAIL_LIMIT}\n${r.output}`,
-        );
-
-        if (fails >= STEP_FAIL_LIMIT) {
-          // Give up rather than wedge, and record WHY so the merge is refused later.
-          giveUp(ctx, wt, id, fails, r.output);
-          progress(
-            `[validate:${label}] ${id} gave up after ${fails}, merge will be refused`,
-          );
-          ctx.log(
-            `GAVE-UP step=${id} wt=${wt} after=${fails}; merge blocked for this ticket`,
-          );
-          clearStepFails(ctx, wt, id);
-          gaveUpHere = true;
-          continue;
-        }
-
-        return {
-          ok: false,
-          step: id,
-          output:
-            `=== ${id} failed in ${wt} (attempt ${fails}/${STEP_FAIL_LIMIT}) ===\n${r.output}\n` +
-            (fails === STEP_FAIL_LIMIT - 1
-              ? "This is your LAST attempt at this step. On the next failure the stop is " +
-                "released, the ticket is marked as failing validation, and the merger will " +
-                "refuse to merge it. If you cannot get to green, say so in your final " +
-                "message rather than repeating the same fix.\n"
-              : ""),
-        };
-      }
-      clearStepFails(ctx, wt, id0(step, r));
+    // Nothing has changed since a green chain: skip. See greenCacheFile.
+    const stateBefore = worktreeState(wt);
+    if (isCachedGreen(ctx, wt, stateBefore)) {
+      ctx.log(`SKIP wt=${wt} (unchanged since last green: ${stateBefore})`);
+      continue;
     }
-    // Green: the ticket is mergeable again. Without this the give-up marker outlives the fix
-    // and block-merger-without-review keeps refusing a ticket whose validation now passes.
-    if (!gaveUpHere) clearValidationGaveUp(ctx, basename(wt));
-    progress(`[validate:${label}] checks passed`);
-    ctx.log(`OK wt=${wt}`);
+
+    // One chain per worktree at a time: two chains overlapping here race on the git index
+    // through the formatter's auto-commit step. A concurrent chain would only validate the
+    // same state twice, so the loser SKIPS rather than waits (timeoutMs 0, the acquireLock
+    // default). Advisory: if the lock cannot be created at all the chain runs anyway,
+    // because a lock that can wedge validation is worse than the race.
+    //
+    // The lock lives in the SESSION dir, never inside the worktree: an untracked lock
+    // directory there would show up in `git status --porcelain`, which is both the
+    // dirty-work check's input and the green cache's key.
+    const lock = acquireLock(
+      join(lockRoot(ctx), `validate-${basename(wt)}.lock`),
+    );
+    if (!lock.locked && lock.held) {
+      ctx.log(`SKIP wt=${wt} (another validation chain holds the lock)`);
+      continue;
+    }
+    let outcome;
+    try {
+      outcome = runWorktreeChain(ctx, wt, perWorktree, {
+        base,
+        owner,
+        progress,
+      });
+    } finally {
+      lock.release();
+    }
+    if (!outcome.ok) return outcome;
   }
 
   for (const step of repoLevel) {
@@ -512,5 +613,96 @@ export function runValidationSteps(ctx, { worktree = "", base = "" } = {}) {
     ctx.log(`${step.id} OK`);
   }
 
+  return { ok: true };
+}
+
+// One worktree's chain, fail-fast. Extracted so the caller can hold the per-worktree lock
+// across it with a single try/finally: the failure paths below return from the middle of
+// the chain, and inlining this in the loop meant either leaking the lock or wrapping every
+// return.
+function runWorktreeChain(ctx, wt, perWorktree, { base, owner, progress }) {
+  const label = basename(wt);
+  // A step that gave up releases the stop and continues, so the loop still reaches its end.
+  // Without this flag the "green" path below would then clear the marker just written.
+  let gaveUpHere = false;
+  for (const step of perWorktree) {
+    if (stepSkipped(ctx, step)) continue;
+    progress(`[validate:${label}] ${step.id}…`);
+    const r = runStep(ctx, step, { cwd: wt, base, owner });
+    if (!r.ok) {
+      // A step may report its own label when the failure is not its command failing
+      // (the uncommitted-work check runs before the formatter, so calling it
+      // "prettier" would point the agent at the wrong thing).
+      const id = r.step ?? step.id;
+
+      // A step that reports its OWN label also owns its OWN budget and its own recovery
+      // (the uncommitted-work check rejects twice, then commits honestly). Counting it here
+      // as well gave one condition two counters with different limits, and a message that
+      // said `attempt 2/2` in its body while the log said `attempt=2/5`. Contradictory
+      // advice is worse than none. So the generic budget covers only the steps with no
+      // budget of their own: a failing command, where the agent must reach green or be
+      // stopped.
+      if (r.step) {
+        progress(`[validate:${label}] ${id} FAILED`);
+        ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
+        return {
+          ok: false,
+          step: id,
+          output: `=== ${id} failed in ${wt} ===\n${r.output}\n`,
+        };
+      }
+
+      const fails = readStepFails(ctx, wt, id) + 1;
+      writeStepFails(ctx, wt, id, fails);
+      progress(
+        `[validate:${label}] ${id} FAILED (${fails}/${STEP_FAIL_LIMIT})`,
+      );
+      ctx.log(
+        `FAIL step=${id} wt=${wt} attempt=${fails}/${STEP_FAIL_LIMIT}\n${r.output}`,
+      );
+
+      if (fails >= STEP_FAIL_LIMIT) {
+        // Give up rather than wedge, and record WHY so the merge is refused later.
+        giveUp(ctx, wt, id, fails, r.output);
+        progress(
+          `[validate:${label}] ${id} gave up after ${fails}, merge will be refused`,
+        );
+        ctx.log(
+          `GAVE-UP step=${id} wt=${wt} after=${fails}; merge blocked for this ticket`,
+        );
+        clearStepFails(ctx, wt, id);
+        gaveUpHere = true;
+        continue;
+      }
+
+      return {
+        ok: false,
+        step: id,
+        output:
+          `=== ${id} failed in ${wt} (attempt ${fails}/${STEP_FAIL_LIMIT}) ===\n${r.output}\n` +
+          (fails === STEP_FAIL_LIMIT - 1
+            ? "This is your LAST attempt at this step. On the next failure the stop is " +
+              "released, the ticket is marked as failing validation, and the merger will " +
+              "refuse to merge it. If you cannot get to green, say so in your final " +
+              "message rather than repeating the same fix.\n"
+            : ""),
+      };
+    }
+    clearStepFails(ctx, wt, id0(step, r));
+  }
+  // Green: the ticket is mergeable again. Without this the give-up marker outlives the fix
+  // and block-merger-without-review keeps refusing a ticket whose validation now passes.
+  if (!gaveUpHere) clearValidationGaveUp(ctx, basename(wt));
+  // Remember the state this chain left behind, so an unchanged worktree is not
+  // re-validated on the next stop. Two conditions, both load-bearing:
+  //   - a FULLY green pass. A chain that gave up above took the `continue` and reaches
+  //     here with gaveUpHere set; caching that would let a failing ticket skip its way to
+  //     a green log line.
+  //   - the OWNER's pass. A non-owner pass skips the dirty-work check by design, so its
+  //     "green" says nothing about whether the owner left work uncommitted. Caching it let
+  //     a foreign pass hand the owner a free skip past its own rejection.
+  if (!gaveUpHere && wt === owner) recordGreen(ctx, wt);
+  progress(`[validate:${label}] checks passed`);
+  ctx.log(`OK wt=${wt}`);
   return { ok: true };
 }

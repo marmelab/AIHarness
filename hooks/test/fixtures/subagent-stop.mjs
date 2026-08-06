@@ -12,8 +12,8 @@
 //       <projects>/<slug>/<session-id>/subagents/agent-<id>.jsonl    the agent's own
 //       <projects>/<slug>/<session-id>/subagents/agent-<id>.meta.json
 //
-//   - meta.agentType arrives BARE or NAMESPACED (`aiharness:orchestrator`), both
-//     observed in real meta files.
+//   - meta.agentType arrives BARE or NAMESPACED (`aiharness:orchestrator`). Both forms
+//     occur, so a fixture must cover both.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

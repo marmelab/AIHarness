@@ -188,7 +188,7 @@
         ]
       },
       {
-        "matcher": "developer|test-writer",
+        "matcher": "developer|simple-developer|test-writer",
         "hooks": [
           {
             "type": "command",

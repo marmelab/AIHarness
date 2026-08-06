@@ -133,10 +133,10 @@ describe("cleanup-worktree removal semantics", () => {
   });
 });
 
-// The sweep is the MERGER's post-merge step, and the role test used to be
-// `agentType !== "merger"`. A plugin-provided agent arrives NAMESPACED, so the compare
-// never matched `aiharness:merger` and the skip fired on the merger's own stop as
-// readily as on a developer's. Only idempotence hid it.
+// The sweep is the MERGER's post-merge step, so the role test has to go through bareRole.
+// A plugin-provided agent arrives NAMESPACED, and a literal `agentType !== "merger"` never
+// matches `aiharness:merger`: the skip would then fire on the merger's own stop as readily
+// as on a developer's, and only the sweep's idempotence would hide it.
 describe("cleanup-worktree skips by role, through bareRole", () => {
   let seq = 0;
   // A fresh session id per case, so each run writes its own hooks.log.

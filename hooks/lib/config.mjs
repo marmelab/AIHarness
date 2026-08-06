@@ -147,6 +147,11 @@ export const pipelineRoles = (cfg) =>
   roleNames(cfg).filter((r) => cfg.roles[r]?.pipeline);
 export const debounceRoles = (cfg) =>
   roleNames(cfg).filter((r) => cfg.roles[r]?.debounce);
+// Roles whose stop runs the validation chain, i.e. the roles that write code in a
+// worktree. Every other stop is not validation's business: a reviewer, merger, planner or
+// orchestrator owns no worktree, so there is nothing there to validate.
+export const validateRoles = (cfg) =>
+  roleNames(cfg).filter((r) => cfg.roles[r]?.validate);
 // Managed-launcher extension points (empty object when no launcher overlay).
 export const launcher = (cfg) => cfg.launcher ?? {};
 export const allowedContainers = (cfg) => cfg.containers?.allow ?? [];

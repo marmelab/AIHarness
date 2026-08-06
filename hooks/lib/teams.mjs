@@ -6,6 +6,7 @@ import {
   pipelineRoles,
   debounceRoles,
   roleNames,
+  validateRoles,
 } from "./config.mjs";
 
 export const getFirstTaskId = (text) =>
@@ -25,6 +26,10 @@ const DEFAULT_PIPELINE = [
   "test-writer",
 ];
 const DEFAULT_DEBOUNCE = ["developer", "quality-reviewer", "merger"];
+// The roles that write code in a worktree, so the only ones whose stop has anything to
+// validate. simple-developer belongs here: it owns <base>/simple (rollback / migration
+// dispatches), and leaving it out would silently stop validating that work.
+const DEFAULT_VALIDATE = ["developer", "simple-developer", "test-writer"];
 
 const setFromConfig = (reader, fallback) => {
   try {
@@ -41,6 +46,9 @@ export const pipelineRoleSet = () =>
 /** Roles whose identical re-dispatch is debounced (async-ack double dispatch). */
 export const debounceRoleSet = () =>
   setFromConfig(debounceRoles, DEFAULT_DEBOUNCE);
+/** Roles whose stop runs the validation chain (they own a worktree and write code). */
+export const validateRoleSet = () =>
+  setFromConfig(validateRoles, DEFAULT_VALIDATE);
 /** Every declared role name (config.roles keys); [] on a config error. */
 export const configRoleNames = () => {
   try {
@@ -62,6 +70,21 @@ export const configRoleNames = () => {
 // (tool_input.subagent_type), stop-side identity is namespaced, and callers should not have
 // to know which one they are holding.
 export const bareRole = (name) => String(name || "").replace(/^[\w.-]+:/, "");
+
+// Does `name` name one of `roles`? Same boundary rule as the single-role predicates
+// below, applied to a config-driven set: a role name that merely STARTS with another's
+// is not it (`simple-developer` is not `developer`, `mergerbot` is not `merger`).
+export const matchesRole = (name, roles) => {
+  const bare = bareRole(name);
+  if (!bare) return false;
+  return [...roles].some(
+    (r) =>
+      r &&
+      new RegExp(
+        `^${String(r).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([-@]|$)`,
+      ).test(bare),
+  );
+};
 
 // Agent-name role predicates. Match the bare role, a namespaced one
 // (aiharness:merger), a suffixed name (merger-TASK-003), or an @-qualified address.

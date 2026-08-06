@@ -18,18 +18,12 @@
 // Recovery: already-registered worktree → skip (restart / retry); orphan dir →
 // rm -rf then recreate; orphan branch with no worktree → force-delete so -b works.
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmdirSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { getBaseBranch, getWorktreePaths, git } from "./lib/git.mjs";
+import { acquireLock, LOCK_ACQUIRE_TIMEOUT_MS } from "./lib/lock.mjs";
 import { REVIEW_ROLES, reviewFlag } from "./lib/reviews.mjs";
 import { getFirstTaskId } from "./lib/teams.mjs";
 import { addWorktreeFolder } from "./lib/workspace-folders.mjs";
@@ -42,13 +36,6 @@ import {
   taskBranch,
   taskWorktreePath,
 } from "./lib/topology.mjs";
-
-// Advisory-lock tuning (see the acquire loop below). LOCK_ACQUIRE_TIMEOUT_MS must
-// stay comfortably under this hook's PreToolUse timeout in settings.json so a
-// waiter gives up and proceeds best-effort rather than being killed mid-run.
-const LOCK_ACQUIRE_TIMEOUT_MS = 20_000;
-const LOCK_STALE_MS = 60_000;
-const LOCK_SPIN_MS = 100;
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "setup-worktree");
@@ -98,47 +85,20 @@ if (taskId) {
 
 mkdirSync(ctx.sessionDir, { recursive: true });
 
-// Serialise the git-mutation region per session: a wave dispatches N
-// developers in ONE orchestrator message, so N PreToolUse hooks can fire nearly
-// together and race on session-branch / _session creation and git's internal
-// worktree locks. A best-effort advisory lock (atomic mkdir + bounded spin,
-// 60s stale-steal) serialises them; released on any exit via the exit handler.
-const lockDir = join(ctx.sessionDir, ".setup-worktree.lock");
-const sleepSync = (ms) =>
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-let locked = false;
-const deadline = Date.now() + LOCK_ACQUIRE_TIMEOUT_MS;
-while (Date.now() < deadline) {
-  try {
-    mkdirSync(lockDir);
-    locked = true;
-    break;
-  } catch (e) {
-    if (e.code !== "EEXIST") break; // can't lock — proceed best-effort
-    try {
-      if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
-        rmSync(lockDir, { recursive: true, force: true });
-        continue;
-      }
-    } catch {
-      continue; // lock vanished — retry immediately
-    }
-    sleepSync(LOCK_SPIN_MS);
-  }
-}
-// Release the advisory lock. Idempotent (guarded by `locked`) so it is safe to
-// call explicitly once the git-mutation region is done — releasing before the
-// slow node_modules provisioning keeps the critical section short — and again on
-// exit as a backstop.
-const releaseLock = () => {
-  if (!locked) return;
-  try {
-    rmdirSync(lockDir);
-  } catch {
-    // best-effort
-  }
-  locked = false;
-};
+// Serialise the git-mutation region per session: a wave dispatches N developers in ONE
+// orchestrator message, so N PreToolUse hooks can fire nearly together and race on
+// session-branch / _session creation and git's internal worktree locks. WAIT for the
+// lock here (every dispatch must end up provisioned), with the acquire timeout kept
+// comfortably under this hook's PreToolUse timeout in settings.json so a waiter gives up
+// and proceeds best-effort rather than being killed mid-run.
+//
+// releaseLock is idempotent, so it is called explicitly once the git-mutation region is
+// done (releasing before the slow node_modules provisioning keeps the critical section
+// short) and again on exit as a backstop.
+const { release: releaseLock } = acquireLock(
+  join(ctx.sessionDir, ".setup-worktree.lock"),
+  { timeoutMs: LOCK_ACQUIRE_TIMEOUT_MS },
+);
 process.on("exit", releaseLock);
 
 const base = getBaseBranch();

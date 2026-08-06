@@ -6,8 +6,8 @@
 //
 // The regression it guards: reading the `MODE:` line from the payload's transcript_path.
 // That file is the MAIN session transcript and it contains EVERY dispatch prompt of the
-// session, so one feature-review dispatch would make this answer "feature-review" for
-// every one of the ~210 stops that followed.
+// session, so one feature-review dispatch there makes this answer "feature-review" for
+// every stop that follows.
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

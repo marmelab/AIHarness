@@ -3,12 +3,11 @@
 // Every SubagentStop guard needs this, and the runtime makes it hard:
 //
 //   - `agent_type` in the payload is EMPTY, so the hooks.json matchers do not filter.
-//     Every SubagentStop hook fires on every stop (about 210 stops for 35 dispatches
-//     in the audited run), and each one has to work out for itself whether the stop is
-//     its business.
+//     Every SubagentStop hook fires on every stop, and each one has to work out for
+//     itself whether the stop is its business.
 //   - `transcript_path` points at the MAIN SESSION transcript, not the stopping
-//     agent's. The original implementation here derived a sibling
-//     `<transcript>.meta.json` from it, which therefore resolved 0 times out of 202.
+//     agent's. A sibling `<transcript>.meta.json` derived from it therefore never
+//     exists, so that is not a way to identify anyone.
 //
 // The spawn-time meta DOES exist, one directory down from the main transcript:
 //
@@ -27,8 +26,9 @@
 //                   session. Only reached when there is no agent id at all.
 //
 // When none of them answers, the caller gets null AND the session's hooks.log gets one
-// loud WARN. Silent degradation is what let this bug survive a two-hour run: 202
-// identity failures and not one line about it.
+// loud WARN. Unresolvable identity turns every guard behind it into a no-op, and a guard
+// that treats "not my role" as "not my business" cannot report that: without the WARN the
+// whole family degrades in silence.
 
 import {
   appendFileSync,
@@ -297,9 +297,9 @@ const isMainSessionTranscript = (payload) => {
  * Never falls back to the payload's transcript_path when that is the MAIN session
  * transcript. That file holds every dispatch prompt and every orchestrator message of
  * the session, so scanning it for a `MODE:` line, a `TASK_ID` or a final `APPROVED`
- * answers with whatever came FIRST in the session instead of what this agent did.
- * That is how record-review-verdict came to log task=UNKNOWN, and how a single
- * `MODE: feature-review` line would match on all 210 stops.
+ * answers with whatever came FIRST in the session instead of what this agent did: one
+ * `MODE: feature-review` dispatch would then match on every stop that follows, and a
+ * verdict would be keyed to the session's first ticket rather than the reviewer's own.
  *
  * @param {Record<string, unknown>} payload  Parsed SubagentStop payload.
  * @returns {string}
