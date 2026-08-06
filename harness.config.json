@@ -25,18 +25,54 @@
     "provision": "npm-link"
   },
   "roles": {
-    "orchestrator": { "model": "sonnet", "pipeline": false, "debounce": false },
-    "planner": { "model": "opus", "pipeline": true, "debounce": false },
-    "developer": { "model": "sonnet", "pipeline": true, "debounce": true },
-    "simple-developer": {
-      "model": "sonnet",
-      "pipeline": true,
-      "debounce": false
+    "orchestrator": {
+      "pipeline": false,
+      "debounce": false,
+      "validate": false,
+      "model": "sonnet"
     },
-    "test-writer": { "model": "sonnet", "pipeline": true, "debounce": false },
-    "quality-reviewer": { "model": "opus", "pipeline": true, "debounce": true },
-    "merger": { "model": "haiku", "pipeline": true, "debounce": true },
-    "documentator": { "model": "sonnet", "pipeline": false, "debounce": false }
+    "planner": {
+      "pipeline": true,
+      "debounce": false,
+      "validate": false,
+      "model": "opus"
+    },
+    "developer": {
+      "pipeline": true,
+      "debounce": true,
+      "validate": true,
+      "model": "sonnet"
+    },
+    "simple-developer": {
+      "pipeline": true,
+      "debounce": false,
+      "validate": true,
+      "model": "sonnet"
+    },
+    "test-writer": {
+      "pipeline": true,
+      "debounce": false,
+      "validate": true,
+      "model": "sonnet"
+    },
+    "quality-reviewer": {
+      "pipeline": true,
+      "debounce": true,
+      "validate": false,
+      "model": "opus"
+    },
+    "merger": {
+      "pipeline": true,
+      "debounce": true,
+      "validate": false,
+      "model": "haiku"
+    },
+    "documentator": {
+      "pipeline": false,
+      "debounce": false,
+      "validate": false,
+      "model": "sonnet"
+    }
   },
   "documentator": {
     "author": { "name": "Documentator", "email": "documentator@harness.local" }
