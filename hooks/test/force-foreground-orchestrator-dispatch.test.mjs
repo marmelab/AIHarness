@@ -9,11 +9,12 @@
 // APPROVED work unmerged.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, test } from "vitest";
+import { sanitizePath } from "../lib/paths.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, "..", "force-foreground-orchestrator-dispatch.mjs");
@@ -113,5 +114,73 @@ describe("force-foreground-orchestrator-dispatch", () => {
     });
     expect(r.status).toBe(0);
     expect(isBlocked(r)).toBe(false);
+  });
+});
+
+// In a runtime that exposes no run_in_background, this guard has nothing left to deny, and
+// it used to say so on every single dispatch: 35 identical ACCEPT lines in one session's
+// log, which buries the lines that mean something.
+describe("the inert-runtime note is logged once per session", () => {
+  const inertRun = (root, sessionId) =>
+    spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        tool_name: "Agent",
+        session_id: sessionId,
+        tool_input: { subagent_type: "developer", prompt: "" },
+      }),
+      env: { ...process.env, APP_DIR: TMP, HARNESS_TMP_ROOT: root },
+      encoding: "utf8",
+    });
+
+  const inertLines = (root, sessionId) => {
+    const log = join(root, sanitizePath(TMP), sessionId, "hooks.log");
+    if (!existsSync(log)) return [];
+    return readFileSync(log, "utf8")
+      .split("\n")
+      .filter((l) => l.includes("guard is inert"));
+  };
+
+  test("five dispatches produce one note, and none of them is blocked", () => {
+    const root = mkdtempSync(join(tmpdir(), "force-fg-inert-"));
+    const sessionId = "inert-1234";
+    for (let i = 0; i < 5; i++) {
+      const r = inertRun(root, sessionId);
+      expect(isBlocked(r)).toBe(false);
+      expect(r.status).toBe(0);
+    }
+    expect(inertLines(root, sessionId)).toHaveLength(1);
+    // And it corrects the doctrine that caused the re-dispatch, at the source.
+    expect(inertLines(root, sessionId)[0]).toContain("task-notification");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("a new session gets its own note", () => {
+    const root = mkdtempSync(join(tmpdir(), "force-fg-inert2-"));
+    inertRun(root, "sess-a");
+    inertRun(root, "sess-b");
+    expect(inertLines(root, "sess-a")).toHaveLength(1);
+    expect(inertLines(root, "sess-b")).toHaveLength(1);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // An explicit false is the compliant shape and stays a normal per-dispatch accept: it is
+  // not the inert case, so it must not consume or trigger the note.
+  test("an explicit false is never reported as inert", () => {
+    const root = mkdtempSync(join(tmpdir(), "force-fg-explicit-"));
+    spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        tool_name: "Agent",
+        session_id: "explicit-1234",
+        tool_input: {
+          subagent_type: "developer",
+          prompt: "",
+          run_in_background: false,
+        },
+      }),
+      env: { ...process.env, APP_DIR: TMP, HARNESS_TMP_ROOT: root },
+      encoding: "utf8",
+    });
+    expect(inertLines(root, "explicit-1234")).toHaveLength(0);
+    rmSync(root, { recursive: true, force: true });
   });
 });
