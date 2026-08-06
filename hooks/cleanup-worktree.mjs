@@ -14,6 +14,7 @@ import {
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { readAgentMeta } from "./lib/agent-meta.mjs";
+import { isMerger } from "./lib/teams.mjs";
 import {
   getBaseBranch,
   getWorktreeEntries,
@@ -35,11 +36,17 @@ const raw = readFileSync(0, "utf8");
 const ctx = createHookContext(raw, "cleanup-worktree");
 
 // SubagentStop fires this on EVERY subagent stop here (the matcher doesn't filter
-// and agent_type is empty in the payload). cleanup is the MERGER's post-merge step
-// — skip the worktree sweep when the sibling <agent>.meta.json shows the stopping
-// agent is clearly NOT a merger (developer / reviewer / planner / …). The sweep is
+// and agent_type is empty in the payload). cleanup is the MERGER's post-merge step,
+// so skip the worktree sweep when the resolved agent meta shows the stopping agent is
+// clearly NOT a merger (developer / reviewer / planner / ...). The sweep is
 // idempotent either way; this just avoids running it on every stop. Meta
-// missing/ambiguous → proceed with the normal cleanup.
+// missing/ambiguous: proceed with the normal cleanup.
+//
+// The comparison goes through isMerger (i.e. bareRole), never `=== "merger"`. A
+// plugin-provided agent arrives NAMESPACED, so the raw compare never matched
+// `aiharness:merger` and this skip fired on the merger's own stop as readily as on
+// anyone else's. It was harmless only because the sweep is idempotent and something
+// else eventually ran it.
 {
   let payload = {};
   try {
@@ -48,8 +55,10 @@ const ctx = createHookContext(raw, "cleanup-worktree");
     /* proceed */
   }
   const meta = readAgentMeta(payload);
-  if (meta && meta.agentType && meta.agentType !== "merger") {
-    ctx.accept(`skip — ${meta.agentType} stop (cleanup runs on merger stops)`);
+  if (meta && meta.agentType && !isMerger(meta.agentType)) {
+    ctx.accept(
+      `skip: ${meta.agentType} stop via ${meta.source} (cleanup runs on merger stops)`,
+    );
   }
 }
 
