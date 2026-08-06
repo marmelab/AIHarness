@@ -32,6 +32,7 @@ import { getFirstTaskId, isQualityReviewer } from "./lib/teams.mjs";
 import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag, reviewsDir } from "./lib/reviews.mjs";
+import { reviewerVerdict } from "./lib/verdict.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "record-review-verdict");
@@ -99,107 +100,17 @@ if (!role || !task) {
   }
 }
 
-// Last assistant text: prefer the payload field, fall back to the transcript.
-// While scanning the transcript, recover role/task from the dispatch prompt
-// (ROLE: / TICKET_FILE:) when the agent name didn't carry them.
-const lastAssistantText = () => {
-  if (
-    typeof input.last_assistant_message === "string" &&
-    input.last_assistant_message.trim()
-  ) {
-    return input.last_assistant_message;
-  }
-  if (!transcript || !existsSync(transcript)) return "";
-  let body = "";
-  try {
-    body = readFileSync(transcript, "utf8");
-  } catch {
-    return "";
-  }
-  let lastText = "";
-  for (const line of body.split("\n")) {
-    if (!line.trim()) continue;
-    let e;
-    try {
-      e = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const msg = e.message || e;
-    const content = msg && msg.content;
-    if (Array.isArray(content)) {
-      for (const b of content) {
-        if (
-          b &&
-          b.type === "text" &&
-          typeof b.text === "string" &&
-          b.text.trim()
-        )
-          lastText = b.text;
-      }
-    } else if (typeof content === "string" && content.trim()) {
-      lastText = content;
-    }
-    if (!role) {
-      // Anchor to a dispatch-line boundary — start of the JSONL record, an
-      // escaped newline (\n inside the JSON string), or the prompt field's
-      // opening quote — so an inline prose mention ("...the ROLE: quality-reviewer
-      // agent...") cannot mis-assign the role.
-      const m = line.match(/(?:^|\\n|")ROLE:\s*(quality-reviewer)/);
-      if (m) role = m[1];
-    }
-    if (!task) {
-      // Anchor to the dispatch's TASK_ID / TICKET_FILE lines only. A bare
-      // /TASK-\d+/ scan would latch onto the FIRST ticket mentioned anywhere in
-      // the transcript (e.g. "TASK-001 is merged, now review TASK-002"), keying
-      // the verdict flag to the wrong ticket.
-      const m =
-        line.match(/TASK_ID[:=\s]+(TASK-\d+)/) ||
-        line.match(/TICKET_FILE[=:\s]+\S*(TASK-\d+)/);
-      if (m) task = m[1];
-    }
-  }
-  return lastText;
-};
-
-// Verdict = the last CLEAN contract marker, read bottom-up. The contract puts the
-// verdict on the final line: a bare `APPROVED`, or `REJECTED:` followed by a
-// bulleted feedback list (so the REJECTED marker is NOT the last line). We scan
-// upward from the bottom and take the first clean marker, skipping feedback
-// bullets and trailing prose. Two deliberate asymmetries stop a chatty trailing
-// line from FLIPPING a real verdict:
-//   - APPROVED matches only a standalone `APPROVED` (optionally trailing
-//     punctuation) — not "APPROVED parts: ..." prose.
-//   - REJECTED requires the contract colon `REJECTED:` — so a trailing sentence
-//     like "REJECTED concerns are resolved" after a real APPROVED is ignored.
-// A line that is neither a clean marker nor a feedback bullet is skipped (keep
-// scanning up); if none is found the verdict is UNKNOWN and the flag is untouched.
-const src = lastAssistantText();
+// The verdict, from the reviewer's final contract line. Parsing lives in lib/verdict.mjs,
+// shared with e2e-on-feature-review so the hook that RECORDS the verdict and the hook that
+// ACTS on it cannot read the same message differently. "" when no clean marker is present,
+// and the flag is then left untouched: never written on a guess.
+const verdict = reviewerVerdict(input);
 
 // The end-of-feature review has NO ticket, so every TASK-id recovery above comes back
-// empty and the flag could not be keyed at all: the hook logged task=UNKNOWN and left
-// the verdict unrecorded, which is exactly the flag e2e-on-feature-review gates the
-// suite on. A reviewer whose dispatch carried `MODE: feature-review` is keyed on the
-// shared FEATURE sentinel instead. Reviewer role only: a developer or merger stop must
-// never be able to write a review verdict.
+// empty and the flag could not be keyed at all. A reviewer whose dispatch carried
+// `MODE: feature-review` is keyed on the shared FEATURE sentinel instead. Reviewer role
+// only: a developer or merger stop must never be able to write a review verdict.
 if (role && !task && reviewMode(input) === "feature-review") task = FEATURE_KEY;
-
-const isApproved = (l) => l.replace(/[.!\s]+$/, "") === "APPROVED";
-const isRejected = (l) => /^REJECTED:/.test(l);
-let verdict = "";
-const verdictLines = src.split("\n").map((s) => s.trim());
-for (let i = verdictLines.length - 1; i >= 0; i--) {
-  const line = verdictLines[i];
-  if (!line) continue;
-  if (isRejected(line)) {
-    verdict = "REJECTED";
-    break;
-  }
-  if (isApproved(line)) {
-    verdict = "APPROVED";
-    break;
-  }
-}
 
 // Only log for reviewer stops. This hook fires on EVERY subagent stop (the
 // SubagentStop matcher doesn't filter and agent_type is empty in this runtime),

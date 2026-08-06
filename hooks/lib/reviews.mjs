@@ -1,13 +1,21 @@
 // Per-ticket review verdict flags. The presence of a flag means that reviewer
-// returned APPROVED for the ticket. PRIMARY writer is the quality-reviewer agent
-// itself — it touches the flag via Bash as its last action before emitting the
-// contract line (see quality-reviewer.md), so the verdict is recorded
-// synchronously and never depends on a post-stop transcript read. FALLBACK writer
-// is record-review-verdict.mjs (SubagentStop), kept as belt-and-suspenders for the
-// case the reviewer forgot the touch. Read by block-merger-without-review.mjs
-// (PreToolUse/Agent), cleared on REJECTED and when a developer is (re)dispatched
-// (setup-worktree.mjs) so a changed diff invalidates stale approvals. Session-scoped
-// under <sessionDir>/reviews, mirroring the <sessionDir>/flags convention.
+// returned APPROVED for the ticket.
+//
+// The ONLY writer is record-review-verdict.mjs (SubagentStop), which parses the
+// reviewer's contract line through lib/verdict.mjs. The reviewer used to touch the
+// flag itself before stopping; that made one Bash call in one agent prompt the single
+// point of failure for the whole end-of-feature gate, and an agent writing its own
+// gate file is the exact shape a CI-bypass check looks for. It survives only as an
+// opt-in fallback (`WRITE_VERDICT_FLAG: yes` in the dispatch) for a runtime where a
+// hook can read neither the last assistant message nor a flushed transcript.
+//
+// Read by block-merger-without-review.mjs (PreToolUse/Agent), cleared on REJECTED and
+// when a developer is (re)dispatched (setup-worktree.mjs) so a changed diff invalidates
+// stale approvals. Session-scoped under <sessionDir>/reviews, mirroring the
+// <sessionDir>/flags convention.
+//
+// e2e-on-feature-review does NOT wait for this flag: it parses the same verdict with the
+// same parser, so the two never disagree and neither depends on the other's write.
 //
 // Path source: the quality-reviewer agent (PRIMARY writer) derives the flag dir
 // from its ticket file — `$(dirname TICKET_FILE)/reviews` — i.e. under the

@@ -90,20 +90,24 @@ mistake would be most costly. Rules:
   items (style, naming, things the hooks already catch).
 - `Hotspots for human review: none identified` is a valid, complete section.
 
-**Record your verdict flag (required, do this BEFORE emitting the contract line).** The
-end-of-feature e2e suite is launched by a hook on your stop, and it keys off this flag, so a
-`BLOCKED` review never pays for a 10-minute suite. Write it yourself with a single Bash call:
-a post-stop transcript read races the flush and silently drops the verdict. The flag dir is
-`${TICKETS_DIR}/reviews`, and the key is the literal `FEATURE` (this pass has no `TASK_ID`):
+**Do NOT write a verdict flag.** Your contract line IS the verdict. The
+`record-review-verdict` hook parses it on your stop and writes
+`<session_dir>/reviews/FEATURE-quality-reviewer`, and `e2e-on-feature-review` parses the
+same line through the same parser to decide whether to launch the suite. Nothing you do
+with Bash is needed for either.
 
-- APPROVED:
-  ```bash
-  RD="${TICKETS_DIR}/reviews" && mkdir -p "$RD" && touch "$RD/FEATURE-quality-reviewer"
-  ```
-- BLOCKED:
-  ```bash
-  RD="${TICKETS_DIR}/reviews" && rm -f "$RD/FEATURE-quality-reviewer"
-  ```
+This used to be your job, and it was a single point of failure: a dispatch that did not
+repeat the instruction produced an APPROVED review with no flag, no e2e run, and a full
+re-review to recover one `touch`. An agent writing its own gate file is also the exact
+shape a CI-bypass check looks for, so the runtime's security monitor flagged the
+documented behaviour.
+
+> **Fallback, only when your spawn prompt says `WRITE_VERDICT_FLAG: yes`.** Some runtimes
+> expose neither the last assistant message nor a flushed transcript when a hook runs, so
+> the hook cannot read your contract line. Only then, and only if asked, write the flag
+> BEFORE the contract line: `RD="${TICKETS_DIR}/reviews" && mkdir -p "$RD" && touch
+"$RD/FEATURE-quality-reviewer"` on APPROVED, or `rm -f
+"$RD/FEATURE-quality-reviewer"` on BLOCKED.
 
 OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
 
@@ -194,16 +198,8 @@ Read the ticket spec at `TICKET_FILE`, read the diff in `WORKTREE_PATH`. Apply y
    `session-base/<short>` is the fixed session fork anchor — a local ref, independent of the base branch's name (main, master, or a working branch). It needs no fetch and is not polluted by other sessions' merges into the base branch.
 2. **Apply the rubric** below (Parts A and B). Also apply `coding-style.md` and `security-triggers.md` rules. Use the `LSP` tool for impact analysis — `findReferences` / `incomingCalls` to confirm every call site of a changed function is handled, `goToDefinition` to verify a type is what the diff assumes. See `.claude/rules/lsp-usage.md` (it is read-only intelligence, not a forbidden validation command).
 3. **Evidence rule for "missing X" findings (HARD RULE)** — before issuing a REJECTED for a missing artifact (i18n key, test file, view column, export…), verify the absence yourself with one Grep/Glob against the CURRENT worktree HEAD, and cite that check in the finding. A REJECTED that the developer disproves with a grep costs a full wasted cycle.
-4. **Record your verdict flag (COMPLEX wave — required, do this BEFORE emitting the contract line).** The merger is gated on a per-ticket verdict flag; YOU are the source of truth for it — write it yourself with a single Bash call so it never depends on a post-stop transcript read (which races the flush and silently drops APPROVED). The flag dir is the `reviews/` sibling of your ticket file, i.e. `$(dirname "${TICKET_FILE}")/reviews` (which is `<session_dir>/reviews`):
-   - **APPROVED** → create the flag:
-     ```
-     RD="$(dirname "${TICKET_FILE}")/reviews" && mkdir -p "$RD" && touch "$RD/${TASK_ID}-quality-reviewer"
-     ```
-   - **REJECTED** → remove any stale flag so a prior APPROVED can't leak into the merge:
-     ```
-     RD="$(dirname "${TICKET_FILE}")/reviews" && rm -f "$RD/${TASK_ID}-quality-reviewer"
-     ```
-     Substitute the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt. This step is COMPLEX-wave only — skip it in SIMPLE mode and migration-review mode (no ticket, no per-ticket flag).
+4. **Do NOT write a verdict flag.** The merger is gated on a per-ticket verdict flag, and the `record-review-verdict` hook writes it from your contract line on your stop. Your job is to emit that line correctly; the flag is bookkeeping you never touch. Same for the end-of-feature pass (see Feature-review mode).
+   > **Fallback, only when your spawn prompt says `WRITE_VERDICT_FLAG: yes`.** Some runtimes expose neither the last assistant message nor a flushed transcript when a hook runs, so the hook cannot read your contract line. Only then, and only if asked, write it BEFORE the contract line: `RD="$(dirname "${TICKET_FILE}")/reviews" && mkdir -p "$RD" && touch "$RD/${TASK_ID}-quality-reviewer"` on APPROVED, `rm -f "$RD/${TASK_ID}-quality-reviewer"` on REJECTED, substituting the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt.
 5. **Emit verdict** as the final line of output using the OUTPUT CONTRACT format above.
 
 **DO NOT:**

@@ -3,11 +3,18 @@
 //
 // It fires for the end-of-feature `MODE: feature-review` dispatch and ONLY when that
 // review APPROVED, so a BLOCKED review that sends the work back to a developer never
-// pays for a 10-minute suite. The gate is the reviewer's own verdict FLAG, not the
-// verdict text: at SubagentStop `last_assistant_message` is absent in this runtime and
-// the transcript is often unflushed (see record-review-verdict.mjs), so parsing the
-// verdict here would return UNKNOWN. The flag is written synchronously by the reviewer
-// itself before it stops, which is why the wave flow already trusts it.
+// pays for a 10-minute suite.
+//
+// The gate is the reviewer's VERDICT, parsed here through lib/verdict.mjs, the same
+// parser record-review-verdict uses to write the flag. Reading the verdict rather than
+// waiting for that flag to appear is deliberate: this hook and record-review-verdict are
+// registered on the same SubagentStop matcher, and depending on one hook's file write
+// being visible to another is a race whatever the runtime's execution order turns out to
+// be. Sharing the parser makes the two agree by construction.
+//
+// The flag is still consulted, but only as a fallback for an UNPARSEABLE verdict, so a
+// runtime that gives neither `last_assistant_message` nor a flushed transcript at stop
+// time can still gate the suite on a reviewer that wrote the flag itself.
 //
 // The suite runs on the INTEGRATED session worktree (never $REPO, which sits on the
 // base branch), via the deploy adapter's e2e-smoke.sh: isolated slot-leased Supabase,
@@ -27,6 +34,7 @@ import { git } from "./lib/git.mjs";
 import { isFeatureReview } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag } from "./lib/reviews.mjs";
 import { sessionBranch, sessionWorktreePath } from "./lib/topology.mjs";
+import { reviewerVerdict } from "./lib/verdict.mjs";
 
 const E2E_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -56,9 +64,17 @@ try {
   // best-effort
 }
 
-const flag = reviewFlag(ctx, FEATURE_KEY, "quality-reviewer");
-if (!existsSync(flag)) {
-  ctx.accept("feature-review not APPROVED -> e2e not launched");
+// APPROVED runs the suite; REJECTED does not. An unparseable verdict falls back to the
+// flag, which is the only case where an agent-written flag still matters.
+const verdict = reviewerVerdict(input);
+const approved =
+  verdict === "APPROVED" ||
+  (verdict === "" &&
+    existsSync(reviewFlag(ctx, FEATURE_KEY, "quality-reviewer")));
+if (!approved) {
+  ctx.accept(
+    `feature-review not APPROVED (verdict=${verdict || "UNPARSEABLE"}) -> e2e not launched`,
+  );
 }
 
 const src = sessionWorktreePath(ctx);
