@@ -9,13 +9,28 @@ Validation is automated and config-driven. The steps live in ONE place,
 guard, so they can never drift:
 
 - `validate-on-stop.mjs` (SubagentStop) runs the whole chain after every
-  developer / test-writer stop: the format step (prettier auto-fix + commit),
-  typecheck, lint (eslint, scoped to the stop's changed files) and the unit steps.
+  developer / simple-developer / test-writer stop: the format step (prettier auto-fix +
+  commit), typecheck, lint (eslint, scoped to the stop's changed files) and the unit steps.
   A failed step rejects the stop; the agent's internal loop fixes it and only a
   green stop returns control to the orchestrator.
   **e2e is NOT in this chain**: a ticket can legitimately be mid-feature, and the
   chain's `cwd:"repo"` steps run in the base-branch checkout, so a per-stop e2e run
   only ever tested code the ticket had not touched.
+- **The chain only ever touches the stopping agent's OWN worktree.** It fires on every
+  subagent stop (the matcher does not filter and `agent_type` is empty), so it resolves who
+  stopped, checks that the role is one that owns a worktree (`roles.<role>.validate` in the
+  config), and attributes exactly one worktree. Any of those three failing means it
+  validates NOTHING and says so in `hooks.log`. There is no "validate everything" fallback:
+  one audited run made 212 chains for about 12 that were needed, 202 of them unscoped, and
+  the sweep applied the formatter's auto-commit to trees whose own developer was still
+  mid-edit. A worktree whose state is unchanged since the last green chain is skipped, and
+  one already being validated by a concurrent chain is skipped.
+- **A refusal is bounded and, for now, ADVISORY.** The reject-fix loop above is what the
+  harness intends; it has not been verified that the runtime delivers a rejection into the
+  stopping subagent's context (in one audited run the feedback reached none of 10 developer
+  transcripts). So no invariant depends on an agent reacting to a refusal: every refusal has
+  a budget and an honest exit, and "never merge red" is enforced at the merge instead. See
+  `hooks/test/validation-feedback-path.test.mjs` for the manual check that would settle it.
 - **The chain has a failure budget.** A step that fails rejects the stop, and the agent's loop
   fixes it and stops again, but only up to 5 consecutive failures for that step. Past it the
   stop is RELEASED rather than refused forever, a marker lands in
@@ -59,7 +74,9 @@ command string in a hook or in this file.
 
 - **Developer / test-writer**: after implementation + commit, stop. The hooks
   run and inject any failures via stderr. Fix and commit again next turn. Do not
-  run the merge yourself: that is the merger's job.
+  run the merge yourself: that is the merger's job. **Never end a turn with a dirty
+  tree**: `git status --porcelain` must be empty before you stop, or the chain commits your
+  work for you under a message you did not write (`agents/developer.md`, END OF TURN).
 - **Reviewers**: focus on what hooks can't check (semantic review, integration
   wiring, e2e spec presence). To verify TypeScript, `Read` the source, do not run
   the compiler.
