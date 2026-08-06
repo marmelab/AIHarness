@@ -1,15 +1,14 @@
 // Tests for role identity, in lib/teams.mjs.
 //
 // A plugin-provided agent arrives NAMESPACED: the runtime reports `aiharness:developer`,
-// not `developer`. Every predicate anchored on the bare role, so once the harness shipped as
-// a plugin they all returned false and a family of guards went silently inert: bash-guard
-// stopped gating validation commands for developers and reviewers, record-review-verdict
-// stopped recording verdicts, completion-invariant never recognised the orchestrator's stop
-// (35 `not orchestrator (unknown)` lines in one real run).
+// not `developer`. A predicate anchored on the bare role returns false for it, which turns a
+// whole family of guards inert at once: bash-guard stops gating validation commands for
+// developers and reviewers, record-review-verdict stops recording verdicts,
+// completion-invariant stops recognising the orchestrator's stop.
 //
-// Nothing failed loudly, because each of those guards treats "not my role" as "not my
-// business". That is why these tests exist: the whole suite used to pass bare role names
-// only, so it could not see the migration break identity.
+// None of that fails loudly, because each of those guards treats "not my role" as "not my
+// business". So every case here passes BOTH forms: a suite that only ever passes bare role
+// names cannot see the namespaced form break identity.
 
 import { describe, expect, test } from "vitest";
 import {

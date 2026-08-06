@@ -45,10 +45,10 @@ try {
   // filter (see cleanup-worktree) and agent_type in the payload is empty, so identify
   // via the agent meta. Any doubt -> accept (never block a non-orchestrator stop).
   //
-  // The log says which STRATEGY answered, because "unknown" used to mean two different
-  // things and the run that surfaced this bug printed it 35 times: a resolved
-  // non-orchestrator (working as intended) and an identity nobody could resolve (this
-  // invariant is off). Only the second is a defect, and they were indistinguishable.
+  // The log says which STRATEGY answered, because a bare "unknown" covers two different
+  // states: a resolved non-orchestrator, which is this guard working, and an identity
+  // nobody could resolve, which is this guard being off. Only the second is a defect, so
+  // the line has to tell them apart.
   const meta = readAgentMeta(payload);
   if (!meta || !isOrchestrator(meta.agentType)) {
     ctx.accept(

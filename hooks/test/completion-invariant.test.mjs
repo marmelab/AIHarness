@@ -166,10 +166,9 @@ describe("completion-invariant — red e2e", () => {
   test.each(["orchestrator", "aiharness:orchestrator"])(
     "recognises a %s stop on the runtime's real payload shape",
     (agentType) => {
-      // The audited run logged `not orchestrator (unknown)` 35 times: the payload's
-      // transcript_path names the MAIN session transcript, so the sibling-meta lookup
-      // never resolved and this invariant was never checked once. Identity now comes
-      // from the payload's agent_id.
+      // The payload's transcript_path names the MAIN session transcript, so a
+      // sibling-meta lookup resolves nothing and this invariant would never be checked
+      // at all. Identity comes from the payload's agent_id.
       writeE2eResult("failed");
       const layout = runtimeLayout(
         join(TMP, `rt-${sanitizePath(agentType)}`),

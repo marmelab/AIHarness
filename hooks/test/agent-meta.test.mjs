@@ -1,10 +1,10 @@
 // Tests for lib/agent-meta.mjs: resolving WHO stopped, from a SubagentStop payload.
 //
-// The bug these exist for: the resolver derived a sibling `<transcript>.meta.json` from
-// the payload's transcript_path, but that path names the MAIN SESSION transcript. It
-// therefore resolved 0 times out of 202 in the audited run, and every guard behind it
-// degraded in silence. So the fixtures here build the layout the runtime actually
-// writes (see fixtures/subagent-stop.mjs), not a friendlier one.
+// The property to hold: identity resolves on the payload the RUNTIME sends, where
+// transcript_path names the MAIN SESSION transcript rather than the stopping agent's. A
+// sibling `<transcript>.meta.json` derived from that path never exists, so every guard
+// keying on it would be a no-op. The fixtures therefore build the layout the runtime
+// actually writes (see fixtures/subagent-stop.mjs), not a friendlier one.
 
 import {
   mkdirSync,
@@ -191,8 +191,9 @@ describe("readAgentMeta: fallback strategies", () => {
 });
 
 describe("readAgentMeta: unresolvable identity is LOUD", () => {
-  // Silent degradation is the defect: 202 identity failures across a two-hour run and
-  // not one log line about it.
+  // Unresolvable identity turns every guard behind it into a no-op, and each of those
+  // treats "not my role" as "not my business", so none of them can report it. Without this
+  // WARN the whole family degrades with no log line at all.
   const orphanSession = (sessionId) => {
     const projectDir = join(TMP, "projects", "-workspaces-orphan");
     mkdirSync(projectDir, { recursive: true });
