@@ -2,10 +2,10 @@
 // PreToolUse(Agent) — block accidental duplicate dispatches. Two concerns,
 // grouped in one hook because both are "don't dispatch the same thing twice":
 //
-//  1. planner: at most ONE `planner` dispatch per request.
-//     Scope = caller orchestrator agent_id + TICKETS_DIR (one planning round).
-//     A 2nd planner would overwrite the TASK-*.json the wave is already running
-//     against.
+//  1. planner: at most ONE `planner` dispatch per orchestrator instance.
+//     A 2nd planner overwrites the TASK-*.json the wave is already running against,
+//     and two opus planners on one ticketsDir is also the most expensive duplicate
+//     the harness can make.
 //
 //  2. developer / quality-reviewer / merger: debounce identical re-dispatches
 //     inside a short window. A foreground Agent call is SUPPOSED to block and
@@ -34,6 +34,10 @@ import { isExplicitlyBackgrounded } from "./lib/dispatch-parse.mjs";
 const DEBOUNCE_ROLES = debounceRoleSet();
 const DEBOUNCE_WINDOW_MS = 90 * 1000;
 const PLANNER_STALE_MS = 60 * 60 * 1000;
+// How long a dispatched planner is presumed to still be working. An opus planner takes
+// several minutes to explore and write its tickets, so anything inside this window with no
+// tickets on disk is "in flight", not "dead".
+const PLANNER_INFLIGHT_MS = 10 * 60 * 1000;
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "block-duplicate-dispatch");
@@ -76,10 +80,23 @@ if (childRole && isExplicitlyBackgrounded(input)) process.exit(0);
 if (d.subagentType === "planner") {
   // The STATE A planner template writes `TICKETS_DIR=<path>` (equals);
   // parseDispatch only captures the `TICKETS_DIR:` (colon) form, so accept both.
+  // Kept for the log line and for the plan lookup, NOT for the key.
   const promptTicketsDir =
     (prompt.match(/^TICKETS_DIR[:=]\s*(\S+)/m) || [])[1] || "";
   const ticketsDir = d.ticketsDir || promptTicketsDir || ctx.ticketsDir || "";
-  const marker = join(markerDir, `planner-${sha(`${caller}::${ticketsDir}`)}`);
+
+  // Keyed on the CALLER ALONE. The invariant is "one planning round per orchestrator
+  // instance", and folding ticketsDir into the key made the guard trivially avoidable: a
+  // dispatch that simply omits TICKETS_DIR falls back to the session default, hashes to a
+  // different key, and sails past a marker that already exists. A path is caller-controlled
+  // input, so it cannot be part of the identity of the thing being rate-limited.
+  const marker = join(markerDir, `planner-${sha(caller)}`);
+
+  // The sanctioned way to plan again: say so. Without an escape hatch this guard is
+  // unsatisfiable for a whole stale window, and an unsatisfiable guard is a wedge
+  // (rules/hook-authoring.md). REPLAN is explicit, auditable in the log, and the
+  // planner refuses to overwrite tickets without it too (agents/planner.md).
+  const isReplan = /(^|\s)REPLAN(\s|:|$)/m.test(prompt);
 
   if (existsSync(marker)) {
     try {
@@ -114,26 +131,51 @@ if (d.subagentType === "planner") {
     return false;
   };
 
-  if (existsSync(marker) && !planExists()) {
-    // Refresh the marker so the retry is itself recorded, then let it through.
+  if (existsSync(marker) && !planExists() && !isReplan) {
+    // "Marker present but no plan" has two causes that need opposite answers, and mtime is
+    // what tells them apart: a planner still working (it needs several minutes to write
+    // TASK-*.json) versus one that died before writing anything. Allowing both is what let
+    // a re-dispatch 27 seconds after the first one through.
+    let age = Infinity;
+    try {
+      age = Date.now() - statSync(marker).mtimeMs;
+    } catch {
+      /* unreadable mtime -> treat as dead, fall through to refresh + allow */
+    }
+    if (age >= 0 && age < PLANNER_INFLIGHT_MS) {
+      ctx.block({
+        reason:
+          `A \`planner\` was dispatched ${Math.round(age / 1000)}s ago for this request and has not written its tickets yet. ` +
+          `It is STILL RUNNING: a planner takes several minutes, and its dispatch acknowledgement ("Async agent launched ... agentId") means dispatched, not finished. ` +
+          `You WILL be re-woken by its task-notification. Wait for it. Do NOT re-dispatch the planner, and do NOT dispatch a probe or test agent to find out whether the first one is alive. ` +
+          `Two planners on one TICKETS_DIR overwrite each other's TASK-*.json while the plan gate is being presented. ` +
+          `If you are certain the first planner is dead and you must plan again, re-dispatch with REPLAN in the prompt. ` +
+          `(marker: ${marker})`,
+        log: `BLOCK planner in flight caller=${caller} age=${Math.round(age / 1000)}s marker=${marker}`,
+      });
+    }
+    // Genuinely dead (or a clock that went backwards): refresh the marker so the retry is
+    // itself recorded, then let it through.
     try {
       writeFileSync(marker, `${caller} ${ticketsDir}\n`);
     } catch {
       /* best effort */
     }
     ctx.accept(
-      `planner retry allowed: marker present but no plan was produced (ticketsDir=${ticketsDir || "(session default)"})`,
+      `planner retry allowed: marker ${Math.round(age / 1000)}s old and no plan was produced (ticketsDir=${ticketsDir || "(session default)"})`,
     );
   }
 
-  if (existsSync(marker)) {
+  if (existsSync(marker) && !isReplan) {
     ctx.block({
       reason:
         `A \`planner\` has ALREADY been dispatched for this request AND a plan exists (TICKETS_DIR=${ticketsDir || "(session default)"}). ` +
-        `Do NOT dispatch a second planner — a re-plan overwrites the existing TASK-*.json while the wave may already be running against them. ` +
+        `Do NOT dispatch a second planner: a re-plan overwrites the existing TASK-*.json while the wave may already be running against them. ` +
         `Read the tickets already in TICKETS_DIR and continue into STATE B with them. ` +
-        `If the first plan looks wrong, fix the ticket JSON in place — do not re-run the planner.`,
-      log: `BLOCK 2nd planner caller=${caller} ticketsDir=${ticketsDir || "(default)"}`,
+        `If the first plan looks wrong, fix the ticket JSON in place rather than re-running the planner. ` +
+        `If a re-plan is genuinely the right call, re-dispatch with REPLAN in the prompt. ` +
+        `(marker: ${marker})`,
+      log: `BLOCK 2nd planner caller=${caller} ticketsDir=${ticketsDir || "(default)"} marker=${marker}`,
     });
   }
   try {
@@ -142,7 +184,7 @@ if (d.subagentType === "planner") {
     // if we can't record the marker, still allow this (first) planner through
   }
   ctx.log(
-    `ALLOW 1st planner caller=${caller} ticketsDir=${ticketsDir || "(default)"}`,
+    `ALLOW ${isReplan ? "REPLAN" : "1st"} planner caller=${caller} ticketsDir=${ticketsDir || "(default)"} marker=${marker}`,
   );
   process.exit(0);
 }
