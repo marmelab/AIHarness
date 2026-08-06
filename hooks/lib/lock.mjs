@@ -8,10 +8,9 @@
 //                    N PreToolUse hooks fire nearly together and race on
 //                    session-branch / _session creation and git's own worktree locks.
 //                    It WAITS for the lock, because every dispatch must be provisioned.
-//   validate-on-stop two stops 7 seconds apart raced on the git index through the
-//                    formatter's auto-commit step. It does NOT wait: a concurrent
-//                    chain on the same worktree is redundant work, so the second one
-//                    skips.
+//   validate-on-stop overlapping chains on one worktree race on the git index through the
+//                    formatter's auto-commit step. It does NOT wait: a concurrent chain is
+//                    redundant work, so the second one skips.
 //
 // Advisory on purpose. If the lock cannot be taken for any reason other than "someone
 // holds it", the caller proceeds unlocked: a lock that can wedge a pipeline is worse

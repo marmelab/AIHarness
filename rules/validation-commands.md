@@ -21,16 +21,16 @@ guard, so they can never drift:
   stopped, checks that the role is one that owns a worktree (`roles.<role>.validate` in the
   config), and attributes exactly one worktree. Any of those three failing means it
   validates NOTHING and says so in `hooks.log`. There is no "validate everything" fallback:
-  one audited run made 212 chains for about 12 that were needed, 202 of them unscoped, and
-  the sweep applied the formatter's auto-commit to trees whose own developer was still
-  mid-edit. A worktree whose state is unchanged since the last green chain is skipped, and
-  one already being validated by a concurrent chain is skipped.
+  sweeping every session worktree re-runs work nobody asked for and applies the formatter's
+  auto-commit to trees whose own developer is still mid-edit. A worktree whose state is
+  unchanged since the last green chain is skipped, and so is one already being validated by
+  a concurrent chain.
 - **A refusal is bounded and, for now, ADVISORY.** The reject-fix loop above is what the
-  harness intends; it has not been verified that the runtime delivers a rejection into the
-  stopping subagent's context (in one audited run the feedback reached none of 10 developer
-  transcripts). So no invariant depends on an agent reacting to a refusal: every refusal has
-  a budget and an honest exit, and "never merge red" is enforced at the merge instead. See
-  `hooks/test/validation-feedback-path.test.mjs` for the manual check that would settle it.
+  harness intends, but it is NOT established that the runtime delivers a rejection into the
+  stopping subagent's context. So no invariant depends on an agent reacting to a refusal:
+  every refusal has a budget and an honest exit, and "never merge red" is enforced at the
+  merge instead. `hooks/test/validation-feedback-path.test.mjs` carries the manual check
+  that would settle it.
 - **The chain has a failure budget.** A step that fails rejects the stop, and the agent's loop
   fixes it and stops again, but only up to 5 consecutive failures for that step. Past it the
   stop is RELEASED rather than refused forever, a marker lands in

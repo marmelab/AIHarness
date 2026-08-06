@@ -1,17 +1,16 @@
 // Tests for WHAT the validation chain is allowed to touch, in validate-on-stop.mjs and
-// lib/validation.mjs.
+// lib/validation.mjs. Three properties, each of which has to hold on the payload the
+// RUNTIME sends (empty agent_type, the main session transcript, identity in agent_id):
 //
-// A full-run audit of session 13afe5d3 measured the failure these lock down: 212 chains
-// ran for about 12 that were needed, and 202 of them ran UNSCOPED over every session
-// worktree, because the stopping agent's identity was unresolvable and the code fell back
-// to wt=all. TASK-002 was re-validated 33 times, some chains 1.6 seconds apart, and was
-// still being validated 25 minutes after it was DONE. Along the way 34 dirty-stop
-// rejections were raised and 9 fallback commits made, mostly against worktrees whose own
-// developer was still mid-edit.
+//   - a stop only ever validates the worktree it owns, and validates nothing at all when
+//     identity, role or worktree cannot be established. There is no "validate everything"
+//     fallback to land in.
+//   - a worktree unchanged since a green chain, or already being validated by a concurrent
+//     chain, is skipped.
+//   - nothing is ever committed into a worktree the stopping agent does not own.
 //
-// The old suite could not see any of it: it passed `transcript_path: "/nonexistent.jsonl"`
-// and no identity, which is precisely the payload the storm came from, and asserted only
-// that the chain ran.
+// A payload with no resolvable identity is the case to keep passing here: it is what makes
+// the difference between validating one worktree and validating all of them.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -136,7 +135,7 @@ afterEach(() => {
 describe("gate 1: identity", () => {
   test("an unresolvable identity validates nothing", () => {
     addWorktree("TASK-001");
-    // No agent_id and no spawn meta: exactly the payload that produced 202 unscoped chains.
+    // No agent_id and no spawn meta: the payload that used to trigger an unscoped sweep.
     const r = spawnSync("node", [HOOK], {
       input: JSON.stringify({
         session_id: SESSION_ID,
@@ -217,8 +216,8 @@ describe("gate 3: worktree attribution", () => {
 });
 
 describe("no unscoped sweep", () => {
-  // The core regression. TASK-002's developer was still working while TASK-001's stop swept
-  // its tree: same "shared brakes" failure the scoping was introduced to prevent.
+  // The core property: one ticket's stop must not touch a sibling's tree, whose developer
+  // may still be working in it (the "shared brakes" failure).
   test("a TASK-001 stop never touches TASK-002's worktree", () => {
     addWorktree("TASK-001");
     addWorktree("TASK-002");
@@ -267,11 +266,11 @@ describe("no unscoped sweep", () => {
   });
 });
 
-// 34 dirty-stop rejections and 9 fallback commits were made in the audited run, mostly by
-// OTHER agents' stops sweeping a worktree whose developer was still mid-edit. Scoping the
-// hook makes that unreachable; this makes it STRUCTURAL, so a future caller that passes a
-// wider worktree set cannot resurrect it. Driven through runValidationSteps directly,
-// because a mismatched owner is exactly what the hook can no longer produce.
+// A dirty tree that is not ours is somebody else still working: nothing to reject and
+// nothing to commit. Scoping the hook makes a foreign worktree unreachable; the owner gate
+// makes it STRUCTURAL, so a caller that passes a wider worktree set cannot reintroduce it.
+// Driven through runValidationSteps directly, because a mismatched owner is exactly what
+// the hook can no longer produce.
 describe("only the owner's worktree is ever written to", () => {
   const chain = (worktree, owner) =>
     spawnSync(
@@ -410,10 +409,10 @@ describe("green cache", () => {
   });
 });
 
-// The acceptance check for the whole change: replay a stop sequence shaped like the audited
-// run's and count what the chain actually did. Before this, the same sequence produced 212
-// chains, 202 of them unscoped, and 9 commits the agents did not write.
-describe("replaying the audited run's stop sequence", () => {
+// The end-to-end budget for the whole change: a realistic stop sequence, and a count of
+// what the chain actually did. Every number below is an upper bound the implementation must
+// keep meeting, not an observation.
+describe("a full session's stop sequence", () => {
   test("one chain per changed developer stop, no sweep, no commit made for anyone", () => {
     writeFileSync(
       join(APP_DIR, "harness.config.json"),
@@ -438,8 +437,8 @@ describe("replaying the audited run's stop sequence", () => {
     const tasks = ["TASK-001", "TASK-002", "TASK-003"];
     const worktrees = Object.fromEntries(tasks.map((t) => [t, addWorktree(t)]));
 
-    // The cast of the audited run: one developer per ticket, plus the reviewers, mergers,
-    // planner and orchestrator whose stops all fired this same hook.
+    // One developer per ticket, plus the reviewers, mergers, planner and orchestrator
+    // whose stops all fire this same hook.
     tasks.forEach((t, i) => {
       agent(
         `a0000000000000d0${i}`,
@@ -457,8 +456,7 @@ describe("replaying the audited run's stop sequence", () => {
     agent("a0000000000000p00", "aiharness:planner", "plan");
 
     // Two rounds. Each developer commits something new before its own stop, so each of its
-    // stops is a genuinely new state; every other role just stops, repeatedly, the way they
-    // did on the real run.
+    // stops is a genuinely new state; every other role just stops, repeatedly.
     let devStops = 0;
     for (let round = 0; round < 2; round++) {
       tasks.forEach((t, i) => {
@@ -470,14 +468,13 @@ describe("replaying the audited run's stop sequence", () => {
         g(worktrees[t], "commit", "-q", "-m", `feat(${t}): round ${round}`);
         expect(stop(`a0000000000000d0${i}`).status).toBe(0);
         devStops++;
-        // The siblings' stops, interleaved as they were in the real run.
+        // The siblings' stops, interleaved with the developers'.
         stop(`a0000000000000r0${i}`);
         stop(`a0000000000000m0${i}`);
         stop("a0000000000000o00");
         stop("a0000000000000p00");
       });
-      // And the developers stopping again with nothing changed, which is where 33 of
-      // TASK-002's chains came from.
+      // And the developers stopping again with nothing changed.
       tasks.forEach((_, i) => stop(`a0000000000000d0${i}`));
     }
 
@@ -487,8 +484,8 @@ describe("replaying the audited run's stop sequence", () => {
     // 36 stops in total. Only the 12 developer stops get past the three gates at all...
     expect(count("START role=")).toBe(devStops * 2);
     expect(count("skip:")).toBe(24); // reviewer / merger / planner / orchestrator stops
-    // ...and of those, only the 6 with a new state actually run a chain. The repeat stops,
-    // which is where 33 of TASK-002's chains came from, hit the green cache instead.
+    // ...and of those, only the 6 with a new state actually run a chain. The repeat stops
+    // hit the green cache instead.
     expect(count("OK wt=")).toBe(devStops);
     expect(count("unchanged since last green")).toBe(devStops);
     expect(lines.join("\n")).not.toContain("wt=all");
@@ -504,7 +501,7 @@ describe("replaying the audited run's stop sequence", () => {
 });
 
 describe("per-worktree lock", () => {
-  // Two interleaved chains 7 seconds apart raced on the git index through the formatter's
+  // Two chains overlapping on one worktree race on the git index through the formatter's
   // auto-commit step. The loser skips rather than waits: it would only re-validate the
   // same state.
   test("a held lock makes the chain skip that worktree", () => {

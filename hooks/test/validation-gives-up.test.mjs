@@ -1,10 +1,9 @@
 // Tests for the validation chain's failure budget, in lib/validation.mjs, and the merge
 // refusal it triggers in block-merger-without-review.mjs.
 //
-// The chain used to refuse a stop for as long as a step failed, with no budget and no exit:
-// observed on a live run as 35 validation cycles over 52 minutes on one ticket, a developer
-// thrashing on an ambiguous test locator, with no signal to the orchestrator and no way for
-// the agent to give up (validate-on-stop does not read the FAILED contract line).
+// Refusing a red stop with no budget wedges the ticket: a developer thrashing on one failing
+// step is refused forever, with no signal to the orchestrator and no way to give up
+// (validate-on-stop does not read the FAILED contract line).
 //
 // So the chain gives up after a bounded number of consecutive failures per step, releases the
 // stop, and records why. "We never merge red" then survives in the merger gate rather than in

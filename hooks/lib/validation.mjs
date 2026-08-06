@@ -24,14 +24,13 @@ import { sessionWorktreePath } from "./topology.mjs";
 // `only` narrows to the worktree the caller has already attributed to the stopping agent;
 // VALIDATE_WORKTREE is the test override.
 //
-// A narrowed path that no longer exists returns NOTHING. It used to fall through to every
-// session worktree, and that fallback is what produced 202 unscoped chains in the audited
-// run: a stop nobody could attribute swept its siblings' trees, re-running work nobody
-// asked for and running the formatter's auto-commit over developers who were mid-edit.
+// A narrowed path that no longer exists returns NOTHING, never every session worktree: a
+// stop nobody can attribute must not sweep its siblings' trees, re-running work nobody
+// asked for and running the formatter's auto-commit over developers who are mid-edit.
 //
 // The un-narrowed listing excludes the _session worktree. That one belongs to the merger:
 // it holds integrated work whose own tickets were each validated on their own branch, and
-// nobody stops "as" _session, so validating it only ever duplicated work already done.
+// nobody stops "as" _session, so validating it only duplicates work already done.
 export function getActiveWorktrees(ctx, only = "") {
   const narrowed = only || process.env.VALIDATE_WORKTREE || "";
   if (narrowed) return existsSync(narrowed) ? [narrowed] : [];
@@ -209,11 +208,10 @@ function giveUp(ctx, cwd, stepId, attempts, output) {
 // Sugar: the label a successful step clears its counter under.
 const id0 = (step, r) => r.step ?? step.id;
 
-// The validation chain is the one enforcement with no budget: it refuses the stop for as long
-// as a step fails. That is right in principle, a green stop is the contract, but with no exit
-// it wedges. Observed on a real run: 35 validation cycles over 52 minutes on one ticket, a
-// developer thrashing on an ambiguous test locator, no signal to the orchestrator and no way
-// for the agent to give up (validate-on-stop does not read the FAILED contract line).
+// A green stop is the contract, so refusing a red one is right in principle. With no budget
+// it wedges: a developer thrashing on one failing step is refused forever, with no signal to
+// the orchestrator and no way to give up (validate-on-stop does not read the FAILED contract
+// line).
 //
 // So: count consecutive failures per worktree AND per step, because a developer that fixes
 // lint and then breaks a test should not inherit the lint budget. Past the limit, release the
@@ -255,8 +253,9 @@ const clearStepFails = (ctx, cwd, stepId) => {
 
 // --- green cache --------------------------------------------------------------------
 // A worktree whose HEAD and working-tree state are byte-for-byte what a green chain
-// already validated has nothing new to check. TASK-001 ran 9 chains for 3 distinct green
-// states in the audited run; TASK-002 ran 33.
+// already validated has nothing new to check, so the chain is skipped. Without it a
+// developer that stops several times without changing anything pays for the full chain
+// every time.
 //
 // The key is HEAD plus a hash of `git status --porcelain`, so it covers both "committed
 // nothing new" and "edited nothing new": either one changing is a cache miss. Only ever
@@ -351,9 +350,9 @@ const clearDirtyRejects = (ctx, cwd) => {
 
 // Untracked paths in `cwd`, split into the ones a commit may take and the ones it must
 // not. A binary file is anything with a NUL byte in its first 8k, which is how git itself
-// decides: the audited run committed vitest failure SCREENSHOTS into a ticket branch, and
-// that commit later broke another developer's rebase (about 10 minutes lost cleaning
-// history). Source belongs in a commit; a test run's image artifacts never do.
+// decides. Source belongs in a commit; a test run's image artifacts (Playwright / vitest
+// failure screenshots) never do. Committing them bloats the ticket branch and turns any
+// later rebase into a conflict nobody can resolve by reading.
 function splitUntracked(cwd) {
   const out = exec("git", [
     "-C",
@@ -398,10 +397,9 @@ function stageForCommit(cwd, { withUntracked }) {
 // `owner` is the worktree the STOPPING agent owns. Anything that mutates a repository
 // (the dirty-work budget, the fallback commit, the formatter's commit) is gated on
 // cwd === owner, so this chain can never write into a worktree whose own agent is still
-// working. In the audited run 34 dirty-stop rejections were raised, and 9 fallback
-// commits made, mostly by OTHER agents' stops sweeping a tree mid-edit. Scoping
-// validate-on-stop already stops that from being reachable; this makes it structural, so
-// a future caller that passes a wider set cannot resurrect it.
+// working. validate-on-stop already narrows to one worktree, which makes that unreachable
+// in practice; the gate makes it structural, so a caller that passes a wider set cannot
+// reintroduce it.
 function runStep(ctx, step, { cwd, base, owner = "" }) {
   const owns = owner !== "" && cwd === owner;
   const tail = TAIL_LINES[step.kind] ?? 40;
@@ -426,11 +424,10 @@ function runStep(ctx, step, { cwd, base, owner = "" }) {
     return runEslintScoped(cwd, base, step.command, exts, tail);
   }
 
-  // A dirty tree BEFORE the formatter runs means the agent stopped without committing.
-  // The auto-commit below used `git add -A`, so it swept that work into a commit labelled
-  // "auto-apply prettier": observed on a real run where a one-line rename landed with a
-  // style message and no developer commit at all. The history then lies to review, to
-  // /harness-diff and to the revert path.
+  // A dirty tree BEFORE the formatter runs means the agent stopped without committing. It
+  // must not be swept into the formatter's commit: the agent's real work would land under
+  // a `style(...)` subject with no developer commit at all, and the history would then lie
+  // to review, to /harness-diff and to the revert path.
   //
   // Rejecting the stop is the enforcement, BOUNDED. Nothing in the harness forbids an
   // agent from committing (verified against every Bash guard), but a commit can still fail
@@ -575,11 +572,11 @@ export function runValidationSteps(
       continue;
     }
 
-    // One chain per worktree at a time. Two stops 7 seconds apart raced on the git index
-    // through the formatter's auto-commit step in the audited run. A concurrent chain
-    // would validate the same state twice, so the loser SKIPS rather than waits
-    // (timeoutMs 0, the acquireLock default). Advisory: if the lock cannot be created at
-    // all we run anyway, because a lock that can wedge validation is worse than the race.
+    // One chain per worktree at a time: two chains overlapping here race on the git index
+    // through the formatter's auto-commit step. A concurrent chain would only validate the
+    // same state twice, so the loser SKIPS rather than waits (timeoutMs 0, the acquireLock
+    // default). Advisory: if the lock cannot be created at all the chain runs anyway,
+    // because a lock that can wedge validation is worse than the race.
     //
     // The lock lives in the SESSION dir, never inside the worktree: an untracked lock
     // directory there would show up in `git status --porcelain`, which is both the

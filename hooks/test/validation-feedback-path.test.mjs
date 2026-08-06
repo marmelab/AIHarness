@@ -4,38 +4,32 @@
 // READ THIS FIRST: the reject mechanism is ADVISORY, not verified end to end.
 // ============================================================================
 //
-// The documented loop (rules/validation-commands.md) is: a step fails, the stop is
-// refused with exit 2, the runtime injects the reason into the agent's context, the agent
-// fixes it and stops again. The full-run audit of session 13afe5d3 found the second half
-// of that does not happen:
+// The loop rules/validation-commands.md describes has two halves: the hook refuses the
+// stop with exit 2 and an explanation, then the runtime injects that explanation into the
+// stopping agent's context so it can fix and stop again. Only the FIRST half is the
+// harness's, and only the first half is tested here. Whether the runtime delivers a hook's
+// stderr to a subagent is NOT established, and cannot be tested from this repo: it needs a
+// live session dispatching a real subagent.
 //
-//   The rejection feedback appeared in NONE of the 10 developer transcripts. Not once
-//   across 34 dirty-stop rejections. The reject-fix loop the rules advertise did not
-//   operate; only the harmful side effect (the fallback auto-commit) was real.
-//
-// This file therefore asserts only the half the harness owns: that the hook exits 2 and
-// puts an actionable message on stderr. Whether the RUNTIME delivers that stderr to the
-// subagent cannot be tested from here, because doing so needs a live Claude Code session
-// dispatching a real subagent, which no test in this repo can do. So until the manual
-// check below passes, treat every refusal as advisory:
+// Until the manual check below settles it, treat every refusal as advisory:
 //
 //   - never make correctness depend on an agent reacting to a rejection. Every refusal
 //     carries a budget and an honest exit (rules/hook-authoring.md), and that is what
-//     actually holds the line.
-//   - the enforcement that DOES work is at the merge: block-merger-without-review reads
-//     the give-up marker and refuses the ticket. Keep new invariants there, not in a
-//     refusal loop.
+//     holds the line.
+//   - the enforcement that does not need the agent is at the merge:
+//     block-merger-without-review reads the give-up marker and refuses the ticket. Keep
+//     new invariants there, not in a refusal loop.
 //   - agents/developer.md states the clean-tree precondition directly, so a compliant
 //     developer never reaches the rejection in the first place.
 //
-// MANUAL VERIFICATION (do this against a live runtime, then update this header):
+// MANUAL VERIFICATION (against a live runtime, then update this header):
 //   1. Dispatch one developer on a SIMPLE change with `VALIDATE_DRY_RUN=fail` set.
 //   2. Let it stop. The hook exits 2 with "Validation failed at step 'dry-run'".
 //   3. Read <main-transcript-dir>/<session-id>/subagents/agent-<id>.jsonl for that agent
 //      and grep for "Validation failed".
 //   4. Present  => the loop works; narrow this header to say so and drop the advisory
-//      framing. Absent => the loop is still broken; the finding above stands, and the
-//      rejection text is for the human reading hooks.log, nobody else.
+//      framing. Absent => the rejection text is for the human reading hooks.log, nobody
+//      else, and this header stands as written.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

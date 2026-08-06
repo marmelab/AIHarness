@@ -1,9 +1,9 @@
 // Tests for the format step's auto-commit, in lib/validation.mjs.
 //
-// The step exists to commit FORMATTING. It used to `git add -A`, so an agent that stopped
-// without committing had its real work swept into a commit reading "auto-apply prettier".
-// That happened on a live run: a one-line rename landed under a style message with no
-// developer commit at all, leaving the history lying to review and to /harness-diff.
+// The step exists to commit FORMATTING, and nothing else. Staging more than that (`git add
+// -A`) sweeps an agent's own uncommitted work into a commit reading "auto-apply prettier",
+// which leaves the ticket with no developer commit at all and a history that lies to review
+// and to /harness-diff.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -137,16 +137,15 @@ describe("the format step's auto-commit", () => {
     expect(stop().status).toBe(2);
     const r = stop();
     expect(r.status).toBe(0);
-    // The message names WHOSE work it is. 9 such commits were made in the audited run and
-    // one of them broke another developer's rebase, so "which agent left this" is the
-    // first thing anyone reading that history needs.
+    // The message names WHOSE work it is: "which agent left this" is the first thing
+    // anyone reading that history needs.
     expect(log()[0]).toContain("commit work the simple agent left uncommitted");
     expect(g(WT, "status", "--porcelain").stdout.trim()).toBe("");
   });
 
-  // The audited run swept binary vitest failure screenshots into a ticket branch this way,
-  // and that commit later broke the TASK-002 developer's rebase (about 10 minutes lost
-  // cleaning history). Source is committed; a test run's image artifacts are left on disk.
+  // Binary test artifacts (Playwright / vitest failure screenshots) must not ride along:
+  // they bloat the ticket branch and make any later rebase unresolvable by reading. Source
+  // is committed; the artifacts are left on disk.
   test("the fallback commit leaves untracked binary artifacts behind", () => {
     writeFileSync(join(WT, "seed.ts"), 'export const a = "renamed";\n');
     mkdirSync(join(WT, "test-results"), { recursive: true });

@@ -5,16 +5,8 @@
 // e2e-on-feature-review). VALIDATE_DRY_RUN=1 skips the chain; =fail simulates a failure.
 //
 // This hook fires on EVERY subagent stop (the SubagentStop matcher does not filter and
-// `agent_type` in the payload is empty), so deciding whose stop it is IS the hook. A
-// full-run audit of session 13afe5d3 measured what happens when it cannot:
-//
-//   212 chains ran for about 12 that were needed. 202 of them ran UNSCOPED, over every
-//   session worktree, because identity was unresolvable and the code fell back to
-//   wt=all. TASK-002 was re-validated 33 times, some chains 1.6 seconds apart, and was
-//   still being validated 25 minutes after it was DONE.
-//
-// So there is no unscoped fallback any more. Three gates, in order, each accepting with a
-// logged reason rather than sweeping something that is not ours:
+// `agent_type` in the payload is empty), so deciding whose stop it is IS the hook. Three
+// gates, in order, each accepting with a logged reason:
 //
 //   1. Identity unresolvable  -> accept. lib/agent-meta.mjs has already logged one loud
 //                                WARN for the session; there is nothing to attribute.
@@ -23,10 +15,10 @@
 //   3. No attributable worktree -> accept. A developer whose ticket cannot be recovered
 //                                is not a licence to validate its siblings' work.
 //
-// Sweeping foreign worktrees is strictly worse than validating none: it re-runs work
-// nobody asked for, and it applied the formatter's auto-commit to trees whose own
-// developer was still mid-edit ("shared brakes", the exact failure the scoping was
-// introduced to prevent).
+// There is no unscoped fallback. Sweeping every session worktree is strictly worse than
+// validating none: it re-runs work nobody asked for, and it applies the formatter's
+// auto-commit to trees whose own developer is still mid-edit (the "shared brakes" failure
+// this scoping exists to prevent).
 
 import { existsSync, readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
