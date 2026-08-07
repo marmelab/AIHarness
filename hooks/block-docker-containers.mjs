@@ -11,15 +11,8 @@
 // A config that cannot be read blocks too: failing open here would silently hand back
 // arbitrary container launches.
 
-import { readFileSync } from "node:fs";
-import { createHookContext } from "./lib/context.mjs";
 import { allowedContainers, loadConfig } from "./lib/config.mjs";
-
-const input = JSON.parse(readFileSync(0, "utf8"));
-const ctx = createHookContext(input, "block-docker-containers");
-
-const cmd = input.tool_input?.command || "";
-if (!cmd) process.exit(0);
+import { runStandalone } from "./lib/hook-chain.mjs";
 
 // A command that brings a container up: `docker [container] run|create|start`,
 // or compose `up` (both `docker compose up` and legacy `docker-compose up`).
@@ -27,30 +20,35 @@ const launchesContainer = (c) =>
   /\bdocker\s+(container\s+)?(run|create|start)\b/.test(c) ||
   /\bdocker(-compose|\s+compose)\b[^\n]*\bup\b/.test(c);
 
-let allowed = [];
-try {
-  allowed = allowedContainers(loadConfig());
-} catch {
-  allowed = [];
-}
-
 // A declared stack's own CLI usually drives the Docker daemon directly rather than
 // shelling out `docker run`, so it is unaffected either way; this exception covers
 // operating its containers by hand.
-const referencesAllowedStack = (c) =>
+const referencesAllowedStack = (c, allowed) =>
   allowed.some((name) =>
     new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(c),
   );
 
-if (launchesContainer(cmd) && !referencesAllowedStack(cmd)) {
-  ctx.block({
-    reason:
-      "Docker container launch blocked: this dev container only permits the stacks declared in " +
-      `harness.config.json \`containers.allow\` (currently ${allowed.length ? allowed.map((a) => `\`${a}\``).join(", ") : "none"}). ` +
-      "`docker run|create|start` and `docker compose up` are disabled for anything else. " +
-      "Use the project's documented command to bring the local stack up.",
-    log: `cmd=${cmd.slice(0, 120)} allowed=[${allowed.join(",")}]`,
-  });
+export function check(input, ctx) {
+  const cmd = input.tool_input?.command || "";
+  if (!cmd) return;
+
+  let allowed = [];
+  try {
+    allowed = allowedContainers(loadConfig());
+  } catch {
+    allowed = [];
+  }
+
+  if (launchesContainer(cmd) && !referencesAllowedStack(cmd, allowed)) {
+    ctx.block({
+      reason:
+        "Docker container launch blocked: this dev container only permits the stacks declared in " +
+        `harness.config.json \`containers.allow\` (currently ${allowed.length ? allowed.map((a) => `\`${a}\``).join(", ") : "none"}). ` +
+        "`docker run|create|start` and `docker compose up` are disabled for anything else. " +
+        "Use the project's documented command to bring the local stack up.",
+      log: `cmd=${cmd.slice(0, 120)} allowed=[${allowed.join(",")}]`,
+    });
+  }
 }
 
-process.exit(0);
+runStandalone(import.meta.url, "block-docker-containers", check);

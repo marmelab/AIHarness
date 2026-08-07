@@ -16,9 +16,9 @@
 // deny, so it says so ONCE per session rather than on every dispatch: dozens of identical
 // ACCEPT lines bury the log lines that mean something.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import {
   isExplicitlyBackgrounded,
   parseDispatch,
@@ -32,25 +32,17 @@ import { pipelineRoleSet } from "./lib/teams.mjs";
 // (pipeline:false): their background dispatch is correct.
 const PIPELINE_ROLES = pipelineRoleSet();
 
-let input;
-try {
-  input = JSON.parse(readFileSync(0, "utf8"));
-} catch {
-  process.exit(0); // no / unparseable payload -> allow
-}
+export function check(input, ctx) {
+  try {
+    const d = parseDispatch(input);
+    const childRole = PIPELINE_ROLES.has(d.subagentType)
+      ? d.subagentType
+      : PIPELINE_ROLES.has(d.role)
+        ? d.role
+        : "";
 
-const ctx = createHookContext(input, "force-foreground-orchestrator-dispatch");
-
-try {
-  const d = parseDispatch(input);
-  const childRole = PIPELINE_ROLES.has(d.subagentType)
-    ? d.subagentType
-    : PIPELINE_ROLES.has(d.role)
-      ? d.role
-      : "";
-
-  // Not an orchestrator->pipeline-child dispatch -> none of our business.
-  if (!childRole) ctx.accept("not a pipeline dispatch");
+    // Not an orchestrator->pipeline-child dispatch -> none of our business.
+    if (!childRole) return ctx.allow("not a pipeline dispatch");
 
   // Read run_in_background RAW: parseDispatch coerces absent->false, and the three cases
   // are genuinely different here.
@@ -72,33 +64,36 @@ try {
   // to a recovery run. That backstop is why relaxing here is acceptable now and was not
   // before: it had been silently inert (it looked for verdict flags in a directory that
   // never existed) until it was fixed and given tests.
-  const rib = input.tool_input?.run_in_background;
-  // Shared with block-duplicate-dispatch, which must debounce exactly what proceeds here.
-  if (!isExplicitlyBackgrounded(input)) {
-    if (rib === false) ctx.accept(`${childRole} foreground (explicit false)`);
-    // The parameter is absent, so this guard cannot fire in this runtime at all. Worth
-    // knowing once; worth nothing repeated per dispatch.
-    if (noteInertnessOnce(ctx))
-      ctx.accept(
-        `${childRole} accepted: this runtime exposes no run_in_background to a nested subagent, ` +
-          `so this guard is inert for the rest of the session. A background dispatch here is ` +
-          `not a dead end: the orchestrator IS re-woken by the child's task-notification.`,
-      );
-    process.exit(0);
-  }
+    const rib = input.tool_input?.run_in_background;
+    // Shared with block-duplicate-dispatch, which must debounce exactly what proceeds here.
+    if (!isExplicitlyBackgrounded(input)) {
+      if (rib === false)
+        return ctx.allow(`${childRole} foreground (explicit false)`);
+      // The parameter is absent, so this guard cannot fire in this runtime at all. Worth
+      // knowing once; worth nothing repeated per dispatch.
+      if (noteInertnessOnce(ctx))
+        return ctx.allow(
+          `${childRole} accepted: this runtime exposes no run_in_background to a nested subagent, ` +
+            `so this guard is inert for the rest of the session. A background dispatch here is ` +
+            `not a dead end: the orchestrator IS re-woken by the child's task-notification.`,
+        );
+      return;
+    }
 
-  ctx.block({
-    reason:
-      `Nested orchestrator dispatch of "${childRole}" must not be EXPLICITLY backgrounded. The ` +
-      `next step needs this child's contract line, and a foreground call returns it inline. ` +
-      `Re-dispatch with run_in_background: false.`,
-    log: `blocked ${childRole} rib=${rib === undefined ? "absent" : String(rib)}`,
-  });
-} catch (e) {
-  // Never let this gate break a real dispatch.
-  ctx.log(`error, allowing: ${String(e).slice(0, 120)}`);
-  process.exit(0);
+    ctx.block({
+      reason:
+        `Nested orchestrator dispatch of "${childRole}" must not be EXPLICITLY backgrounded. The ` +
+        `next step needs this child's contract line, and a foreground call returns it inline. ` +
+        `Re-dispatch with run_in_background: false.`,
+      log: `blocked ${childRole} rib=${rib === undefined ? "absent" : String(rib)}`,
+    });
+  } catch (e) {
+    // Never let this gate break a real dispatch.
+    ctx.log(`error, allowing: ${String(e).slice(0, 120)}`);
+  }
 }
+
+runStandalone(import.meta.url, "force-foreground-orchestrator-dispatch", check);
 
 // True the first time it is called in a session, false afterwards. A sentinel file rather
 // than a counter: the point is one line in the log, and the exact number of inert dispatches

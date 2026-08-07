@@ -2,8 +2,7 @@
 // PreToolUse(Bash): single guard for Bash commands. Blocks commands that open browser windows (headed Playwright, Vite --open) for every caller, blocks the orchestrator from mutating the review/dispatch guard state under <sessionDir>/{reviews,breaker}, blocks gated subagents from running validation commands (validate-on-stop.mjs runs them automatically on SubagentStop), and blocks them from writing files through Bash instead of the Write/Edit tools.
 // Every block names the rule that fired in its log line, and the file-write refusal names the allowed alternative for the cause that fired: an editing agent is sent to the Write tool, an agent capturing a process's output is given the sinks it may use.
 
-import { readFileSync } from "node:fs";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import {
   isDeveloper,
   isOrchestrator,
@@ -16,14 +15,6 @@ import {
   launcher,
 } from "./lib/config.mjs";
 import { isScratchpadTarget, scratchpadDir } from "./lib/scratchpad.mjs";
-
-const input = JSON.parse(readFileSync(0, "utf8"));
-const ctx = createHookContext(input, "bash-guard");
-
-const agent = input.agent_type || "";
-const cmd = input.tool_input?.command || "";
-
-if (!cmd) process.exit(0);
 
 // Browser rules — any caller: this sandbox has no display, a headed run hangs forever.
 const opensHeadedPlaywright = (c) =>
@@ -50,13 +41,14 @@ const BROWSER_RULES = [
   ],
 ];
 
-const browserViolation = BROWSER_RULES.find(([, matches]) => matches(cmd));
-if (browserViolation) {
+const checkBrowser = (cmd, ctx) => {
+  const violation = BROWSER_RULES.find(([, matches]) => matches(cmd));
+  if (!violation) return;
   ctx.block({
-    reason: browserViolation[2],
-    log: `browser rule=${browserViolation[0]} cmd=${cmd.slice(0, 120)}`,
+    reason: violation[2],
+    log: `browser rule=${violation[0]} cmd=${cmd.slice(0, 120)}`,
   });
-}
+};
 
 // Guard-state rule — orchestrator only: the orchestrator must NEVER mutate the
 // hook state under <sessionDir>/reviews (review-verdict flags) or
@@ -68,7 +60,8 @@ if (browserViolation) {
 // when present, else the CLAUDE_AGENT_NAME-derived ctx.agentType, allowing a
 // suffixed runtime name (orchestrator-…) and the chat- prefix. (isOrchestrator
 // lives in lib/teams.mjs so both gates share one predicate.)
-if (isOrchestrator(agent || ctx.agentType)) {
+const checkGuardState = (cmd, ctx, agent) => {
+  if (!isOrchestrator(agent || ctx.agentType)) return;
   // Match `reviews`/`breaker` as a path segment bounded on the left by `/` and
   // on the right by `/`, a quote, whitespace, or end-of-token. The trailing-slash
   // form alone missed the command the codebase actually teaches the reviewer to
@@ -93,7 +86,7 @@ if (isOrchestrator(agent || ctx.agentType)) {
       log: `orchestrator rule=guard-state-mutation cmd=${cmd.slice(0, 120)}`,
     });
   }
-}
+};
 
 const runsTypecheck = (c) =>
   /(make\s+typecheck|npm\s+run\s+typecheck|npx\s+tsc(\s|$)|tsc\s+--noEmit)/.test(
@@ -177,33 +170,29 @@ try {
 // launching the suite is a hook's job (e2e-on-feature-review.mjs), so an orchestrator
 // or a main-session Bash call must be refused too. Still config-driven — drop "e2e"
 // from validation.extraForbidden and this stops applying, like any other category.
-if (activeCategories.has("e2e") && runsE2eTests(cmd)) {
+const checkE2eAnyCaller = (cmd, ctx) => {
+  if (!activeCategories.has("e2e") || !runsE2eTests(cmd)) return;
   ctx.block({
     reason: `Validation command forbidden: ${CATEGORY_RULES.e2e[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
     log: `any-caller rule=e2e cmd=${cmd.slice(0, 120)}`,
   });
-}
+};
 
-// Validation rules — gated subagents only: the validation hooks already run
-// these; manual runs burn budget and can hang (vitest headed without CI=true).
-// Resolve identity the same robust way as the guard-state rule above: prefer the
-// payload agent_type, fall back to the CLAUDE_AGENT_NAME-derived ctx.agentType,
-// and match via the suffix-aware predicates — so a `developer-TASK-001` runtime
-// name (or an empty agent_type) is still gated, not silently waved through.
-const who = agent || ctx.agentType || "";
-if (!isDeveloper(who) && !isQualityReviewer(who)) process.exit(0);
-
+// Validation rules, gated subagents only: the validation hooks already run these;
+// manual runs burn budget and can hang (vitest headed without CI=true). The caller
+// is resolved in check() below, which is where the gate is applied.
 const VALIDATION_RULES = [...activeCategories]
   .filter((c) => CATEGORY_RULES[c])
   .map((c) => [c, ...CATEGORY_RULES[c]]);
 
-const violation = VALIDATION_RULES.find(([, matches]) => matches(cmd));
-if (violation) {
+const checkValidationCommand = (cmd, ctx) => {
+  const violation = VALIDATION_RULES.find(([, matches]) => matches(cmd));
+  if (!violation) return;
   ctx.block({
     reason: `Validation command forbidden: ${violation[2]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
     log: `rule=${violation[0]} cmd=${cmd.slice(0, 120)}`,
   });
-}
+};
 
 // File-write rules — gated subagents only: code-writing agents must use the
 // Write/Edit tools, never Bash redirection/in-place edits. Bash writes bypass the
@@ -254,31 +243,31 @@ const writesScript = (c) =>
 // The reviewer roles are the ones that RUN the app to verify it, so they own the
 // session scratchpad as a log sink. bareRole handles the namespaced
 // (aiharness:quality-reviewer) and suffixed runtime names.
-const isReviewer = isQualityReviewer(who);
-const exemptTarget = (t) =>
-  t === "/dev/null" ||
-  (logsDir && t.startsWith(`${logsDir}/`)) ||
-  (isReviewer && isScratchpadTarget(t, ctx.sessionId));
+const checkFileWrite = (cmd, ctx, isReviewer) => {
+  const exemptTarget = (t) =>
+    t === "/dev/null" ||
+    (logsDir && t.startsWith(`${logsDir}/`)) ||
+    (isReviewer && isScratchpadTarget(t, ctx.sessionId));
 
-// Evaluate the exemptions PER target, so an unrelated `cmd 2>/dev/null` cannot
-// disarm detection of a real `> file` write in the same command.
-const redirectViolations = [];
-for (const m of cmd.matchAll(REDIRECT_RE)) {
-  const target = unquote(m[2]);
-  if (!looksLikeFile(target) || exemptTarget(target)) continue;
-  redirectViolations.push(["redirect", target]);
-}
-const tee = teeTarget(cmd);
+  // Evaluate the exemptions PER target, so an unrelated `cmd 2>/dev/null` cannot
+  // disarm detection of a real `> file` write in the same command.
+  const redirectViolations = [];
+  for (const m of cmd.matchAll(REDIRECT_RE)) {
+    const target = unquote(m[2]);
+    if (!looksLikeFile(target) || exemptTarget(target)) continue;
+    redirectViolations.push(["redirect", target]);
+  }
+  const tee = teeTarget(cmd);
 
-const writeViolation = [
-  ...redirectViolations,
-  ...(writesSedInPlace(cmd) ? [["sed-in-place", ""]] : []),
-  ...(writesAwkInPlace(cmd) ? [["awk-in-place", ""]] : []),
-  ...(tee && !exemptTarget(tee) ? [["tee", tee]] : []),
-  ...(writesScript(cmd) ? [["scripted-write", ""]] : []),
-][0];
+  const writeViolation = [
+    ...redirectViolations,
+    ...(writesSedInPlace(cmd) ? [["sed-in-place", ""]] : []),
+    ...(writesAwkInPlace(cmd) ? [["awk-in-place", ""]] : []),
+    ...(tee && !exemptTarget(tee) ? [["tee", tee]] : []),
+    ...(writesScript(cmd) ? [["scripted-write", ""]] : []),
+  ][0];
+  if (!writeViolation) return;
 
-if (writeViolation) {
   const [rule, target] = writeViolation;
   // A log-shaped or extensionless target is a process writing down what it
   // printed; any other suffix is an artefact the editing tools must produce.
@@ -298,6 +287,29 @@ if (writeViolation) {
       : `File editing via Bash is forbidden: ${rule}${target ? ` -> ${target}` : ""}. Use the Write or Edit tool instead: a Bash write bypasses prettier/typecheck and the migration-write guard. See developer.md.`,
     log: `file-write rule=${rule} kind=${capturesOutput ? "process-output" : "file-edit"} cmd=${cmd.slice(0, 120)}`,
   });
+};
+
+// The rules in the order they are applied. Each one either refuses (terminal) or
+// returns; the last two are gated on the caller being a code-writing subagent.
+export function check(input, ctx) {
+  const agent = input.agent_type || "";
+  const cmd = input.tool_input?.command || "";
+  if (!cmd) return;
+
+  checkBrowser(cmd, ctx);
+  checkGuardState(cmd, ctx, agent);
+  checkE2eAnyCaller(cmd, ctx);
+
+  // Resolve identity the same robust way as the guard-state rule above: prefer the
+  // payload agent_type, fall back to the CLAUDE_AGENT_NAME-derived ctx.agentType,
+  // and match via the suffix-aware predicates, so a `developer-TASK-001` runtime
+  // name (or an empty agent_type) is still gated, not silently waved through.
+  const who = agent || ctx.agentType || "";
+  const isReviewer = isQualityReviewer(who);
+  if (!isDeveloper(who) && !isReviewer) return;
+
+  checkValidationCommand(cmd, ctx);
+  checkFileWrite(cmd, ctx, isReviewer);
 }
 
-process.exit(0);
+runStandalone(import.meta.url, "bash-guard", check);

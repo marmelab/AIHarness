@@ -15,43 +15,43 @@
 // there is never more than one merger running at a time. A single-slot marker
 // therefore always describes the currently-running merger.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 
-const input = JSON.parse(readFileSync(0, "utf8"));
-const d = parseDispatch(input);
+export function check(input, ctx) {
+  const d = parseDispatch(input);
 
-// Only a merger dispatch carries promotion authorization.
-if (d.subagentType !== "merger") process.exit(0);
+  // Only a merger dispatch carries promotion authorization.
+  if (d.subagentType !== "merger") return;
 
-const ctx = createHookContext(input, "record-merger-stage");
+  // A dispatch is Stage-A-only (may NOT promote) when it either carries STAGE: a-only
+  // or is a per-ticket wave merge (TASK_ID matches TASK-<n>). Every other merger
+  // dispatch (MODE: promote, or a SIMPLE / MIGRATION / ROLLBACK single-shot, none of
+  // which set a TASK-<n> id) legitimately promotes.
+  const stageAOnly = d.stage === "a-only" || /^TASK-\d+$/.test(d.taskId);
+  const promote = !stageAOnly;
 
-// A dispatch is Stage-A-only (may NOT promote) when it either carries STAGE: a-only
-// or is a per-ticket wave merge (TASK_ID matches TASK-<n>). Every other merger
-// dispatch (MODE: promote, or a SIMPLE / MIGRATION / ROLLBACK single-shot, none of
-// which set a TASK-<n> id) legitimately promotes.
-const stageAOnly = d.stage === "a-only" || /^TASK-\d+$/.test(d.taskId);
-const promote = !stageAOnly;
-
-try {
-  mkdirSync(ctx.sessionDir, { recursive: true });
-  writeFileSync(
-    join(ctx.sessionDir, "merger-stage.json"),
-    JSON.stringify({
-      promote,
-      taskId: d.taskId,
-      mode: d.mode,
-      stage: d.stage,
-      at: new Date().toISOString(),
-    }) + "\n",
-  );
-  ctx.log(
-    `RECORD promote=${promote} taskId=${d.taskId || "-"} mode=${d.mode || "-"} stage=${d.stage || "-"}`,
-  );
-} catch {
-  // Best-effort: the Bash guard fails CLOSED when the marker is missing/unreadable,
-  // so a failed write cannot silently allow an unauthorized promotion.
+  try {
+    mkdirSync(ctx.sessionDir, { recursive: true });
+    writeFileSync(
+      join(ctx.sessionDir, "merger-stage.json"),
+      JSON.stringify({
+        promote,
+        taskId: d.taskId,
+        mode: d.mode,
+        stage: d.stage,
+        at: new Date().toISOString(),
+      }) + "\n",
+    );
+    ctx.log(
+      `RECORD promote=${promote} taskId=${d.taskId || "-"} mode=${d.mode || "-"} stage=${d.stage || "-"}`,
+    );
+  } catch {
+    // Best-effort: the Bash guard fails CLOSED when the marker is missing/unreadable,
+    // so a failed write cannot silently allow an unauthorized promotion.
+  }
 }
-process.exit(0);
+
+runStandalone(import.meta.url, "record-merger-stage", check);

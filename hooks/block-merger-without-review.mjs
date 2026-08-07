@@ -11,7 +11,7 @@
 // review), and when the ticket can't be identified (fail open, never wedge the flow).
 
 import { existsSync, readFileSync } from "node:fs";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import {
   REVIEW_ROLES,
@@ -19,22 +19,25 @@ import {
   validationGaveUpFlag,
 } from "./lib/reviews.mjs";
 
-const input = JSON.parse(readFileSync(0, "utf8"));
-const ctx = createHookContext(input, "block-merger-without-review");
-const d = parseDispatch(input);
+export function check(input, ctx) {
+  const d = parseDispatch(input);
 
-if (d.subagentType !== "merger") process.exit(0); // only gate merger dispatches
-if (d.mode === "promote") process.exit(0); // promotion-only carries no per-ticket review
-if (["SIMPLE", "MIGRATION", "PROMOTE", "ROLLBACK"].includes(d.taskId))
-  process.exit(0);
-if (!/^TASK-\d+$/.test(d.taskId)) process.exit(0); // can't identify a ticket → fail open
+  if (d.subagentType !== "merger") return; // only gate merger dispatches
+  if (d.mode === "promote") return; // promotion-only carries no per-ticket review
+  if (["SIMPLE", "MIGRATION", "PROMOTE", "ROLLBACK"].includes(d.taskId)) return;
+  if (!/^TASK-\d+$/.test(d.taskId)) return; // can't identify a ticket -> fail open
+
+  checkValidationGaveUp(ctx, d);
+  checkApproved(ctx, d);
+}
 
 // The validation chain gave up on this ticket: it refused the developer's stop up to its
 // limit and released it rather than wedging the pipeline. The work is therefore NOT green,
 // and this is where "we never merge red" is enforced, mechanically, instead of relying on
 // the orchestrator to have read a result file.
-const gaveUp = validationGaveUpFlag(ctx, d.taskId);
-if (existsSync(gaveUp)) {
+function checkValidationGaveUp(ctx, d) {
+  const gaveUp = validationGaveUpFlag(ctx, d.taskId);
+  if (!existsSync(gaveUp)) return;
   let detail = "";
   try {
     const r = JSON.parse(readFileSync(gaveUp, "utf8"));
@@ -52,14 +55,18 @@ if (existsSync(gaveUp)) {
   );
 }
 
-const missing = REVIEW_ROLES.filter(
-  (role) => !existsSync(reviewFlag(ctx, d.taskId, role)),
-);
-if (missing.length === 0) process.exit(0); // APPROVED → allow the merge
+function checkApproved(ctx, d) {
+  const missing = REVIEW_ROLES.filter(
+    (role) => !existsSync(reviewFlag(ctx, d.taskId, role)),
+  );
+  if (missing.length === 0) return; // APPROVED -> allow the merge
 
-ctx.fail(
-  `Refusing to dispatch the merger for ${d.taskId}: no APPROVED verdict from ${missing.join(" and ")} yet.\n` +
-    "The flow is: developer -> quality-reviewer -> (APPROVED) -> merger.\n" +
-    `Dispatch quality-reviewer-${d.taskId} first (STATE B transition), then dispatch the merger only after it returns APPROVED.`,
-  { log: `BLOCK ${d.taskId} missing=${missing.join(",")}` },
-);
+  ctx.fail(
+    `Refusing to dispatch the merger for ${d.taskId}: no APPROVED verdict from ${missing.join(" and ")} yet.\n` +
+      "The flow is: developer -> quality-reviewer -> (APPROVED) -> merger.\n" +
+      `Dispatch quality-reviewer-${d.taskId} first (STATE B transition), then dispatch the merger only after it returns APPROVED.`,
+    { log: `BLOCK ${d.taskId} missing=${missing.join(",")}` },
+  );
+}
+
+runStandalone(import.meta.url, "block-merger-without-review", check);

@@ -140,12 +140,25 @@ export function createHookContext(input, name = "hook") {
     error,
 
     /**
+     * Record an allow and END THE PROCESS. For a hook that owns its process (every
+     * SubagentStop hook): the decision is final and nothing else in this process runs.
      * @param {string} [detail]
      * @returns {never}
      */
     accept(detail) {
       verdict("ACCEPT", detail);
       process.exit(0);
+    },
+
+    /**
+     * Record an allow and RETURN. For a guard that runs inside a dispatcher chain
+     * (lib/hook-chain.mjs): this guard is done, the next one still has to run, so
+     * exiting here would silently skip every guard registered after it.
+     * @param {string} [detail]
+     * @returns {void}
+     */
+    allow(detail) {
+      verdict("ACCEPT", detail);
     },
 
     /**

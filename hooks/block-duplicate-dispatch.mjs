@@ -24,7 +24,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { pipelineRoleSet, debounceRoleSet } from "./lib/teams.mjs";
 import { isExplicitlyBackgrounded } from "./lib/dispatch-parse.mjs";
@@ -32,6 +32,7 @@ import { isExplicitlyBackgrounded } from "./lib/dispatch-parse.mjs";
 // Sourced from harness.config.json (config.roles debounce/pipeline flags) via
 // teams.mjs, so these sets and force-foreground's share one source of truth.
 const DEBOUNCE_ROLES = debounceRoleSet();
+const PIPELINE_ROLES = pipelineRoleSet();
 const DEBOUNCE_WINDOW_MS = 90 * 1000;
 const PLANNER_STALE_MS = 60 * 60 * 1000;
 // How long a dispatched planner is presumed to still be working. An opus planner takes
@@ -39,24 +40,23 @@ const PLANNER_STALE_MS = 60 * 60 * 1000;
 // tickets on disk is "in flight", not "dead".
 const PLANNER_INFLIGHT_MS = 10 * 60 * 1000;
 
-const input = JSON.parse(readFileSync(0, "utf8"));
-const ctx = createHookContext(input, "block-duplicate-dispatch");
-const d = parseDispatch(input);
-const prompt = String(input.tool_input?.prompt ?? "");
-
-// Without a caller agent_id we can't scope a marker safely — allow rather than
-// risk over-blocking the only dispatch.
-const caller = ctx.agentId;
-if (!caller) process.exit(0);
-
-const markerDir = join(ctx.sessionDir, "breaker");
-try {
-  mkdirSync(markerDir, { recursive: true });
-} catch {
-  process.exit(0); // can't persist a marker → don't risk blocking a real dispatch
-}
-
 const sha = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
+
+export function check(input, ctx) {
+  const d = parseDispatch(input);
+  const prompt = String(input.tool_input?.prompt ?? "");
+
+  // Without a caller agent_id we can't scope a marker safely: allow rather than
+  // risk over-blocking the only dispatch.
+  const caller = ctx.agentId;
+  if (!caller) return;
+
+  const markerDir = join(ctx.sessionDir, "breaker");
+  try {
+    mkdirSync(markerDir, { recursive: true });
+  } catch {
+    return; // can't persist a marker -> don't risk blocking a real dispatch
+  }
 
 // Only debounce dispatches that will actually PROCEED. An explicitly-backgrounded one is
 // denied by force-foreground-orchestrator-dispatch and re-issued, so recording a marker for
@@ -68,16 +68,20 @@ const sha = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
 // was always true and every pipeline role exited here. Observed as two planner dispatches
 // twelve seconds apart with no log line from this hook at all. The predicate is shared with
 // force-foreground now, so the two cannot drift apart again.
-const PIPELINE_ROLES = pipelineRoleSet();
-const childRole = PIPELINE_ROLES.has(d.subagentType)
-  ? d.subagentType
-  : PIPELINE_ROLES.has(d.role)
-    ? d.role
-    : "";
-if (childRole && isExplicitlyBackgrounded(input)) process.exit(0);
+  const childRole = PIPELINE_ROLES.has(d.subagentType)
+    ? d.subagentType
+    : PIPELINE_ROLES.has(d.role)
+      ? d.role
+      : "";
+  if (childRole && isExplicitlyBackgrounded(input)) return;
+
+  if (d.subagentType === "planner") return checkPlanner(ctx, d, { prompt, caller, markerDir });
+  if (DEBOUNCE_ROLES.has(d.subagentType))
+    return checkDebounce(ctx, d, { prompt, caller, markerDir });
+}
 
 // ---- Concern 1: at most one planner per request -------------------------------
-if (d.subagentType === "planner") {
+function checkPlanner(ctx, d, { prompt, caller, markerDir }) {
   // The STATE A planner template writes `TICKETS_DIR=<path>` (equals);
   // parseDispatch only captures the `TICKETS_DIR:` (colon) form, so accept both.
   // Kept for the log line and for the plan lookup, NOT for the key.
@@ -161,7 +165,7 @@ if (d.subagentType === "planner") {
     } catch {
       /* best effort */
     }
-    ctx.accept(
+    return ctx.allow(
       `planner retry allowed: marker ${Math.round(age / 1000)}s old and no plan was produced (ticketsDir=${ticketsDir || "(session default)"})`,
     );
   }
@@ -186,11 +190,10 @@ if (d.subagentType === "planner") {
   ctx.log(
     `ALLOW ${isReplan ? "REPLAN" : "1st"} planner caller=${caller} ticketsDir=${ticketsDir || "(default)"} marker=${marker}`,
   );
-  process.exit(0);
 }
 
 // ---- Concern 2: debounce duplicate developer/reviewer/merger dispatches -------
-if (DEBOUNCE_ROLES.has(d.subagentType)) {
+function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
   // Key on the ticket identity AND the prompt content. The async-ack duplicate
   // re-issues the IDENTICAL dispatch prompt, so an identical (caller, role,
   // ticket, prompt) inside the window collides and is blocked. A genuine retry
@@ -229,7 +232,6 @@ if (DEBOUNCE_ROLES.has(d.subagentType)) {
     // can't record → allow this dispatch through
   }
   ctx.log(`ALLOW ${d.subagentType} dispatch key=${idPart} caller=${caller}`);
-  process.exit(0);
 }
 
-process.exit(0);
+runStandalone(import.meta.url, "block-duplicate-dispatch", check);
