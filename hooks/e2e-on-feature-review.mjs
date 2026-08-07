@@ -83,11 +83,33 @@ const previous = readE2eResult(ctx);
 const featureFlag = () =>
   existsSync(reviewFlag(ctx, FEATURE_KEY, "quality-reviewer"));
 
+// Is the process that wrote a `running` record still alive? A signal 0 answers on this
+// host, which is where the writer ran: EPERM means it exists under another user, ESRCH
+// means it is gone. A record with no pid pre-dates this field, and nothing can prove it
+// live.
+const stillRunning = (r) => {
+  if (!r.pid) return false;
+  try {
+    process.kill(r.pid, 0);
+    return true;
+  } catch (e) {
+    return e?.code === "EPERM";
+  }
+};
+
+// A verdict this merger's fix would invalidate. `failed` is the ordinary one. `running`
+// counts too once its process is gone: a suite killed by the runtime or a host restart
+// leaves that record on disk for the rest of the session, and requiring `failed` meant
+// the next fix to land was never verified. The wave then ended on a verdict nobody ever
+// produced, which is the one state this file exists to make impossible.
+const supersedable = (r) =>
+  r.status === "failed" || (r.status === "running" && !stillRunning(r));
+
 const mergerFixLanded = () => {
   const meta = readAgentMeta(input);
   if (!meta || !isMerger(meta.agentType)) return false;
   if (!featureFlag()) return false; // no feature review has approved yet: the wave is still running
-  if (!previous || previous.status !== "failed") return false;
+  if (!previous || !supersedable(previous)) return false;
   const head = headSha();
   return Boolean(head && previous.sessionSha && previous.sessionSha !== head);
 };
@@ -171,6 +193,10 @@ writeResult({
   source: src,
   sessionSha: headSha(),
   startedAt,
+  // Who to ask whether this run is still live. Without it a `running` left by a killed
+  // process is indistinguishable from one in flight, and the merger trigger has to treat
+  // it as in flight forever (see supersedable).
+  pid: process.pid,
   specsFirst: specs,
 });
 

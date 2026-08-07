@@ -183,6 +183,33 @@ describe("the merger trigger needs all three conditions", () => {
     expect(didRun()).toBe(false);
   });
 
+  // The suite writes `running` before it starts so a killed process is distinguishable
+  // from "never ran". That record survives the process, so a trigger that only accepts
+  // `failed` left the session unable to verify any later fix: the wave ends on a verdict
+  // nobody produced.
+  test("a `running` left by a dead process is re-run when a fix lands", () => {
+    approveFeature();
+    seedResult({
+      status: "running",
+      // A pid that cannot be alive: the hook must not treat it as a suite in flight.
+      pid: 0x7fffffff,
+      sessionSha: headSha(),
+    });
+    mergeAFix("patch");
+    expect(mergerStop().status).toBe(0);
+    expect(didRun()).toBe(true);
+    expect(result().trigger).toBe("merger-fix");
+  });
+
+  test("a `running` from a live process is left alone", () => {
+    approveFeature();
+    // This test process is alive by definition, so the record reads as a suite in flight.
+    seedResult({ status: "running", pid: process.pid, sessionSha: headSha() });
+    mergeAFix("patch");
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
   test("nothing merged since the failure: no re-run on the same code", () => {
     approveFeature();
     seedResult({ status: "failed", sessionSha: headSha() });
