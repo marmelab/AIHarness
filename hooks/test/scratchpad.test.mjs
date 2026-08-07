@@ -1,4 +1,4 @@
-// Tests for lib/scratchpad.mjs — resolving the runtime's per-session scratchpad
+// Tests for lib/scratchpad.mjs: resolving the runtime's per-session scratchpad
 // directory from a session id, and recognising a redirect target that lives in it.
 
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";

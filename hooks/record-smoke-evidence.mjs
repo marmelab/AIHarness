@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SubagentStop(quality-reviewer) — record what a feature-smoke actually did.
+// SubagentStop(quality-reviewer): record what a feature-smoke actually did.
 //
 // The smoke has no verdict flag: its result reaches the orchestrator as text only, so
 // nothing downstream can tell a smoke that walked the flows from one that read the
