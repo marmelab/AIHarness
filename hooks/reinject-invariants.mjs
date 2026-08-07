@@ -16,6 +16,7 @@ const INVARIANTS = [
   "- Worktree scope: each agent reads/writes ONLY its own <WORKTREE_PATH>; never edit $REPO/src directly. Every Bash needs a `cd <WORKTREE_PATH> &&` prefix.",
   "- Git rights: the developer commits its OWN task branch; only the merger mutates session/base branches; no agent pushes or pulls (the user owns the remote).",
   "- Launched is NOT done: an `Async agent launched ... agentId` acknowledgement means dispatched, not finished. Wait for the task-notification; do NOT start implementing the same change yourself.",
+  "- Launched is also not LOST: that acknowledgement means you WILL be re-woken when the child completes. Never re-dispatch on it, and never dispatch a probe/test agent to find out whether the first one is alive (runtime facts live in hooks, not in probes).",
   "- While an orchestrator runs: surface progress only; never route or re-implement the change in the main thread (that is the duplicate-work bug).",
   "- Approvals (migration / plan gate): dispatch a FRESH orchestrator (new Agent call) with the right <intent>; never SendMessage the old one (relayed approvals carry no user authority).",
   "</harness-invariants>",

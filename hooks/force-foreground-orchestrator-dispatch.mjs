@@ -1,25 +1,23 @@
 #!/usr/bin/env node
 // PreToolUse(Agent) - force the orchestrator's pipeline dispatches to run FOREGROUND.
 //
-// Root cause (transcript forensics + a probe): the VS Code extension defaults the Agent
-// tool to BACKGROUND, and a nested subagent (the orchestrator, spawnDepth >= 1) is NEVER
-// re-invoked when a background child completes. So a background dispatch from the
-// orchestrator ends its turn "to await a notification" that never comes - review / merge /
-// promotion never run and finished dev work is orphaned.
-// A probe confirmed explicit run_in_background:false DOES block (child output inline) while
-// the default is async; CLI defaults to foreground, so the bug only ever bit the extension.
+// A foreground dispatch returns the child's contract line inline, which is the shape the
+// orchestrator's stage barriers are written against. An explicitly BACKGROUNDED pipeline
+// dispatch is denied: where the runtime lets the caller choose, choosing background for a
+// child whose result the next step needs is always wrong.
 //
-// Enforcement (the prose guard in orchestrator.md was ignored): DENY any orchestrator->child
-// pipeline dispatch that is EXPLICITLY backgrounded. Detection is by the CHILD role - only
-// the orchestrator dispatches these - so main->orchestrator (child=orchestrator) and the
-// fire-and-forget documentator are never touched. Fail-open: any error or unrecognized shape
-// allows the dispatch.
+// Detection is by the CHILD role - only the orchestrator dispatches these - so
+// main->orchestrator (child=orchestrator) and the fire-and-forget documentator are never
+// touched. Fail-open: any error or unrecognized shape allows the dispatch.
 //
-// It used to deny anything that was not an explicit false, which wedged the harness in a
-// runtime that does not expose the parameter to a nested subagent at all. See the long note
-// at the decision itself for why absent is now accepted and what covers the gap.
+// ABSENT is accepted. A nested subagent's Agent tool does not expose the parameter in every
+// runtime, and requiring an explicit false there made every pipeline dispatch impossible.
+// See the long note at the decision itself. In such a runtime this hook has nothing left to
+// deny, so it says so ONCE per session rather than on every dispatch: dozens of identical
+// ACCEPT lines bury the log lines that mean something.
 
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import {
   isExplicitlyBackgrounded,
@@ -65,9 +63,9 @@ try {
   // minutes, with every pipeline dispatch impossible. A guard that cannot be satisfied is
   // not protection, it is a wedge.
   //
-  // What still catches the original bug: an EXPLICIT true. A runtime that exposes the
-  // parameter lets the orchestrator choose, orchestrator.md tells it to choose false, and
-  // choosing true for a pipeline child is always wrong, so that stays blocked.
+  // What still fires: an EXPLICIT true. A runtime that exposes the parameter lets the
+  // orchestrator choose, orchestrator.md tells it to choose false, and choosing true for a
+  // pipeline child is always wrong, so that stays blocked.
   //
   // What covers the residual risk in the absent case: completion-invariant.mjs, which
   // rejects the orchestrator's stop when APPROVED work is left unmerged and then hands off
@@ -77,24 +75,42 @@ try {
   const rib = input.tool_input?.run_in_background;
   // Shared with block-duplicate-dispatch, which must debounce exactly what proceeds here.
   if (!isExplicitlyBackgrounded(input)) {
-    ctx.accept(
-      rib === false
-        ? `${childRole} foreground (explicit false)`
-        : `${childRole} accepted (runtime exposes no run_in_background)`,
-    );
+    if (rib === false) ctx.accept(`${childRole} foreground (explicit false)`);
+    // The parameter is absent, so this guard cannot fire in this runtime at all. Worth
+    // knowing once; worth nothing repeated per dispatch.
+    if (noteInertnessOnce(ctx))
+      ctx.accept(
+        `${childRole} accepted: this runtime exposes no run_in_background to a nested subagent, ` +
+          `so this guard is inert for the rest of the session. A background dispatch here is ` +
+          `not a dead end: the orchestrator IS re-woken by the child's task-notification.`,
+      );
+    process.exit(0);
   }
 
   ctx.block({
     reason:
-      `Nested orchestrator dispatch of "${childRole}" must not be EXPLICITLY backgrounded. A ` +
-      `nested subagent is never re-invoked when a background child completes, so this ` +
-      `dispatch would orphan the pipeline (review/merge/promotion never run). Re-dispatch with ` +
-      `run_in_background: false - verified to block and return the child's result inline in ` +
-      `this runtime.`,
+      `Nested orchestrator dispatch of "${childRole}" must not be EXPLICITLY backgrounded. The ` +
+      `next step needs this child's contract line, and a foreground call returns it inline. ` +
+      `Re-dispatch with run_in_background: false.`,
     log: `blocked ${childRole} rib=${rib === undefined ? "absent" : String(rib)}`,
   });
 } catch (e) {
   // Never let this gate break a real dispatch.
   ctx.log(`error, allowing: ${String(e).slice(0, 120)}`);
   process.exit(0);
+}
+
+// True the first time it is called in a session, false afterwards. A sentinel file rather
+// than a counter: the point is one line in the log, and the exact number of inert dispatches
+// is not information anyone acts on.
+function noteInertnessOnce(ctx) {
+  const sentinel = join(ctx.sessionDir, "force-foreground-inert");
+  try {
+    if (existsSync(sentinel)) return false;
+    mkdirSync(ctx.sessionDir, { recursive: true });
+    writeFileSync(sentinel, "");
+    return true;
+  } catch {
+    return false; // cannot record it -> stay quiet rather than log on every dispatch
+  }
 }

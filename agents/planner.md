@@ -130,6 +130,18 @@ Normal feature tickets (type / component / config prop) → `parallel_safe: true
 `TICKETS_DIR=<absolute path>` is in your spawn prompt — use the literal value.
 `SETUP_MODE` is `true` only when dispatched after the project-manager interview.
 
+0. **STOP if `${TICKETS_DIR}` already holds `TASK-*.json` and your prompt does not say
+   `REPLAN`.** Check that first, before any other write:
+   ```bash
+   ls "${TICKETS_DIR}"/TASK-*.json 2>/dev/null
+   ```
+   Any output means a plan already exists and the wave may already be running against it.
+   Overwriting those files while a developer holds one is a corruption nobody detects. So
+   write NOTHING, and end your turn saying exactly that: a plan already exists in
+   `TICKETS_DIR`, your prompt carries no `REPLAN`, you wrote nothing, and here are the
+   ticket ids you found. The orchestrator continues into STATE B with the existing plan.
+   Only a prompt that explicitly says `REPLAN` authorises you to replace one.
+
 1. Write each ticket to `${TICKETS_DIR}/TASK-XXX.json`. **Numbering is
    per-session and always restarts at TASK-001**: number the tickets you create
    in this run sequentially from TASK-001 in wave/dependency order (TASK-001,
@@ -139,6 +151,19 @@ Normal feature tickets (type / component / config prop) → `parallel_safe: true
    belong to other sessions. Your worktrees, branches and tickets are isolated
    by `SESSION_SHORT_ID`, so the TASK number only needs to be unique within this
    session, not across the repository.
+
+   **Write them through a staging dir, so no reader ever sees a partial plan.** The
+   orchestrator reads `${TICKETS_DIR}` as soon as it is woken, and a ticket file caught
+   half-written parses as broken JSON. So `Write` every ticket into
+   `${TICKETS_DIR}/.staging/` first, then move the finished set into place with ONE
+   command:
+   ```bash
+   mv "${TICKETS_DIR}"/.staging/TASK-*.json "${TICKETS_DIR}"/ && rmdir "${TICKETS_DIR}"/.staging
+   ```
+   A rename inside one directory is atomic, so each ticket appears complete or not at all.
+   Nothing reads the staging dir as a plan: the harness matches tickets as
+   `TASK-<digits>.json` at the top level of `${TICKETS_DIR}` only. This `mv` is the one
+   Bash file operation you make; every ticket's CONTENT goes through `Write`.
 2. **`SETUP_MODE=true` only** — update `$CLAUDE_PROJECT_DIR/docs/project-context.json`
    with the full ticket list and commit on the base branch:
    ```json
