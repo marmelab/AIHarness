@@ -29,7 +29,7 @@
 // Never throws. No file logging: this hook's log file lives inside the base dir
 // it deletes, so writing after removal would recreate the dir we tear down.
 
-import { readFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
@@ -56,6 +56,11 @@ const ctx = createHookContext(raw, "cleanup-session");
 try {
   const { inflight, phase } = detectInflight(ctx);
   if (inflight !== false) {
+    // The session dir is kept, so sweep what a resumed session must NOT inherit: the
+    // per-subagent Bash counters. Those agents are gone, and their files would otherwise
+    // accumulate one per agent for as long as the session is resumed. Everything else
+    // under breaker/ is deliberate state a recovery run still reads.
+    sweepBashCounters(ctx);
     ctx.error(
       `preserved for resume (phase=${phase ?? "undetermined"}); state kept for STATE RECOVERY`,
     );
@@ -91,3 +96,17 @@ try {
 }
 
 process.exit(0);
+
+// Per-subagent Bash-call counters (circuit-breaker.mjs). Only these: the other markers
+// under breaker/ (planner dispatch, dirty-work budgets, validation give-up) are what a
+// recovery run reads to know what already happened.
+function sweepBashCounters(ctx) {
+  const dir = join(ctx.sessionDir, "breaker");
+  try {
+    for (const f of readdirSync(dir)) {
+      if (f.startsWith("bash-count-")) rmSync(join(dir, f), { force: true });
+    }
+  } catch {
+    // absent or unreadable: nothing to sweep
+  }
+}

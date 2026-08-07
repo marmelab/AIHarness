@@ -6,6 +6,7 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  readdirSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -145,5 +146,43 @@ describe("cleanup-session", () => {
     expect(r.status).toBe(0);
     expect(existsSync(base)).toBe(true);
     expect(existsSync(promoteLock)).toBe(true);
+  });
+});
+
+// A session preserved for resume keeps its whole dir, so anything a recovery run must NOT
+// inherit has to be swept explicitly. The per-subagent Bash counters are that: those
+// agents are gone, and their files would accumulate one per agent across every resume.
+describe("cleanup-session: a preserved session sweeps the Bash counters", () => {
+  const seedBreaker = (base) => {
+    const dir = join(base, "breaker");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "bash-count-aaaa1111bbbb2222"), `${Date.now()}\n`);
+    writeFileSync(join(dir, "bash-count-cccc3333dddd4444"), `${Date.now()}\n`);
+    // Deliberate state a recovery run still reads: it must survive.
+    writeFileSync(join(dir, "planner-eeee5555"), "orch\n");
+    writeFileSync(join(dir, "completion-invariant-rejects"), "1");
+    return dir;
+  };
+
+  test("counters go, the other markers stay", () => {
+    const { base, run } = setup();
+    const dir = seedBreaker(base);
+    // An unmerged task branch is in-flight state, so the session is preserved.
+    mkdirSync(join(base, "tickets"), { recursive: true });
+    writeFileSync(
+      join(base, "tickets", "TASK-001.json"),
+      JSON.stringify({ ticket_id: "TASK-001", status: "pending" }),
+    );
+
+    const r = run();
+    // The session must actually have been PRESERVED, or this proves nothing: the
+    // non-preserved path removes the whole dir and the sweep never runs.
+    expect(r.stderr).toContain("preserved for resume");
+    expect(existsSync(dir)).toBe(true);
+
+    const left = readdirSync(dir);
+    expect(left.filter((f) => f.startsWith("bash-count-"))).toEqual([]);
+    expect(left).toContain("planner-eeee5555");
+    expect(left).toContain("completion-invariant-rejects");
   });
 });
