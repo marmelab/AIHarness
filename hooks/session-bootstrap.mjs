@@ -13,8 +13,10 @@
 // Pure env-inspection + additionalContext: no MCP calls (MCP may be disabled in
 // hosted/headless runs), no git mutation, never throws.
 
-import { readFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
+import { harnessFile, REPO } from "./lib/paths.mjs";
 import { detectInflight } from "./lib/session-state.mjs";
 
 // A managed launcher owns the session context — stay out of its way.
@@ -40,6 +42,33 @@ try {
   mkdirSync(sessionDir, { recursive: true });
 } catch {
   // best-effort: the orchestrator/agents recreate it as needed
+}
+
+// The harness's own scripts and the repo root, resolved HERE and written to a file the
+// agents can source. A hook always has the env to resolve both; a subagent's shell does
+// not. `$CLAUDE_PROJECT_DIR` was observed EMPTY in one, so a prompt that spelled a path as
+// `$CLAUDE_PROJECT_DIR/.claude/scripts/x.mjs` resolved to `/.claude/scripts/x.mjs` and
+// died with module-not-found. That literal is wrong twice over: under plugin distribution
+// the scripts live in the plugin, not in the project's `.claude/`.
+//
+// harnessFile() already knows both layouts (CLAUDE_PLUGIN_ROOT, else <repo>/.claude), so
+// one sourced line replaces every hand-spelled path in agents/*.md.
+try {
+  writeFileSync(
+    join(sessionDir, "harness-env.sh"),
+    [
+      "# Written by session-bootstrap. Source it before invoking a harness script:",
+      '#   source "<TICKETS_DIR>/harness-env.sh"',
+      "# HARNESS_SCRIPTS is the harness's own scripts dir in whichever layout is installed;",
+      "# HARNESS_REPO is the project root. Neither depends on env a subagent shell may lack.",
+      `export HARNESS_SCRIPTS=${JSON.stringify(dirname(harnessFile("scripts", "e2e-smoke.sh")))}`,
+      `export HARNESS_REPO=${JSON.stringify(REPO)}`,
+      `export HARNESS_SESSION_DIR=${JSON.stringify(sessionDir)}`,
+      "",
+    ].join("\n"),
+  );
+} catch {
+  // best-effort: an agent that cannot source it falls back to its own resolution
 }
 
 ctx.log(`SESSION-BOOTSTRAP session_dir=${sessionDir}`);

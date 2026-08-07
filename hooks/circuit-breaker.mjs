@@ -1,81 +1,29 @@
 #!/usr/bin/env node
-// PreToolUse(Bash) - per-subagent circuit breaker. Counts Bash calls per subagent
-// (keyed on agent_id, present only for subagents) and blocks once a subagent
-// exceeds the loop limit, so a stuck agent can't spin forever. The main session
-// (no agent_id) is never throttled - interactive sessions legitimately make many
-// Bash calls.
+// PreToolUse(Bash) - per-subagent circuit breaker. It exists to stop a subagent that is
+// spinning, and nothing else. The main session (no agent_id) is never throttled.
+//
+// The budget is a SLIDING WINDOW, not a lifetime total: at most WINDOW_LIMIT counted work
+// calls in any WINDOW_MS. A lifetime counter cannot tell "stuck" from "long-lived", so it
+// blocked an orchestrator making one Bash call every two minutes over an hour and three
+// quarters, during the last mandated step of its run, which therefore never happened. A
+// loop hits 30 calls in ten minutes trivially; healthy work paced across an hour never
+// does. Ageing timestamps out is also what makes the counter self-healing, so there is no
+// staleness rule to get wrong (the old one keyed on file mtime, which every write
+// refreshed, so a long-lived agent never reset).
+//
+// What counts is decided by lib/bash-classify.mjs: read-only exploration, git
+// plumbing/commit and progress-log appends are free.
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { createHookContext } from "./lib/context.mjs";
 import { TMP_ROOT } from "./lib/paths.mjs";
+import { isFreeCommand } from "./lib/bash-classify.mjs";
 
-// Per-subagent budget of WORK calls. Read-only exploration and git plumbing/commit
-// are free (see isFreeCommand), so this counts only "real work" (builds, scripts,
-// migrations, rebases). 45 work calls is comfortable and catches infinite loops
-// (which hit 100+ fast). Before this exclusion, devs burned the whole budget on
-// grep-based symbol search (0 LSP / 209 grep in one session) and had none left to
-// commit.
-const ITERATION_LIMIT = 45;
-
-// A Bash call is "free" (never counted) when its primary command is read-only
-// exploration or git plumbing/commit. Strips a leading `cd <path> &&` (the worktree
-// convention) and inspects the first token of the first pipeline stage.
-function isFreeCommand(raw) {
-  let c = String(raw || "").trim();
-  c = c.replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "").trim();
-  const first = c.split(/[|&;]/)[0].trim().split(/\s+/)[0] || "";
-  const READONLY = new Set([
-    "grep",
-    "rg",
-    "egrep",
-    "fgrep",
-    "find",
-    "ls",
-    "cat",
-    "wc",
-    "head",
-    "tail",
-    "pwd",
-    "tree",
-    "stat",
-    "file",
-    "which",
-    "echo",
-    "dirname",
-    "basename",
-    "realpath",
-  ]);
-  if (READONLY.has(first)) return true;
-  const gm = c.match(/^git\s+(\S+)/);
-  if (gm) {
-    const GIT_FREE = new Set([
-      "add",
-      "commit",
-      "status",
-      "diff",
-      "log",
-      "show",
-      "branch",
-      "rev-parse",
-      "rev-list",
-      "stash",
-      "worktree",
-      "ls-files",
-      "merge-base",
-    ]);
-    if (GIT_FREE.has(gm[1])) return true;
-  }
-  return false;
-}
+// Overridable so a test can exercise the window without waiting minutes.
+const WINDOW_MS = Number(process.env.BREAKER_WINDOW_MS) || 10 * 60 * 1000;
+const WINDOW_LIMIT = Number(process.env.BREAKER_WINDOW_LIMIT) || 30;
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "circuit-breaker");
@@ -83,13 +31,10 @@ const ctx = createHookContext(input, "circuit-breaker");
 // Per-subagent breaker only. The main session (no agent_id) is never throttled.
 if (!ctx.agentId) process.exit(0);
 
-// Read-only exploration (grep/find/ls/cat/...) and git plumbing (add/commit/status)
-// do NOT count against the budget. The breaker exists to catch stuck WORK loops, not
-// to ration symbol search or starve the final commit.
-if (isFreeCommand(input.tool_input?.command)) {
-  ctx.log(`free: ${String(input.tool_input?.command ?? "").slice(0, 80)}`);
-  process.exit(0);
-}
+// Free calls exit before any bookkeeping. They used to log a line each, which produced
+// hundreds of `free:` lines per session and buried everything else; the counted calls
+// below are the ones worth a record.
+if (isFreeCommand(input.tool_input?.command)) process.exit(0);
 
 const key = `sub-${ctx.agentId}`;
 const keyHash = createHash("sha1").update(key).digest("hex").slice(0, 16);
@@ -102,37 +47,47 @@ try {
 }
 const counterFile = join(counterDir, `bash-count-${keyHash}`);
 
-// Auto-reset if the counter file is older than 1 hour (stale subagent).
-if (existsSync(counterFile)) {
+const now = Date.now();
+
+// One epoch-ms timestamp per line. Anything unparseable is dropped, which also migrates
+// the old format (a single lifetime integer) harmlessly: it is not a plausible timestamp.
+const readWindow = () => {
+  if (!existsSync(counterFile)) return [];
   try {
-    const ageMs = Date.now() - statSync(counterFile).mtimeMs;
-    if (ageMs > 60 * 60 * 1000) unlinkSync(counterFile);
+    return readFileSync(counterFile, "utf8")
+      .split("\n")
+      .map((l) => parseInt(l.trim(), 10))
+      .filter((t) => Number.isFinite(t) && t > 1_600_000_000_000 && t <= now)
+      .filter((t) => now - t < WINDOW_MS);
   } catch {
-    // ignore
+    return [];
   }
-}
+};
 
-let count = 0;
+const recent = readWindow();
+recent.push(now);
+
 try {
-  count = parseInt(readFileSync(counterFile, "utf8"), 10) || 0;
+  // Bounded write: only the window is kept, so the file cannot grow without limit.
+  writeFileSync(counterFile, recent.join("\n") + "\n");
 } catch {
-  count = 0;
-}
-count += 1;
-try {
-  writeFileSync(counterFile, String(count));
-} catch {
-  // ignore
+  // ignore: a breaker that cannot persist must not block real work
 }
 
-// Observability: record the keyed count so per-agent budgets can be audited.
-ctx.log(`key=${key} hash=${keyHash} count=${count}`);
-
-if (count > ITERATION_LIMIT) {
+if (recent.length > WINDOW_LIMIT) {
+  const spanS = Math.round((now - recent[0]) / 1000);
   ctx.block({
-    reason: `Circuit breaker: this subagent has made ${count} Bash calls - likely stuck in a loop. Stop, and report where you are blocked so the orchestrator can re-dispatch with a fresh context.`,
-    log: `BLOCK count=${count}`,
+    reason:
+      `Circuit breaker: ${recent.length} work-level Bash calls in the last ${spanS}s, which is a loop rather than progress. ` +
+      `Read-only exploration, git plumbing and progress-log appends are NOT counted, so this is ${recent.length} calls that each did something. ` +
+      `Stop and report where you are blocked so the orchestrator can re-dispatch with a fresh context. ` +
+      `The budget is a rolling window: it frees itself as the oldest calls age past ${Math.round(WINDOW_MS / 60000)} minutes.`,
+    log: `count=${recent.length}/${WINDOW_LIMIT} span=${spanS}s key=${key}`,
   });
 }
+
+// One line per COUNTED call, so `grep '\[circuit-breaker\]' hooks.log` shows the work
+// pace and nothing else.
+ctx.log(`count=${recent.length}/${WINDOW_LIMIT} key=${key} hash=${keyHash}`);
 
 process.exit(0);

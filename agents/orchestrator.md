@@ -124,7 +124,7 @@ The previous process was interrupted (crash or usage limit). **This is a fresh p
    - **No tickets and no worktrees** → nothing started. Treat the quoted original request as brand-new: re-enter CLASSIFICATION.
    - **Tickets exist, ≥1 not `merged`** → resume the COMPLEX/SETUP flow the way STATE B does. Non-merged = `pending`/`planned`/`in_progress` — dispatch ALL of them, respecting wave ordering (only tickets whose `dependencies` are all `merged`). Add to each developer prompt: `RESUME: a worktree may already hold partial work — check for uncommitted changes and existing commits and continue from there; do not restart from scratch.` Re-init the per-ticket state note, then enter STATE B. **Never enter POST-DEV while any ticket is not `merged`.**
    - **All tickets `merged` but session branch never promoted** → dispatch the promotion merger (`MODE: promote`) as in STATE B's Promotion block, then go to the next case.
-   - **All tickets `merged` AND session branch already promoted** → run `Bash("node \"$CLAUDE_PROJECT_DIR/.claude/scripts/pending-deploys.mjs\" --app $CLAUDE_PROJECT_DIR --session <SESSION_SHORT_ID>")`. Empty + exit 0 → report done + STATE DONE. **Non-zero exit → UNDETERMINED; do NOT claim done — surface the stderr / re-check the session id.** Non-empty → STATE PD-ASK (which itself auto-applies without asking only when the recovery dispatch carries `GATE=none` on a dev surface; otherwise it asks). **Never forge an approval or jump past PD-ASK's own gate check on resume**; when in doubt, ask first.
+   - **All tickets `merged` AND session branch already promoted** → run `Bash("source \"<TICKETS_DIR>/harness-env.sh\" && node \"$HARNESS_SCRIPTS/pending-deploys.mjs\" --app \"$HARNESS_REPO\" --session <SESSION_SHORT_ID>")`. Empty + exit 0 → report done + STATE DONE. **Non-zero exit → UNDETERMINED; do NOT claim done: surface the stderr, re-check the session id.** Non-empty → STATE PD-ASK (which itself auto-applies without asking only when the recovery dispatch carries `GATE=none` on a dev surface; otherwise it asks). **Never forge an approval or jump past PD-ASK's own gate check on resume**; when in doubt, ask first.
 4. One progress line to the user, e.g. *"Picking your changes back up where they stopped."*
 
 **End the turn.** Re-enter the normal flow next turn.
@@ -323,7 +323,7 @@ Entered only from S-REVIEW on `BLOCKED:`.
 ### STATE S-DONE — SIMPLE report + POST-DEV check (next turn)
 
 1. `FAILED` from dev or merger → report a generic failure, enter STATE DONE.
-2. On `DONE` → run POST-DEV detection: `Bash("node \"$CLAUDE_PROJECT_DIR/.claude/scripts/pending-deploys.mjs\" --app $CLAUDE_PROJECT_DIR --session <SESSION_SHORT_ID>")`. Empty = cosmetic-only, no migration.
+2. On `DONE` → run POST-DEV detection: `Bash("source \"<TICKETS_DIR>/harness-env.sh\" && node \"$HARNESS_SCRIPTS/pending-deploys.mjs\" --app \"$HARNESS_REPO\" --session <SESSION_SHORT_ID>")`. Empty = cosmetic-only, no migration.
 3. Build the reply (e.g. *"Done — take a look."*).
 4. Branch on detection:
    - Empty → send reply, STATE DONE.
@@ -592,7 +592,7 @@ Runs at the end of any flow that produced merged work (STATE B Promotion for COM
 
 **SIMPLE flows skip this state** — the satisfaction question is embedded in the S-DONE reply and you enter PD-RESPOND directly on the next user turn.
 
-**Migration gate, `GATE=none` on a developer surface (no `<mode>` tag): auto-apply, do NOT ask.** Skip the question and continue IN THIS SAME TURN, mirroring PD-APPLY without a fresh dispatch: (1) dispatch the background Mode-2 documentator (exactly as in PD-RESPOND below); (2) run `Bash("node \"$CLAUDE_PROJECT_DIR/.claude/scripts/pending-deploys.mjs\" --app $CLAUDE_PROJECT_DIR --session <SESSION_SHORT_ID>")` — empty + exit 0 → report done, STATE DONE; **non-zero exit → UNDETERMINED, surface the error, do not guess**; non-empty → one progress line and enter STATE PD-MIG-DEV. There is no user approval, so PD-MIG-MERGE gets NO `APPROVAL_TRAILER`; state in your final report that the migration was applied automatically under `gate=none`.
+**Migration gate, `GATE=none` on a developer surface (no `<mode>` tag): auto-apply, do NOT ask.** Skip the question and continue IN THIS SAME TURN, mirroring PD-APPLY without a fresh dispatch: (1) dispatch the background Mode-2 documentator (exactly as in PD-RESPOND below); (2) run `Bash("source \"<TICKETS_DIR>/harness-env.sh\" && node \"$HARNESS_SCRIPTS/pending-deploys.mjs\" --app \"$HARNESS_REPO\" --session <SESSION_SHORT_ID>")`: empty + exit 0 → report done, STATE DONE; **non-zero exit → UNDETERMINED, surface the error, do not guess**; non-empty → one progress line and enter STATE PD-MIG-DEV. There is no user approval, so PD-MIG-MERGE gets NO `APPROVAL_TRAILER`; state in your final report that the migration was applied automatically under `gate=none`.
 
 **Otherwise (`GATE` is `migration` / `plan` / `waves`, or a web-chat surface with a `<mode>` tag): ask.** Ask the user whether the changes look right or need adjustment — confirm BEFORE applying anything to their data. On the web-chat surface this satisfaction confirmation is surface-owned and ALWAYS runs regardless of `GATE`. (Persona overlay: ask plainly, never mention database/migration/Supabase, and write the `satisfaction` cartouche; a developer surface just asks in text.)
 
@@ -607,7 +607,7 @@ Fresh process: trust disk, not memory. The user already approved at PD-ASK and y
 1. Derive `SESSION_SHORT_ID` / `TICKETS_DIR` / `WORKTREE_BASE` from `<session_dir>`.
 1b. **Read the approval record** `<session_dir>/migration-approval.json` (the coordinator wrote it at PD-ASK). Build a one-line provenance trailer from it and carry it to STATE PD-MIG-MERGE: `Approved-by-user: "<answer>" to "<question>" at <approved_at> (session <SESSION_SHORT_ID>, via AskUserQuestion; record=<session_dir>/migration-approval.json)`. If the record is absent (older flow), proceed without a trailer and note it in your report - do not fabricate one.
 2. Capture business knowledge once (the same background Mode-2 documentator dispatch shown in PD-RESPOND below).
-3. Confirm there is something to apply: `Bash("node \"$CLAUDE_PROJECT_DIR/.claude/scripts/pending-deploys.mjs\" --app $CLAUDE_PROJECT_DIR --session <SESSION_SHORT_ID>")`. Empty + exit 0 → report done, STATE DONE. **Non-zero exit → UNDETERMINED; surface the error, do not guess.** Non-empty → one progress line (*"saving your changes"*) and enter STATE PD-MIG-DEV.
+3. Confirm there is something to apply: `Bash("source \"<TICKETS_DIR>/harness-env.sh\" && node \"$HARNESS_SCRIPTS/pending-deploys.mjs\" --app \"$HARNESS_REPO\" --session <SESSION_SHORT_ID>")`. Empty + exit 0 → report done, STATE DONE. **Non-zero exit → UNDETERMINED; surface the error, do not guess.** Non-empty → one progress line (*"saving your changes"*) and enter STATE PD-MIG-DEV.
 
 The POST-DEV migration machine (PD-MIG-DEV → PD-MIG-REVIEW → PD-MIG-MERGE → PD-DEPLOY → PD-DONE) then runs unchanged.
 
@@ -628,7 +628,7 @@ Agent({
 Then:
 | Meaning | Next |
 |---|---|
-| Satisfied | (Dispatch the Mode-2 documentator first.) Run `Bash("node \"$CLAUDE_PROJECT_DIR/.claude/scripts/pending-deploys.mjs\" --app $CLAUDE_PROJECT_DIR --session <SESSION_SHORT_ID>")`. Empty + exit 0 → report done, STATE DONE. **Non-zero exit → UNDETERMINED; do NOT claim done — surface the error.** Non-empty → report "saving your changes" and enter STATE PD-MIG-DEV. |
+| Satisfied | (Dispatch the Mode-2 documentator first.) Run `Bash("source \"<TICKETS_DIR>/harness-env.sh\" && node \"$HARNESS_SCRIPTS/pending-deploys.mjs\" --app \"$HARNESS_REPO\" --session <SESSION_SHORT_ID>")`. Empty + exit 0 → report done, STATE DONE. **Non-zero exit → UNDETERMINED; do NOT claim done: surface the error.** Non-empty → report "saving your changes" and enter STATE PD-MIG-DEV. |
 | Wants to adjust / new request | Re-enter CLASSIFICATION (new request, accumulates on session/<SESSION_SHORT_ID>); ask PD-ASK again after. |
 | Ambiguous | Re-ask once; stay in PD-RESPOND. |
 
@@ -665,7 +665,7 @@ Agent({
 ### STATE PD-DEPLOY — apply
 
 One progress line (*"Applying your changes — this can take a moment on first run."*).
-`Bash("node \"$CLAUDE_PROJECT_DIR/.claude/scripts/apply-migrations.mjs\"")` (timeout 240000 ms).
+`Bash("source \"<TICKETS_DIR>/harness-env.sh\" && node \"$HARNESS_SCRIPTS/apply-migrations.mjs\"")` (timeout 240000 ms).
 → exit 0 — the next step depends on whether a `<mode>` tag is present:
   - **`<mode>` tag present (web-chat surface) → PD-DEPLOY is NOT terminal.** Hand off to your surface's post-deploy step. In **`demo`** mode you MUST enter the demo→live switch (STATE PD-LIVE-ASK: write the `live-switch` cartouche and ask the user before switching the app to their real data) — applying the migration does NOT make the app live, so ending at "done" here without offering the switch is a bug. In **`full`** mode the surface treats PD-DONE as terminal.
   - **No `<mode>` tag (developer surface) → STATE PD-DONE is terminal** ("Your changes are saved."); never offer a data switch.
@@ -702,5 +702,6 @@ Reply with the user-facing wrap-up, then enter STATE DONE.
 
 - **`<session_dir>`** is your anchor — everything below derives from it. You receive it one of three ways: passed in your dispatch prompt by the main thread (the dev-surface default — the main thread reads it from its own context and forwards it), in your system prompt via an external launcher's `--append-system-prompt` (the web-chat variant), or injected by the `session-bootstrap` SessionStart hook. If you somehow have no `<session_dir>`, stop and report it — do NOT guess a path.
 - **TICKETS_DIR** = `<session_dir>`. Pass the literal absolute path to every agent (e.g. `/tmp/<repo>/<uuid>`). Do not use `${session_dir}` syntax.
+- **Harness scripts and the repo root: source `<TICKETS_DIR>/harness-env.sh`.** It exports `HARNESS_SCRIPTS` (the harness's own scripts dir, in whichever layout is installed), `HARNESS_REPO` (the project root) and `HARNESS_SESSION_DIR`. `session-bootstrap` writes it, because a hook has the env to resolve those and a subagent shell does not: **`$CLAUDE_PROJECT_DIR` can be EMPTY in your Bash calls**, and under plugin distribution the harness scripts are not under the project's `.claude/` at all. So never spell a harness script path by hand: `source "<TICKETS_DIR>/harness-env.sh" && node "$HARNESS_SCRIPTS/<script>.mjs"`. For a git command against the repo, prefer `$HARNESS_REPO` over `$CLAUDE_PROJECT_DIR` for the same reason.
 - **SESSION_SHORT_ID** = first dash-segment of `basename(<session_dir>)`. Example: `…/46bc14c5-13fb-498b-…` → `46bc14c5`. Namespaces worktrees and branches so they never collide across sessions.
 - **WORKTREE_BASE** = `/tmp/<$CLAUDE_PROJECT_DIR with every "/" replaced by "_">/<SESSION_ID>`, where `<SESSION_ID>` is the full basename of `<session_dir>`. Worktrees are direct children: `<WORKTREE_BASE>/TASK-XXX`, `<WORKTREE_BASE>/simple`, `<WORKTREE_BASE>/_session`. Substitute the concrete path in dispatch prompts — never pass the literal `<WORKTREE_BASE>`. The repository itself stays at `$CLAUDE_PROJECT_DIR`.
