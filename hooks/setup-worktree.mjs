@@ -99,6 +99,9 @@ export function check(input, ctx) {
   );
   process.on("exit", releaseLock);
 
+  // No ctx ON PURPOSE: this is the call that CREATES the anchor, and what it needs is
+  // the base branch NAME, recorded below as sessionbase.<short>.branch and merged back
+  // into at promotion. See getBaseBranch on the exposure window this opens.
   const base = getBaseBranch();
   const integrationBranch = sessionBranch(ctx);
   const sessionWt = sessionWorktreePath(ctx);

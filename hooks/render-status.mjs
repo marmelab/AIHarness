@@ -29,7 +29,7 @@ import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
 import { reviewsDir } from "./lib/reviews.mjs";
 import { getBaseBranch, git } from "./lib/git.mjs";
-import { sessionBaseBranch, sessionBranch } from "./lib/topology.mjs";
+import { sessionBranch } from "./lib/topology.mjs";
 
 if (sessionDirFromEnv()) process.exit(0);
 
@@ -165,8 +165,9 @@ function diffSection(label, range) {
 }
 
 function sessionDiff() {
-  const anchor = sessionBaseBranch(ctx);
-  const baseRef = verifyRef(anchor) ? anchor : getBaseBranch();
+  // The session's fork anchor when it exists, the repo HEAD otherwise (see
+  // getBaseBranch on the window where that is all there is).
+  const baseRef = getBaseBranch(ctx);
   const sessRef = sessionBranch(ctx);
   const sections = [];
 

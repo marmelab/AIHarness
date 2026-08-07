@@ -65,7 +65,7 @@ const ctx = createHookContext(raw, "cleanup-worktree");
 // Nothing has been created yet: also not an event.
 if (!existsSync(ctx.worktreeBase)) process.exit(0);
 
-const base = getBaseBranch();
+const base = getBaseBranch(ctx);
 
 const isUnderBase = (p) =>
   p === ctx.worktreeBase || p.startsWith(ctx.worktreeBase + "/");

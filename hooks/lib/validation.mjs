@@ -58,7 +58,7 @@ function getWorktreesToValidate(
   // everything since the repo's checked-out base branch — which would over- or
   // under-report a worktree's delta whenever the base branch has diverged from
   // the session branch. Falls back to the repo base branch when no override.
-  const effectiveBase = base || getBaseBranch();
+  const effectiveBase = base || getBaseBranch(ctx);
   const isAdrOnly = (files) =>
     files.length > 0 && files.every((f) => f.startsWith("adr/"));
   const worktrees = active.filter((wt) => {
@@ -139,10 +139,10 @@ export function scopedLintFiles(changedFiles, cwd, extensions) {
 // lint (ok). `base` empty -> repo base branch, matching getWorktreesToValidate.
 // `command` is the eslint invocation prefix (e.g. `npx eslint`); files are
 // appended here, so the config command must NOT carry its own file glob.
-function runEslintScoped(cwd, base, command, extensions, tail) {
+function runEslintScoped(ctx, cwd, base, command, extensions, tail) {
   const { changedFiles } = getWorktreeChangeSummary(
     cwd,
-    base || getBaseBranch(),
+    base || getBaseBranch(ctx),
   );
   const files = scopedLintFiles(changedFiles, cwd, extensions);
   if (files.length === 0) return { ok: true };
@@ -421,7 +421,7 @@ function runStep(ctx, step, { cwd, base, owner = "" }) {
 
   if (step.kind === "lint" && step.changedScoped) {
     const exts = step.extensions ?? [".ts", ".tsx", ".mjs"];
-    return runEslintScoped(cwd, base, step.command, exts, tail);
+    return runEslintScoped(ctx, cwd, base, step.command, exts, tail);
   }
 
   // A dirty tree BEFORE the formatter runs means the agent stopped without committing. It
