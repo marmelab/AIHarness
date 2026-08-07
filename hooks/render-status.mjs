@@ -42,8 +42,37 @@ try {
 const ctx = createHookContext(input, "render-status");
 
 const progressLog = join(ctx.sessionDir, "harness-progress.log");
-// No technical progress log → not a #technical-harness run → stay inert.
+// No technical progress log -> not a #technical-harness run -> stay inert.
 if (!existsSync(progressLog)) process.exit(0);
+
+// The board is derived from the progress log, so an unchanged log renders the same
+// board. This hook fires on EVERY subagent stop, and the expensive part is sessionDiff:
+// a `git diff` plus a `git diff --stat` per dev branch, on every stop, to re-emit bytes
+// nobody asked for. The last rendered mtime is kept in status.json, next to the output
+// it describes, so the check costs one stat and needs no extra state file.
+const outDir = join(REPO, ".harness", ctx.sessionShort);
+const statusJsonPath = join(outDir, "status.json");
+const progressMtimeMs = (() => {
+  try {
+    return statSync(progressLog).mtimeMs;
+  } catch {
+    return 0;
+  }
+})();
+const lastRenderedMtimeMs = (() => {
+  try {
+    const prev = JSON.parse(readFileSync(statusJsonPath, "utf8"));
+    return prev.progressMtimeMs ?? 0;
+  } catch {
+    return 0; // absent / unreadable / pre-dates this field -> render
+  }
+})();
+if (progressMtimeMs && progressMtimeMs === lastRenderedMtimeMs) {
+  ctx.log(
+    `unchanged since last render (${new Date(progressMtimeMs).toISOString()})`,
+  );
+  process.exit(0);
+}
 
 const WT_RE = /^(TASK-\d+|simple|_session)$/;
 const TICKET_RE = /^TASK-\d+\.json$/;
@@ -241,6 +270,9 @@ function build() {
   const statusJson = {
     short: ctx.sessionShort,
     updated,
+    // What the skip above compares against. Written last, so a render that throws
+    // leaves the previous value and the next stop re-renders.
+    progressMtimeMs,
     tickets: {
       total: tickets.length,
       merged,
@@ -255,14 +287,10 @@ function build() {
 
 try {
   const { statusMd, ticketsMd, statusJson, diffPatch } = build();
-  const outDir = join(REPO, ".harness", ctx.sessionShort);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "STATUS.md"), statusMd);
   writeFileSync(join(outDir, "TICKETS.md"), ticketsMd);
-  writeFileSync(
-    join(outDir, "status.json"),
-    JSON.stringify(statusJson, null, 2),
-  );
+  writeFileSync(statusJsonPath, JSON.stringify(statusJson, null, 2));
   if (diffPatch) writeFileSync(join(outDir, "session.diff"), diffPatch);
   ctx.log(`rendered board -> ${outDir}`);
 } catch (e) {
