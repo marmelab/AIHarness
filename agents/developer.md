@@ -10,6 +10,9 @@ tools:
   - Glob
   - Grep
   - Skill
+  # The Playwright MCP browser tools. The runtime does not always deliver a plugin's
+  # MCP tools to a subagent, so an agent that does not see them in its tool list drives
+  # the browser from Bash instead (see "Running the app for self-verification").
   - mcp__plugin_aiharness_playwright__browser_navigate
   - mcp__plugin_aiharness_playwright__browser_snapshot
   - mcp__plugin_aiharness_playwright__browser_click
@@ -195,6 +198,8 @@ Forbidden: `sed -i`, `awk -i inplace`, `cat > file`, `cat >> file`, `echo > file
 
 Bash writes bypass the harness's edit tracking and reach reviewers unformatted. Violation = rejected at review.
 
+**Capturing a process's output is the same syntax, and it is gated too.** You rarely need it: the Bash tool already returns stdout and stderr to you, and a long-running process started with `run_in_background: true` returns its output the same way. When you genuinely want the output gone, `> /dev/null 2>&1`. Redirecting into the session scratchpad directory is the quality-reviewer's exemption, not yours.
+
 ## Validation commands — DO NOT RUN MANUALLY
 
 See `.claude/rules/validation-commands.md` for the full list and rationale. Short version: typecheck / prettier / unit / e2e / lint / build are blocked by `bash-guard`. After implementation + commit, emit the OUTPUT CONTRACT line and stop — the SubagentStop validation chain (typecheck + prettier + lint + unit) runs automatically before your stop is accepted. If validation fails, fix the issues, commit, and stop again.
@@ -208,6 +213,25 @@ See `.claude/rules/validation-commands.md` for the full list and rationale. Shor
 - Quick fs checks where Glob/Grep don't fit: `ls -la`, `test -f`
 
 Keep Bash usage lean — around 30 calls per ticket is the expected ceiling. Prefer Glob/Grep/Read for exploration.
+
+## Running the app for self-verification
+
+Optional, before commit, when a change is behavior-visible and you want to see it render.
+This is the sanctioned way; other forms are refused by `bash-guard`.
+
+1. **Start it inside YOUR worktree, never `$REPO`** (which serves the wrong branch). The launch command and port base come from `config.app` (`smokeCommand`, `portBase`); pick a port unique to this task, `portBase` + the TASK number:
+
+   ```bash
+   cd <WORKTREE_PATH> && <smokeCommand> -- --port <PORT> --strictPort
+   ```
+
+   Run it with `run_in_background: true`. Do NOT wrap it in `nohup`, a trailing `&`, or a subshell: a backgrounded process holds the pipe open and the call never returns. Demo mode is FakeRest + auto-authenticated (no Supabase, no login); with `config.app.hashRouting` the app uses hash routing, so navigate to `http://localhost:<PORT>/#/<route>`.
+
+2. **Headless only** (this sandbox has no display): Playwright without `--headed` / `--ui` / `--debug`, the dev server without `--open`.
+
+3. **Drive it.** If the `browser_*` Playwright MCP tools are in your tool list, use them, preferring `browser_snapshot` (accessibility tree, token-cheap) over `browser_take_screenshot`. The runtime does not always deliver a plugin's MCP tools to a subagent; when they are absent, do not spend a turn looking for them, drive the browser from Bash with a headless Playwright script that PRINTS what it checked (`console.log`, `ariaSnapshot()`, `page.on('pageerror')`). Printed lines come back as tool output; a screenshot costs a few hundred kilobytes and answers a structural question with an image.
+
+4. **Always tear down**: close the browser and kill the server before you stop, or the SubagentStop validation chain stalls.
 
 ## Tool call efficiency — HARD RULE
 
@@ -290,5 +314,5 @@ Implement the plan. Stick to ticket scope.
 - No features outside ticket scope. An adjacent problem you notice (a nearby bug, a tempting refactor) is REPORTED in your final message, never fixed silently in this diff (`coding-style.md` scope discipline).
 - e2e tests in `e2e/` if ticket touches UI/filters/forms/interactions, unless acceptance criteria say otherwise. Call `Skill({skill: "e2e-conventions"})` and `Skill({skill: "playwright-testing"})` before writing e2e tests. Don't run them — ship the spec, CI executes.
 - Silent mode: Playwright without `--headed` / `--ui` / `--debug` (headless is its default), Vite without `--open`, Vitest without `browser.ui`.
-- **Self-verification in the browser (optional, before commit).** When a change is behavior-visible and you want to confirm it renders before handing off to review, drive it via the Playwright MCP against a demo-mode server you start **inside your own worktree** (never `$REPO`). The launch command and port base come from `config.app` (`smokeCommand` + `portBase`, currently `npm run dev:demo` and `5300`): `cd <WORKTREE_PATH> && npm run dev:demo -- --port <PORT> --strictPort` (run in background; pick a port unique to this task, e.g. `5300` + the TASK number). Demo mode is FakeRest + auto-authenticated (no Supabase, no login); with `config.app.hashRouting` the app uses hash routing, so navigate to `http://localhost:<PORT>/#/<route>`. Prefer `browser_snapshot` (accessibility tree, token-cheap) over `browser_take_screenshot` (reserve pixels for visual/legibility checks). **Always tear down** `browser_close` and kill the server before you stop, or the SubagentStop validation chain stalls. This is for your own confidence; the quality-reviewer re-verifies in its Part C. It does **not** replace the required e2e spec.
+- **Self-verification in the browser (optional, before commit).** See "Running the app for self-verification" below. This is for your own confidence; the quality-reviewer re-verifies in its Part C. It does **not** replace the required e2e spec.
 - Architecture Decision Records: load `Skill({skill: "adr-writing"})` only when the change introduces a structural decision (see WORKFLOW step 3). Skip by default.

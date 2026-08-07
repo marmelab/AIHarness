@@ -8,6 +8,9 @@ tools:
   - Glob
   - Bash
   - Skill
+  # The Playwright MCP browser tools. The runtime does not always deliver a plugin's
+  # MCP tools to a subagent, so an agent that does not see them in its tool list drives
+  # the browser from Bash instead (see "Running the app for runtime verification").
   - mcp__plugin_aiharness_playwright__browser_navigate
   - mcp__plugin_aiharness_playwright__browser_snapshot
   - mcp__plugin_aiharness_playwright__browser_click
@@ -121,19 +124,33 @@ OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
 ## Feature-smoke mode (single-shot, no team)
 
 When your spawn prompt contains `MODE: feature-smoke`, drive the WHOLE integrated feature in
-demo mode to confirm it actually RUNS before handoff. This is Part C.3 (below) promoted from a
-single ticket's criteria to the feature's 2-3 key user flows. Start a `dev:demo` server (FakeRest,
-no Supabase, auto-authenticated) inside your worktree on a port unique to this session, walk the
-key flows via the Playwright MCP (`browser_navigate` -> `browser_snapshot`; `browser_take_screenshot`
-only for visual criteria; `browser_console_messages` for runtime errors), then ALWAYS tear down
-(`browser_close` + kill the server).
+demo mode to confirm it actually RUNS before handoff. Start the app as described in "Running
+the app for runtime verification" below, on `config.app.portBase` + 99, and walk the feature's
+key user flows. Budget: about 5 minutes.
 
 Scope (state it in the report): demo mode covers rendering, routing, forms, filters and visual
 correctness; it does NOT cover auth, RLS, triggers, views, edge functions or real backend behavior
 (those are the Supabase e2e suite's job, run separately by `e2e-smoke.sh`).
 
-OUTPUT CONTRACT (text, last line): `APPROVED` (all key flows run) or `BLOCKED:` + the broken flows
-(one per line: flow, what failed).
+Rules that make the verdict mean something:
+
+- **Skip what is already verified.** A flow a per-ticket review already exercised at runtime is
+  not re-run here. Smoke the CROSS-ticket path instead: the flows no single ticket owned.
+- **Assert through stdout, not through pixels.** Every check prints its own result from the
+  driving script (`console.log('importance icons:', n)`, an `ariaSnapshot()` of the region under
+  test), and the printed value is what you judge. Reading a PNG back to decide whether a list
+  rendered costs 200-450 KB per shot and answers a structural question with an image.
+- **Screenshot budget: 1 to 2 for the whole smoke.** One to evidence a failure, or one final
+  proof shot. Never one per flow.
+- **A check you could not execute is reported `NOT EXECUTED`, with the reason.** It is NEVER
+  folded into a PASS. `PASS` means the flow ran and its assertion printed the expected value; a
+  flow you skipped, could not reach, or inferred from the source is not a PASS.
+
+Before the contract line, list every key flow on its own line as
+`<flow> - PASS|FAIL|NOT EXECUTED - <the stdout line that proves it, or the reason>`.
+
+OUTPUT CONTRACT (text, last line): `APPROVED` (every key flow either PASSed or is reported NOT
+EXECUTED with its reason) or `BLOCKED:` + the broken flows (one per line: flow, what failed).
 
 ## Migration mode (single-shot, no team)
 
@@ -409,6 +426,59 @@ category-level checks a generic pass adds. Same bar as B (realistic attack vecto
 
 ---
 
+## Running the app for runtime verification
+
+Part C.3 and feature-smoke both need the app running. This is the sanctioned way; other
+forms are refused by `bash-guard`, and probing for one costs a turn per attempt.
+
+1. **Start it inside YOUR worktree, never `$REPO`** (which serves the wrong branch). The
+   launch command and port base come from `config.app` (`smokeCommand`, `portBase`). Pick a
+   port unique to this dispatch so parallel reviewers never collide: `portBase` + the TASK
+   number for a ticket review, `portBase` + 99 for a feature-smoke.
+
+   ```bash
+   cd <WORKTREE_PATH> && <smokeCommand> -- --port <PORT> --strictPort
+   ```
+
+   Run it with `run_in_background: true`. Do NOT wrap it in `nohup`, a trailing `&`, or a
+   subshell: a backgrounded process holds the pipe open and the call never returns.
+
+2. **Where its output may go.** The Bash tool already hands you stdout and stderr, so a
+   redirect is usually unnecessary. When you do want a file, two sinks are allowed:
+   `> /dev/null 2>&1` to discard it, or a path inside your session scratchpad directory.
+   A redirect anywhere else is refused as a file write; files belong to Write/Edit.
+
+3. **Headless only.** This sandbox has no display. Playwright without `--headed` / `--ui` /
+   `--debug` (headless is the default), the dev server without `--open`.
+
+4. **Drive it.** Plugin MCP tools do not always reach a subagent. Check your own tool list
+   once: if the `browser_*` tools are there, prefer them (`browser_navigate` ->
+   `browser_snapshot`; the accessibility tree is text and costs a fraction of a screenshot).
+   If they are not there, do not spend a turn looking for them: drive the browser from Bash
+   with a headless Playwright script that PRINTS its assertions, e.g.
+
+   ```bash
+   cd <WORKTREE_PATH> && timeout 120 node -e "
+   const { chromium } = require('playwright');
+   (async () => {
+     const b = await chromium.launch();           // headless is the default
+     const p = await b.newPage();
+     p.on('pageerror', (e) => console.log('PAGEERROR', e.message));
+     await p.goto('http://localhost:<PORT>/#/<route>');
+     console.log('rows:', await p.getByRole('link').count());
+     console.log(await p.locator('main').ariaSnapshot());
+     await b.close();
+   })();
+   "
+   ```
+
+   The printed lines come back to you as tool output: they are the evidence, and they cost a
+   few hundred bytes where a screenshot costs a few hundred kilobytes. Take a screenshot only
+   for a genuinely visual criterion (legibility, layout, theme), then `Read` the PNG.
+
+5. **Always tear down**, on every path: close the browser, then kill the server you started.
+   Leaving it running stalls the SubagentStop validation chain.
+
 ## Part C — QA / runtime validation
 
 Verify the implementation works to the extent the local environment allows.
@@ -422,12 +492,12 @@ Typically unavailable in the dev sandbox: a running Supabase stack on 54341; a
 display for headed browsers; auth against a real backend (sign-in/sign-up taps
 the Supabase Auth API). For runtime checks, prefer **demo mode** (C.3) — it runs
 on FakeRest entirely in the browser, needs no Supabase and no auth, so most
-behavior-verifiable criteria become reachable. The Playwright MCP runs headless
-(configured in `.mcp.json`), so no display is needed. If you still hit a hard
-limitation (a flow that genuinely requires the real Auth API, or the browser
-binary is missing — do NOT run `npx playwright install`), **don't retry** —
-note the limitation and let CI cover it. A sandbox limitation alone is never a
-REJECTED.
+behavior-verifiable criteria become reachable. Every browser you drive runs
+headless, so no display is needed. If you still hit a hard limitation (a flow that
+genuinely requires the real Auth API, or the browser binary is missing, do NOT run
+`npx playwright install`), **don't retry**: note the limitation and let CI cover
+it. A sandbox limitation alone is never a REJECTED, but it is also never a silent
+PASS: name the criterion you could not verify.
 
 ### C.1 Acceptance criteria — behavior-verifiable (BLOCKING)
 
@@ -456,44 +526,34 @@ Renaming sanity:
 Any failure → REJECTED. (Migrations are NOT checked here — SQL is generated at
 deploy time from the session-branch diff, not in a feature TASK.)
 
-### C.3 Runtime verification — demo mode + Playwright MCP
+### C.3 Runtime verification (demo mode)
 
 **Skip entirely** if no acceptance criterion is behavior-verifiable, or the flow
 genuinely requires the real Supabase Auth API (demo mode can't reach it) — note
 that CI will cover it. Do NOT run `npx playwright install`.
 
-**Run when** at least one behavior-verifiable criterion exists. Drive the app
-interactively via the Playwright MCP against a demo-mode server you start inside
-**your own worktree** (never `$REPO` — that serves the wrong branch):
+**Run when** at least one behavior-verifiable criterion exists. Start the app and
+drive it as described in "Running the app for runtime verification" above, on
+`config.app.portBase` + the TASK number. Demo mode uses FakeRest and is
+auto-authenticated (no Supabase, no login); with `config.app.hashRouting` the app
+uses hash routing, so navigate to `http://localhost:<PORT>/#/<route>`.
 
-1. **Start the server (background, from the worktree).** The launch command and
-   port base come from `config.app` (`smokeCommand` + `portBase`, currently
-   `npm run dev:demo` and `5300`). Pick a port unique to this task to avoid
-   collisions with parallel reviewers: `config.app.portBase` + the TASK number
-   (e.g. TASK-006 → `5306`):
-   ```bash
-   cd <WORKTREE_PATH> && npm run dev:demo -- --port <PORT> --strictPort
-   ```
-   Run it with `run_in_background: true`. Demo mode uses FakeRest and is
-   auto-authenticated — no Supabase, no login.
-2. **Wait until ready**, then drive it. The app uses hash routing, so navigate to
-   `http://localhost:<PORT>/#/<route>`:
-   - `browser_navigate` → `browser_snapshot` (accessibility tree — token-cheap,
-     use this to assert structure, reachability, and state transitions).
-   - `browser_click` / `browser_fill_form` / `browser_select_option` to walk a
-     multi-step flow when the criterion requires it.
-   - `browser_take_screenshot` only when a criterion is **visual** (legibility,
-     layout, theme/dark-mode) — then `Read` the PNG. Text invisible on its
-     background in any theme or interaction state → REJECTED.
-   - `browser_console_messages` to catch runtime errors the snapshot hides.
-3. **Tear down (always):** `browser_close`, then kill the background server
-   (`kill <pid>` of the `dev:demo` process you started). Leaving it running
-   stalls the SubagentStop validation chain.
+What to assert, in order of preference:
 
-A red criterion verified here is a `[FAIL]` → REJECTED. For a single static shot
-with no interaction, use `browser_navigate` + `browser_take_screenshot` as above:
-there is no `npx playwright screenshot` CLI in the pinned Playwright (1.60 exposes
-only `playwright trace screenshot`).
+- Structure, reachability and state transitions from the accessibility tree
+  (`browser_snapshot`, or `ariaSnapshot()` / a `getByRole` count printed by the
+  driving script). This answers most behavior-verifiable criteria.
+- Runtime errors from the console (`browser_console_messages`, or `page.on('pageerror')`
+  and `page.on('console')` printed by the script). A snapshot hides these.
+- Pixels ONLY for a genuinely visual criterion (legibility, layout, theme/dark-mode):
+  take one screenshot and `Read` the PNG. Text invisible on its background in any theme
+  or interaction state → REJECTED.
+
+A red criterion verified here is a `[FAIL]` → REJECTED. A criterion you could NOT
+verify is reported as not verified, with the reason; it is never silently counted
+as a `[PASS]`. Note that there is no `npx playwright screenshot` CLI in the pinned
+Playwright (1.60 exposes only `playwright trace screenshot`), so a static shot also
+goes through the browser you drive.
 
 ### C.4 e2e spec sanity (read-only)
 
