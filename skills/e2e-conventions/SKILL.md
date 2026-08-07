@@ -33,9 +33,29 @@ If the work is tracked under a ticket id, you may prefix the file with it (e.g. 
 
 Write the spec alongside the implementation. The reviewer checks that the spec exists and asserts the right thing. CI runs it — don't run it locally yourself.
 
+## Importing CJS packages in specs
+
+Specs run under the test runner's Node ESM loader, not the app bundler. A CJS
+package arrives wrapped there, so the namespace form yields a module object whose
+members are undefined at call time:
+
+```ts
+import * as Papa from "papaparse"; // WRONG in e2e/: Papa.parse is undefined
+import Papa from "papaparse"; // correct
+```
+
+`papaparse` is the known case: use the **default import** in `e2e/`. The same
+package may legitimately keep the namespace form under `src/`, where the bundler
+applies interop, so do not "fix" `src/` to match.
+
+The compiler will not catch this when the package ships ESM-shaped types (both
+forms typecheck), so enforce it with an ESLint `no-restricted-imports` entry
+scoped to `e2e/`, using `importNames: ["*"]` to ban only the namespace form.
+
 ## Red Flags
 
 - A UI/filter/form/interaction change with no `e2e/*.spec.ts` added.
+- A namespace import of a CJS package (`import * as X`) inside `e2e/`.
 - Claiming the CSS/migration-only exception without saying so in the task notes.
 - A spec placed outside `e2e/`, or that asserts nothing user-visible.
 - Running the e2e suite locally instead of letting CI do it.
@@ -46,3 +66,4 @@ Write the spec alongside the implementation. The reviewer checks that the spec e
 - [ ] The spec is named after the feature (ticket-id prefix optional).
 - [ ] The spec asserts the right user-visible behavior, using `playwright-testing` patterns.
 - [ ] Any CSS/migration-only exemption is stated explicitly in the task notes.
+- [ ] CJS packages are default-imported in the spec, not namespace-imported.
