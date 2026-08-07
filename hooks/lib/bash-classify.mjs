@@ -92,9 +92,62 @@ export function stripPrefixes(command) {
   return c;
 }
 
+// Redirects that say nothing about whether the call did work, stripped before the write
+// test reads what is left. `2>/dev/null` is the commonest exploration idiom there is, and
+// counting its `>` as a file write charged the budget for `grep ... 2>/dev/null`, which is
+// the exact false positive the sliding window exists to avoid. A capture of stderr alone
+// does not make a reader a writer either: a stage that really works is still caught by its
+// verb, since `node`, `npm` and friends are not in READONLY.
+const DISCARDED_OUTPUT = /(?:\d*|&)>>?\s*\/dev\/null/g;
+const STDERR_ONLY = /2>>?\s*(?!&)\S+/g;
+
 // A redirect into a file makes a pipeline a writer, whatever its verbs. `2>&1` and `>&2`
 // are not file writes, and the progress-log append is handled before this is consulted.
 const WRITES_A_FILE = />>?\s*(?!&)/;
+
+/**
+ * Blank out the CONTENT of quoted spans, keeping the quotes and the length.
+ *
+ * Every regex below reads shell punctuation, and none of it means anything inside quotes:
+ * `grep "a;b" f` split into two commands whose second one had no known verb, and
+ * `echo "a -> b"` read as a redirect into a file. Both were counted as work.
+ *
+ * @param {string} command
+ * @returns {string} the command with quoted content replaced by `x`
+ */
+export function maskQuoted(command) {
+  let out = "";
+  let quote = "";
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === "\\" && quote === '"' && i + 1 < command.length) {
+        out += "xx";
+        i++;
+        continue;
+      }
+      if (ch === quote) {
+        quote = "";
+        out += ch;
+        continue;
+      }
+      out += "x";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < command.length) {
+      out += ch + command[i + 1];
+      i++;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
 
 // Pieces that are shell structure, not a command: a loop or conditional header, and the
 // keywords that close them. Splitting on `;` turns `for f in *.ts; do grep ...; done` into
@@ -145,9 +198,14 @@ const isFreeStage = (stage) => {
 export function isFreeCommand(raw) {
   const command = String(raw || "");
   if (!command.trim()) return true;
+  // On the RAW text: the progress log is recognised by its path, which masking would blank.
   if (PROGRESS_APPEND.test(command)) return true;
 
-  const stripped = stripPrefixes(command);
+  // Everything past this point reads punctuation, so it reads the masked text with the
+  // redirects that decide nothing already removed.
+  const stripped = stripPrefixes(
+    maskQuoted(command).replace(DISCARDED_OUTPUT, "").replace(STDERR_ONLY, ""),
+  );
   if (!stripped) return true;
   // Anything after `&&`, `;` or `||` is a separate command; classify them all, so
   // `grep x && node build.mjs` is work.
