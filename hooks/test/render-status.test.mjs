@@ -114,7 +114,7 @@ describe("render-status", () => {
   // stops from each paying for a git diff per dev branch.
   describe("re-render skip", () => {
     test("a second stop with an unchanged progress log renders nothing new", () => {
-      const { outDir, run } = setup();
+      const { base, outDir, run } = setup();
       run();
       const first = statSync(join(outDir, "STATUS.md")).mtimeMs;
       const stored = JSON.parse(
@@ -125,6 +125,16 @@ describe("render-status", () => {
       const r = run();
       expect(r.status).toBe(0);
       expect(statSync(join(outDir, "STATUS.md")).mtimeMs).toBe(first);
+      // And it says nothing: one line per stop reporting that nothing changed is the
+      // same noise the render itself was. The first run logged once, so the count is
+      // what must not grow.
+      const lines = () =>
+        readFileSync(join(base, "hooks.log"), "utf8")
+          .split("\n")
+          .filter((l) => l.includes("[render-status]")).length;
+      expect(lines()).toBe(1);
+      run();
+      expect(lines()).toBe(1);
     });
 
     test("an appended progress line renders again", () => {

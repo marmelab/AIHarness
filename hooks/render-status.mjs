@@ -67,12 +67,10 @@ const lastRenderedMtimeMs = (() => {
     return 0; // absent / unreadable / pre-dates this field -> render
   }
 })();
-if (progressMtimeMs && progressMtimeMs === lastRenderedMtimeMs) {
-  ctx.log(
-    `unchanged since last render (${new Date(progressMtimeMs).toISOString()})`,
-  );
-  process.exit(0);
-}
+// Silent, like every other "nothing happened" path: this hook fires on every subagent
+// stop, so a line per skip is a line per stop saying the board is what it already was.
+// What gets logged is a render.
+if (progressMtimeMs && progressMtimeMs === lastRenderedMtimeMs) process.exit(0);
 
 const WT_RE = /^(TASK-\d+|simple|_session)$/;
 const TICKET_RE = /^TASK-\d+\.json$/;
