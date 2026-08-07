@@ -32,7 +32,7 @@ When your dispatch prompt carries `PERSONA: technical` (the `#technical-harness`
 
 1. **Full technical register** — as stated in the User-facing-messaging bullet above.
 2. **Raw reporting.** Your final report is not a summary; it is the mechanical truth. Include: each `TASK-XXX` and its status, the branch names (`session/<SESSION_SHORT_ID>` and the per-task branches), the commit SHAs, each reviewer verdict (`APPROVED` / `REJECTED: <feedback>`), and any ADR file paths the developer wrote. Do not soften or omit failures.
-3. **Stop at the session branch — never auto-promote.** The session branch is your terminal point. Do **not** dispatch the Stage-B promotion into the base branch, and do **not** run the POST-DEV migration round (STATE PD-* / writing-migrations). Merge every ticket into `session/<SESSION_SHORT_ID>` (Stage A only) and stop. The developer reviews the session branch, promotes it, and generates/applies migrations themselves. Still run the `pending-deploys.mjs` detection for **information only**, and report "schema changes detected — you will need a migration on merge" when it is non-empty; never generate or apply the migration yourself.
+3. **Stop at the session branch — never auto-promote.** The session branch is your terminal point. Do **not** dispatch the Stage-B promotion into the base branch, and do **not** run the POST-DEV migration round (STATE PD-\* / writing-migrations). Merge every ticket into `session/<SESSION_SHORT_ID>` (Stage A only) and stop. The developer reviews the session branch, promotes it, and generates/applies migrations themselves. Still run the `pending-deploys.mjs` detection for **information only**, and report "schema changes detected — you will need a migration on merge" when it is non-empty; never generate or apply the migration yourself.
 4. **Live progress log.** Your final report only reaches the developer when this long turn ends, so give them a live feed: append one timestamped line to `<session_dir>/harness-progress.log` at **every point where these instructions have you emit a progress line** — plan ready (ticket count), each ticket dispatched, each developer `DONE` (with `branch=`/`commit=`/`files=`), each reviewer verdict (`APPROVED` / `REJECTED: …`), each Stage-A merge, and the final stop. Append immediately after the event, before moving on, with `Bash("echo \"$(date -u +%H:%M:%S) <event>\" >> <session_dir>/harness-progress.log")` (substitute the real `<session_dir>` from your context). Overwrite nothing, append only. The developer runs `tail -f` on this file (or a `Monitor` on it) to watch the harness in real time. The `validate-on-stop` hook additionally auto-appends each validation step as it runs (`[validate:TASK-XXX] typecheck…`, `… checks passed` / `… FAILED`), so the otherwise-silent minutes while a developer's SubagentStop runs typecheck / lint / vitest show up in the same feed, so you do NOT log those yourself.
 
 The main thread runs `/harness-diff` after you return, so end your report by naming the session branch it should diff.
@@ -458,8 +458,20 @@ For every ticket in `REVIEW`, dispatch the quality-reviewer in the foreground. B
 ```
 Agent({ subagent_type: "quality-reviewer",
   description: "Review T",
+  model: "<see the review-model rule below, or omit>",
   prompt: "ROLE: quality-reviewer\nTASK_ID: T\nTICKET_FILE: <TICKETS_DIR>/T.json\nWORKTREE_PATH: <WORKTREE_BASE>/T" })
 ```
+
+**Review model.** Per-ticket review is the largest single line of a run's cost: 9 reviewer dispatches were 57% of one measured session. Pass `model: "sonnet"` for an ordinary ticket, and OMIT `model` entirely (the agent file's `opus` then applies) when either holds:
+
+- the ticket's `files_to_modify` includes anything under `supabase/`, or
+- the ticket carries `schema_sensitive: true`.
+
+The second condition is not redundant with the first. In the session this rule comes from, one of the two findings that paid for opus was on a diff containing no SQL at all: a select input on a `CHECK`-constrained column, left clearable, could submit `""` and fail the constraint on save. A rule keyed only on the file list would have sent that ticket to the cheaper model.
+
+Omitting the field rather than naming `opus` is deliberate. A runtime that ignores `model` leaves the reviewer at its declared `opus`, so the failure mode of this optimisation is spending too much, never reviewing too weakly.
+
+`MODE: feature-review`, `MODE: feature-smoke` and `MODE: migration-review` never pass `model`: they judge the integrated feature and the migration, where a miss has nothing downstream to catch it.
 
 Store the verdict in `reviews.quality` and resolve each:
 
@@ -520,19 +532,40 @@ With all tickets merged, run ONE fresh global review of the integrated feature b
 Agent({
   subagent_type: "quality-reviewer",
   description: "Feature-review: <one-line summary>",
-  prompt: "ROLE: quality-reviewer (MODE: feature-review)\nSESSION_DIFF_BASE: session-base/<SESSION_SHORT_ID>..session/<SESSION_SHORT_ID>\nTICKETS_DIR: <absolute per-session path>\n\nReview the whole integrated feature per feature-review mode. Text verdict only, no SendMessage.",
+  prompt: "ROLE: quality-reviewer (MODE: feature-review)\nSESSION_DIFF_BASE: session-base/<SESSION_SHORT_ID>..session/<SESSION_SHORT_ID>\nTICKETS_DIR: <absolute per-session path>\n\nReview the whole integrated feature per feature-review mode. Text verdict only, no SendMessage.\n\n<the RUNTIME_CHECK block below, when the diff changes UI under src/components/>",
   run_in_background: false
 })
 ```
+
+**The runtime check rides along with this review.** When the diff changes UI under `src/components/`, append this block to the prompt above instead of dispatching a second reviewer afterwards:
+
+```
+RUNTIME_CHECK: drive these cross-ticket flows in demo mode after the static review.
+1. <flow>
+2. <flow>
+3. <flow>
+Rules, and they are the contract, not advice:
+- AT MOST 3 flows, and only CROSS-ticket ones. A flow a per-ticket review already drove is not re-run.
+- Assert through stdout: each check prints the value it judges. Never read a PNG back to answer a structural question.
+- Screenshot budget for the WHOLE check: 2. One to evidence a failure, or one final proof shot.
+- A flow you could not execute is reported NOT EXECUTED with the reason. It is never folded into a PASS.
+- Report one line per flow: <flow> - PASS|FAIL|NOT EXECUTED - <the stdout line that proves it>.
+```
+
+Two reasons the block is restated here rather than left to the agent file, where all of it already appears. The budget was measured being ignored: one run took 31 screenshots for 4.9 MB against a documented budget of 1 to 2, and a rule the dispatch prompt does not carry is a rule that competes with everything else in a 60k-token context. And running the check as its own opus dispatch cost 13.4 minutes to re-judge a diff the review had just judged, on top of the review's own 4.1.
+
+Omit the block entirely for a diff that changes no UI. It is what tells `record-smoke-evidence` a browser was expected, so an absent block means no browser is expected and no evidence is demanded.
+
+Dispatch a standalone `MODE: feature-smoke` only when the review has already APPROVED and you need the runtime check re-run on its own (a fix landed that the review itself did not invalidate).
 
 - `APPROVED` → forward any non-blocking notes (nits, ponytail `net: -N`) to the final report; proceed to promotion. **`PERSONA: technical` only:** also relay the reviewer's `Hotspots for human review:` section verbatim in the final report (it points the developer at the spots most worth eyeballing before promotion). Omit it for the non-technical web-chat persona (file:line risks are noise there).
 - `BLOCKED:` <imperative findings> → fix them on the shared `<SESSION_SHORT_ID>/simple` worktree, which `setup-worktree` forks from the session branch (so the fix lands on top of the merged work). Do NOT invent a `featurefix` branch: `setup-worktree` / `enforce-dev-dispatch` only recognize `TASK-XXX` and `<SESSION_SHORT_ID>/simple`, so a bespoke branch is rejected (fail-closed) and the fix cannot get a worktree. Dispatch ONE `developer` with the SIMPLE template: `CHANGE_REQUEST` = the findings verbatim, `BRANCH_NAME: <SESSION_SHORT_ID>/simple`, `WORKTREE_PATH: <WORKTREE_BASE>/simple`, `run_in_background: false`. Then merge it into `session/<SESSION_SHORT_ID>` with a SIMPLE-mode merger carrying `STAGE: a-only` (Stage A only, no promotion), and re-run feature-review. **Bound to 2 rounds**: if still `BLOCKED` after 2, report the remaining findings in the handoff and proceed anyway (never wedge the pipeline on review). `#technical-harness` runs feature-review before its stop (no promotion after).
 
 #### Feature-smoke (does it actually run?)
 
-After feature-review passes, confirm the integrated feature RUNS before promotion / handoff. Two parts, both reported in the handoff:
+Confirm the integrated feature RUNS before promotion / handoff. Two parts, both reported in the handoff:
 
-- **Demo smoke** (when the diff changes UI under `src/components/`): dispatch the quality-reviewer with `MODE: feature-smoke` (foreground, `run_in_background: false`) to drive the feature's key user flows in demo mode and report PASS / FAIL / NOT EXECUTED per flow. Do NOT name a browser tool in the dispatch: how it drives the browser is the reviewer's to decide (quality-reviewer.md, "Running the app for runtime verification"), and naming a tool it may not have been given sends it probing for one. Ask for the CROSS-ticket flows only, the ones no single ticket's review already exercised at runtime. Runs for any UI change; needs no Supabase.
+- **Demo smoke**: already done, inside the feature-review above, via its `RUNTIME_CHECK` block. Its per-flow PASS / FAIL / NOT EXECUTED lines come back in that reviewer's report, and a FAIL is a `BLOCKED:` verdict like any other. Do NOT name a browser tool in the block: how it drives the browser is the reviewer's to decide (quality-reviewer.md, "Running the app for runtime verification"), and naming a tool it may not have been given sends it probing for one. Needs no Supabase.
 - **e2e suite**: you do NOT launch it, and `bash-guard` refuses the command if you try. The `e2e-on-feature-review` SubagentStop hook runs it for you, on the integrated `_session` worktree. It has TWO triggers: the feature review above when it APPROVED (it parses the reviewer's contract line itself, with the same parser that writes the `FEATURE-quality-reviewer` flag), so a `BLOCKED` review never pays for the suite; and **a merger stop, when the last result was `failed` and your fix has since been merged**. So a fix round is dev + merge, and the suite re-runs by itself. **A missing flag is never a reason to re-run a feature review**, and neither is wanting the suite to re-run. It uses an ISOLATED, slot-leased Supabase instance and tears it down. Read the outcome from `<session_dir>/e2e-result.json` after the merger returns; the same outcome is appended to `harness-progress.log`.
 
   `status` is `passed` | `skipped` | `failed` | `running`. **`running` means the suite is still going or its process was killed**: check `startedAt`, and treat it as unknown rather than as a pass. A missing file means the hook did not run the suite at all (no session worktree, or the review did not approve). The file also carries `failureSignature` (which failure this is), `sessionSha` (the commit it ran against) and `specsFirst` (the changed specs it ran ahead of the full suite).
@@ -557,6 +590,7 @@ Then promote the session branch to the base branch (the branch the session was f
     prompt: "ROLE: merger\nMODE: promote\nSESSION_SHORT_ID: <SESSION_SHORT_ID>"
   })
   ```
+
   - `DONE: PROMOTE commit=…` → SETUP path → STATE SETUP-DONE. COMPLEX path → report one line per ticket, then STATE PD-ASK.
   - `FAILED: PROMOTE promote conflict: files=[…]` → one progress line (_"Synchronising your changes…"_) and STATE PD-PROMOTE-FIX.
   - `FAILED: PROMOTE main opt-in required` → the base resolves to `main`/`master`; do NOT bypass. Surface to the user that this commits **directly to `main`** and confirm; on confirmation, re-dispatch the promote merger with `ALLOW_MAIN: 1` added to its prompt. `#technical-harness` never promotes, so it never reaches here.
@@ -718,7 +752,7 @@ Reply with the user-facing wrap-up, then enter STATE DONE.
 - ❌ Start a ticket's next stage before the current stage's foreground agents have returned.
 - ❌ Run per-ticket mergers concurrently — dispatch one at a time (Stage 3).
 - ❌ Treat malformed agent output as anything other than `FAILED` for that stage.
-- ❌ Use the RB-* states for anything other than a `<intent>rollback-conflict</intent>` turn.
+- ❌ Use the RB-\* states for anything other than a `<intent>rollback-conflict</intent>` turn.
 - ❌ Dispatch more than 5 tickets in a single STATE B pass — cap at 5, loop the remainder.
 - ❌ Write/Edit any file **except** `$CLAUDE_PROJECT_DIR/docs/project-context.json` during SETUP-INTERVIEW.
 - ❌ Dispatch a `project-manager` agent during SETUP-INTERVIEW — conduct the interview directly via the `setup-interview` skill.

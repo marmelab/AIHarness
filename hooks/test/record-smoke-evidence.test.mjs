@@ -53,19 +53,24 @@ const toolUse = (name, input) =>
 
 /**
  * Spawn a stopping reviewer and run the hook against it.
- * @param {{mode?: string, verdict?: string, drove?: "mcp"|"bash"|null, agentId?: string}} o
+ * @param {{mode?: string, verdict?: string, drove?: "mcp"|"bash"|null,
+ *          agentId?: string, runtimeCheck?: boolean}} o
  */
 const runStop = ({
   mode = "feature-smoke",
   verdict = "APPROVED",
   drove = null,
   agentId = "a5m0ke00000000001",
+  runtimeCheck = false,
 } = {}) => {
   const transcript = spawnAgent(
     layout,
     agentId,
     { agentType: "quality-reviewer", description: "smoke the feature" },
-    `ROLE: quality-reviewer (MODE: ${mode})\nSESSION_SHORT_ID: 5m0ke1d0\n`,
+    `ROLE: quality-reviewer (MODE: ${mode})\nSESSION_SHORT_ID: 5m0ke1d0\n` +
+      (runtimeCheck
+        ? "RUNTIME_CHECK: drive these cross-ticket flows in demo mode.\n1. create a contact\n"
+        : ""),
     [verdict],
   );
   if (drove === "mcp") {
@@ -129,8 +134,8 @@ describe("record-smoke-evidence", () => {
     expect(result().status).toBe("unknown");
   });
 
-  // Other reviewer stops are not this hook's business: a per-ticket review and the
-  // end-of-feature review must leave no smoke result behind.
+  // Other reviewer stops are not this hook's business: a per-ticket review, and a
+  // feature review that was asked for no flows, must leave no smoke result behind.
   test.each(["feature-review", "per-ticket"])(
     "writes nothing for MODE: %s",
     (mode) => {
@@ -151,5 +156,36 @@ describe("record-smoke-evidence", () => {
       encoding: "utf8",
     });
     expect(r.status).toBe(0);
+  });
+});
+
+// The runtime check now normally rides inside the feature-review dispatch, as a
+// RUNTIME_CHECK block, rather than costing a second opus agent. The marker is what makes
+// such a stop ours: the mode alone would demand browser evidence from every review,
+// including reviews of diffs that change no UI at all.
+describe("record-smoke-evidence: the runtime check folded into a feature-review", () => {
+  test("a feature-review carrying RUNTIME_CHECK is recorded like a smoke", () => {
+    const r = runStop({
+      mode: "feature-review",
+      runtimeCheck: true,
+      drove: "bash",
+    });
+    expect(r.status).toBe(0);
+    expect(result()).toMatchObject({
+      status: "approved",
+      verdict: "APPROVED",
+      evidence: { bash: true },
+    });
+  });
+
+  test("a RUNTIME_CHECK approved with no browser is still caught", () => {
+    runStop({ mode: "feature-review", runtimeCheck: true, drove: null });
+    expect(result()).toMatchObject({ status: "approved-no-evidence" });
+  });
+
+  test("a feature-review with no RUNTIME_CHECK is not asked for evidence", () => {
+    const r = runStop({ mode: "feature-review", drove: null });
+    expect(r.status).toBe(0);
+    expect(existsSync(resultFile())).toBe(false);
   });
 });
