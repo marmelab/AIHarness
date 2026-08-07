@@ -80,8 +80,8 @@ const checkGuardState = (cmd, ctx, agent) => {
   if ((mutatingVerb && guardPath.test(cmd)) || redirectToGuard) {
     ctx.block({
       reason:
-        "Refusing this command: the orchestrator must not write to or delete files under <session_dir>/reviews or <session_dir>/breaker — those ARE the review/dispatch guards. " +
-        "If a merger dispatch was blocked for 'no APPROVED verdict', do NOT fabricate the flag and do NOT re-dispatch the reviewer: the reviewer writes its own flag on APPROVED (quality-reviewer.md). A missing flag means the reviewer did NOT approve — read its output file and act on the real verdict. " +
+        "Refusing this command: the orchestrator must not write to or delete files under <session_dir>/reviews or <session_dir>/breaker. Those ARE the review/dispatch guards. " +
+        "If a merger dispatch was blocked for 'no APPROVED verdict', do NOT fabricate the flag and do NOT re-dispatch the reviewer to create the record: the flag is written by the record-review-verdict hook from the reviewer's contract line, so a missing flag means no APPROVED line was read, which is not the same as a rejection. Read the reviewer's own contract line, then its '[record-review-verdict]' line in <session_dir>/hooks.log, and act on the real verdict (orchestrator.md, 'If the merger dispatch is blocked for no APPROVED verdict yet'). " +
         "If a dispatch was blocked as 'still in flight', wait for its task-notification instead of clearing the marker.",
       log: `orchestrator rule=guard-state-mutation cmd=${cmd.slice(0, 120)}`,
     });

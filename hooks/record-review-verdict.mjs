@@ -1,14 +1,20 @@
 #!/usr/bin/env node
-// SubagentStop(quality-reviewer) — FALLBACK recorder of the reviewer's verdict
-// flag (block-merger-without-review.mjs enforces dev -> reviewer -> merger on it).
-// The PRIMARY writer is now the quality-reviewer agent itself, which touches the
-// flag via Bash before it stops (see quality-reviewer.md) — synchronous, no race.
-// This hook stays as belt-and-suspenders: at SubagentStop the reviewer's final
-// contract line is often not yet flushed to the transcript (and last_assistant_message
-// is absent in this runtime), so verdict recovery here can return UNKNOWN and the
-// flag is left untouched. That silent miss was the TASK-002 cascade — the agent
-// self-write removes the dependency; this hook only catches the case the agent
-// skipped its touch. SubagentStop cannot block — it only records.
+// SubagentStop(quality-reviewer): the ONLY writer of the reviewer's verdict flag
+// (block-merger-without-review.mjs enforces dev -> reviewer -> merger on it).
+// The reviewer used to touch the flag itself before stopping. That made one Bash
+// call in one agent prompt the single point of failure for the end-of-feature gate,
+// and an agent writing the file that gates its own review is the exact shape a
+// CI-bypass check reports. The self-write survives only as an opt-in fallback, on a
+// dispatch carrying `WRITE_VERDICT_FLAG: yes` (see quality-reviewer.md), for a
+// runtime where no hook can read the verdict at all.
+//
+// The cost of being the only writer: at SubagentStop the reviewer's final contract
+// line is sometimes not yet flushed to the transcript (and last_assistant_message is
+// absent in this runtime), so recovery here returns UNKNOWN and the flag is left
+// untouched on an APPROVED review. That reads downstream as "not approved", so the
+// log line below has to say which of verdict, ticket or identity was missing:
+// orchestrator.md turns that line into the WRITE_VERDICT_FLAG re-dispatch.
+// SubagentStop cannot block, it only records.
 //
 // Flag (presence == APPROVED): <sessionDir>/reviews/<TASK>-<role>. Cleared on
 // REJECTED here; cleared on a developer (re)dispatch by setup-worktree.mjs so a
