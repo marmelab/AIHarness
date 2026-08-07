@@ -45,35 +45,95 @@ const progressLog = join(ctx.sessionDir, "harness-progress.log");
 // No technical progress log -> not a #technical-harness run -> stay inert.
 if (!existsSync(progressLog)) process.exit(0);
 
-// The board is derived from the progress log, so an unchanged log renders the same
-// board. This hook fires on EVERY subagent stop, and the expensive part is sessionDiff:
-// a `git diff` plus a `git diff --stat` per dev branch, on every stop, to re-emit bytes
-// nobody asked for. The last rendered mtime is kept in status.json, next to the output
-// it describes, so the check costs one stat and needs no extra state file.
+const WT_RE = /^(TASK-\d+|simple|_session)$/;
+const TICKET_RE = /^TASK-\d+\.json$/;
+
+// This hook fires on EVERY subagent stop, and the expensive part is sessionDiff: a
+// `git diff` plus a `git diff --stat` per dev branch, to re-emit bytes nobody asked for.
+// So a stop that changed nothing must not render.
+//
+// "Changed nothing" is not "the progress log did not move". The board has a column per
+// source: the review flags, the ticket files, the live worktrees, e2e-result.json and the
+// session's branches. Only the roles with `validate: true` append to the progress log, so
+// keying the skip on that log alone froze the board on precisely the stops the other
+// sources answer for: a quality-reviewer's APPROVED never reached the ✅ column, and the
+// worktrees cleanup-worktree removes at merge stayed on the board for the rest of the run.
+//
+// One stat per source plus one `for-each-ref` stays far below the render it guards. The
+// key is kept in status.json, next to the output it describes, so it needs no state file.
 const outDir = join(REPO, ".harness", ctx.sessionShort);
 const statusJsonPath = join(outDir, "status.json");
-const progressMtimeMs = (() => {
+// Shared by the key and by e2eLine: the two must read the same file or the board can
+// change without the key moving.
+const e2eResultPath = join(ctx.sessionDir, "e2e-result.json");
+
+const mtimeMs = (p) => {
   try {
-    return statSync(progressLog).mtimeMs;
+    return statSync(p).mtimeMs;
   } catch {
-    return 0;
+    return 0; // absent is a state of its own, and a stable one
   }
-})();
-const lastRenderedMtimeMs = (() => {
+};
+
+// Presence, not content: a review flag means what its name says. Listed rather than
+// stat'ed on the directory, because the session dir is also where hooks.log is created
+// and a dir mtime would move for reasons the board does not show.
+const listing = (dir) => {
   try {
-    const prev = JSON.parse(readFileSync(statusJsonPath, "utf8"));
-    return prev.progressMtimeMs ?? 0;
+    return readdirSync(dir).sort().join(",");
   } catch {
-    return 0; // absent / unreadable / pre-dates this field -> render
+    return "";
+  }
+};
+
+// A ticket's STATUS lives inside its file, so the dir's mtime is not enough.
+const ticketsMtimeMs = () => {
+  let newest = 0;
+  for (const dir of [ctx.ticketsDir, ctx.sessionDir]) {
+    try {
+      for (const f of readdirSync(dir)) {
+        if (TICKET_RE.test(f)) newest = Math.max(newest, mtimeMs(join(dir, f)));
+      }
+    } catch {
+      // unreadable dir -> contributes nothing, the other sources still key the render
+    }
+  }
+  return newest;
+};
+
+// What the diff is taken from: the session branch and every dev branch under it.
+const refsFingerprint = () => {
+  try {
+    return git([
+      "for-each-ref",
+      "--format=%(refname:short)=%(objectname:short)",
+      `refs/heads/${ctx.sessionShort}/`,
+      `refs/heads/${sessionBranch(ctx)}`,
+    ]).stdout.trim();
+  } catch {
+    return "";
+  }
+};
+
+const renderKey = [
+  mtimeMs(progressLog),
+  listing(reviewsDir(ctx)),
+  liveWorktrees().join(","),
+  mtimeMs(e2eResultPath),
+  ticketsMtimeMs(),
+  refsFingerprint(),
+].join("|");
+const lastRenderKey = (() => {
+  try {
+    return JSON.parse(readFileSync(statusJsonPath, "utf8")).renderKey ?? "";
+  } catch {
+    return ""; // absent / unreadable / pre-dates this field -> render
   }
 })();
 // Silent, like every other "nothing happened" path: this hook fires on every subagent
 // stop, so a line per skip is a line per stop saying the board is what it already was.
 // What gets logged is a render.
-if (progressMtimeMs && progressMtimeMs === lastRenderedMtimeMs) process.exit(0);
-
-const WT_RE = /^(TASK-\d+|simple|_session)$/;
-const TICKET_RE = /^TASK-\d+\.json$/;
+if (lastRenderKey && renderKey === lastRenderKey) process.exit(0);
 
 // Tickets live in the session dir itself or a `tickets/` subdir - try both.
 function readTickets() {
@@ -122,9 +182,8 @@ const approved = (id) =>
 const E2E_ICON = { passed: "✅", skipped: "⏭", failed: "❌" };
 function e2eLine() {
   try {
-    const p = join(sessionDirFromEnv() || ctx.sessionDir, "e2e-result.json");
-    if (!existsSync(p)) return "_not run this round_";
-    const r = JSON.parse(readFileSync(p, "utf8"));
+    if (!existsSync(e2eResultPath)) return "_not run this round_";
+    const r = JSON.parse(readFileSync(e2eResultPath, "utf8"));
     return `${E2E_ICON[r.status] ?? "?"} **${r.status}**${r.finishedAt ? ` · ${r.finishedAt}` : ""}`;
   } catch {
     return "_unreadable_";
@@ -271,7 +330,7 @@ function build() {
     updated,
     // What the skip above compares against. Written last, so a render that throws
     // leaves the previous value and the next stop re-renders.
-    progressMtimeMs,
+    renderKey,
     tickets: {
       total: tickets.length,
       merged,
