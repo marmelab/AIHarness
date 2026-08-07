@@ -11,7 +11,7 @@ import {
   rmSync,
   rmdirSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { readAgentMeta } from "./lib/agent-meta.mjs";
 import { isMerger } from "./lib/teams.mjs";
@@ -55,22 +55,17 @@ const ctx = createHookContext(raw, "cleanup-worktree");
   } catch {
     /* proceed */
   }
+  // Silent: this fires on every stop of every role, so a line here is a line per
+  // subagent stop for the whole session saying that nothing was asked of this hook.
+  // The merger stop that DOES sweep logs its summary at the end.
   const meta = readAgentMeta(payload);
-  if (meta && meta.agentType && !isMerger(meta.agentType)) {
-    ctx.accept(
-      `skip: ${meta.agentType} stop via ${meta.source} (cleanup runs on merger stops)`,
-    );
-  }
+  if (meta && meta.agentType && !isMerger(meta.agentType)) process.exit(0);
 }
 
-if (!existsSync(ctx.worktreeBase)) {
-  ctx.accept(`${ctx.worktreeBase} not found`);
-}
+// Nothing has been created yet: also not an event.
+if (!existsSync(ctx.worktreeBase)) process.exit(0);
 
 const base = getBaseBranch();
-ctx.log(
-  `START session=${ctx.sessionShort} base=${ctx.worktreeBase} branch=${base}`,
-);
 
 const isUnderBase = (p) =>
   p === ctx.worktreeBase || p.startsWith(ctx.worktreeBase + "/");
@@ -99,29 +94,25 @@ const getMergedTips = () => {
 };
 const mergedTips = getMergedTips();
 
-const shouldRemove = ({ path: wtPath, branch }) => {
-  if (isInfraWorktreePath(wtPath)) {
-    ctx.log(`SKIP-SESSION-WORKTREE ${wtPath}`);
-    return false;
-  }
-  if (!branch) {
-    ctx.log(`SKIP-DETACHED ${wtPath} (detached HEAD)`);
-    return false;
-  }
+// A skip is the NORMAL outcome: this hook fires on every subagent stop and sweeps
+// every worktree each time, so a line per skipped worktree is a line per worktree per
+// stop, and it drowns the removals. The reason a worktree was kept is still recorded,
+// but once, in the summary at the end. What gets its own line is what CHANGED.
+const skipReason = ({ path: wtPath, branch }) => {
+  if (isInfraWorktreePath(wtPath)) return "session-worktree";
+  if (!branch) return "detached";
   const tip = git(["rev-parse", "--verify", branch]).stdout.trim();
-  if (!tip || !mergedTips.has(tip)) {
-    ctx.log(`SKIP-UNMERGED ${wtPath} branch=${branch}`);
-    return false;
-  }
+  if (!tip || !mergedTips.has(tip)) return "unmerged";
   if (exec("git", ["-C", wtPath, "status", "--porcelain"]).stdout.trim()) {
-    ctx.log(`SKIP-DIRTY ${wtPath} (uncommitted changes)`);
-    return false;
+    return "dirty";
   }
-  return true;
+  return "";
 };
 
 const deleteBranch = (branch) => {
   if (!branch) return;
+  // A protected branch reaching here would be a bug in shouldRemove above, not
+  // routine, so it stays a log line.
   if (isProtectedBranch(branch)) {
     ctx.log(`SKIP-SESSION-BRANCH ${branch}`);
     return;
@@ -133,7 +124,12 @@ const deleteBranch = (branch) => {
 };
 
 const ourWorktrees = getWorktreeEntries().filter((e) => isUnderBase(e.path));
-const toRemove = ourWorktrees.filter(shouldRemove);
+const skipped = [];
+const toRemove = ourWorktrees.filter((e) => {
+  const reason = skipReason(e);
+  if (reason) skipped.push(`${basename(e.path)}:${reason}`);
+  return !reason;
+});
 
 toRemove.forEach((e) => {
   removeWorktree(e.path);
@@ -153,17 +149,14 @@ git(["worktree", "prune"]);
 
 const registered = getWorktreePaths();
 
+// The session dir holds the harness's own state (breaker/, reviews/, locks/, tickets/)
+// alongside the worktrees, so most entries here are not worktrees and never will be.
+// Logging each one as "non-worktree" on every stop said nothing and said it loudly.
 const sweepLeftover = (entry) => {
   if (!entry.isDirectory()) return;
   const dir = join(ctx.worktreeBase, entry.name);
-  if (dir.endsWith("/_session")) {
-    ctx.log(`SKIP-SESSION-LEFTOVER ${dir}`);
-    return;
-  }
-  if (!isTaskWorktreeDirName(entry.name)) {
-    ctx.log(`SKIP-NON-WORKTREE ${dir}`);
-    return;
-  }
+  if (dir.endsWith("/_session")) return;
+  if (!isTaskWorktreeDirName(entry.name)) return;
   if (registered.includes(dir)) return;
   rmSync(dir, { recursive: true, force: true });
   ctx.log(`LEFTOVER RM ${dir}`);
@@ -177,6 +170,8 @@ try {
   // not empty / already gone — fine
 }
 
+// One line per sweep, and it is the only one when nothing changed: what was removed,
+// and what was kept and why. Everything above logs an ACTION.
 ctx.accept(
-  `removed=${toRemove.length} skipped=${ourWorktrees.length - toRemove.length} session=${ctx.sessionShort}`,
+  `removed=${toRemove.length} kept=${skipped.length}${skipped.length ? ` [${skipped.join(" ")}]` : ""} session=${ctx.sessionShort} base=${base}`,
 );
