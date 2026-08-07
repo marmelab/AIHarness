@@ -24,13 +24,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
 import { reviewsDir } from "./lib/reviews.mjs";
 import { getBaseBranch, git } from "./lib/git.mjs";
 import { sessionBaseBranch, sessionBranch } from "./lib/topology.mjs";
 
-if (process.env.CHAT_SESSION_DIR) process.exit(0);
+if (sessionDirFromEnv()) process.exit(0);
 
 let input = {};
 try {
@@ -94,10 +95,7 @@ const approved = (id) =>
 const E2E_ICON = { passed: "✅", skipped: "⏭", failed: "❌" };
 function e2eLine() {
   try {
-    const p = join(
-      process.env.CHAT_SESSION_DIR || ctx.sessionDir,
-      "e2e-result.json",
-    );
+    const p = join(sessionDirFromEnv() || ctx.sessionDir, "e2e-result.json");
     if (!existsSync(p)) return "_not run this round_";
     const r = JSON.parse(readFileSync(p, "utf8"));
     return `${E2E_ICON[r.status] ?? "?"} **${r.status}**${r.finishedAt ? ` · ${r.finishedAt}` : ""}`;

@@ -36,6 +36,7 @@ import {
   taskBranch,
   taskWorktreePath,
 } from "./lib/topology.mjs";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 
 export function check(input, ctx) {
   const d = parseDispatch(input);
@@ -203,7 +204,7 @@ export function check(input, ctx) {
   // not race. No-op under a managed launcher (owns its own UI) or a non-technical
   // run (no progress log), matching the render-status board's gating.
   if (
-    !process.env.CHAT_SESSION_DIR &&
+    !sessionDirFromEnv() &&
     existsSync(join(ctx.sessionDir, "harness-progress.log"))
   ) {
     addWorktreeFolder(

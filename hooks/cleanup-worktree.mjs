@@ -31,6 +31,7 @@ import {
 } from "./lib/topology.mjs";
 import { removeWorktree } from "./lib/worktree.mjs";
 import { removeWorktreeFolders } from "./lib/workspace-folders.mjs";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 
 const raw = readFileSync(0, "utf8");
 const ctx = createHookContext(raw, "cleanup-worktree");
@@ -143,7 +144,7 @@ toRemove.map((e) => e.branch).forEach(deleteBranch);
 // Drop the merged worktrees from the editor's workspace folders (setup-worktree
 // added them on a technical run). No-op under a managed launcher or a mono-folder
 // window (no `.code-workspace` to edit; `code --remove` does not exist).
-if (!process.env.CHAT_SESSION_DIR && toRemove.length) {
+if (!sessionDirFromEnv() && toRemove.length) {
   const removed = new Set(toRemove.map((e) => e.path));
   removeWorktreeFolders(ctx.repo, (p) => removed.has(p));
 }

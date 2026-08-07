@@ -11,13 +11,19 @@ CRM Builder / chat-service specifics live in Atomic CRM's project layer (its
 
 | Key | Meaning | Consumer | Unset behavior |
 |---|---|---|---|
-| `sessionDirEnv` | Env var carrying the managed session dir (default `CHAT_SESSION_DIR`) | `context.mjs`, `reviews.mjs`, `session-bootstrap.mjs` read this env directly | falls back to the recomputed `/tmp/<repo>/<id>` session dir |
+| `sessionDirEnv` | Env var carrying the managed session dir (default `CHAT_SESSION_DIR`) | `config.sessionDirFromEnv()`, the single reader; every hook resolves the dir through it | falls back to the recomputed `/tmp/<repo>/<id>` session dir |
 | `turnSentinelDir` | Dir where `turn-complete.mjs` drops `pty-turn-done-<sid>` so the launcher knows the turn ended | `turn-complete.mjs` | hook writes nothing (inert) |
 | `postCheckoutScript` | Script the merger runs after checkout to materialize the app variant | `merger.md` (runs it), `block-orchestrator-merge.mjs` (gates it merger-only) | not run; the guard clause is inert |
 | `logsDir` | Managed-launcher log dir agents may redirect into | `bash-guard.mjs` (redirect exemption) | only `/dev/null` is exempt |
 
 `CHAT_SESSION_DIR` is kept as the generic "managed session dir" variable name:
-it is set by the launcher, not by the core. Persona injection stays the
+it is set by the launcher, not by the core. No hook reads it directly. Everything
+that needs the managed session dir (review verdict flags, the validation give-up
+marker, the e2e and smoke results, the status board, the session id) calls
+`sessionDirFromEnv()`, so renaming the variable in the config moves all of them at
+once. A hook reading `process.env.CHAT_SESSION_DIR` itself would make this key a
+setting that changes nothing, silently: nothing errors when the artifacts are written
+somewhere the launcher never looks. Persona injection stays the
 launcher's job too, via `--append-system-prompt` (the web-chat orchestrator is
 this same `orchestrator` with a non-technical persona layered on at launch); the
 core never hardcodes a persona.

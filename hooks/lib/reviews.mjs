@@ -20,16 +20,17 @@
 // Path source: the quality-reviewer agent (PRIMARY writer) derives the flag dir
 // from its ticket file — `$(dirname TICKET_FILE)/reviews` — i.e. under the
 // `<session_dir>` it was handed (TICKETS_DIR == <session_dir>, see orchestrator.md).
-// On a managed launcher (CRM Builder's chat-service) that `<session_dir>` is
-// `CHAT_SESSION_DIR`, which is NOT the `/tmp/<repo>/<id>` path ctx.sessionDir
-// recomputes — so the reader/clearer/fallback below must key off CHAT_SESSION_DIR
-// when present, or they look in the wrong dir and the synchronous verdict is lost
-// (block-merger then blocks on a phantom "no APPROVED"). With no managed launcher,
-// CHAT_SESSION_DIR is unset and ctx.sessionDir already equals <session_dir> (the
+// On a managed launcher (CRM Builder's chat-service) that `<session_dir>` is the dir
+// named by `config.launcher.sessionDirEnv`, which is NOT the `/tmp/<repo>/<id>` path
+// ctx.sessionDir recomputes, so the reader/clearer/fallback below resolve it through
+// `sessionDirFromEnv()`, or they look in the wrong dir and the synchronous verdict is
+// lost (block-merger then blocks on a phantom "no APPROVED"). With no managed
+// launcher that env var is unset and ctx.sessionDir already equals <session_dir> (the
 // session-bootstrap hook injects exactly that), so this is a no-op there.
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { sessionDirFromEnv } from "./config.mjs";
 
 export const REVIEW_ROLES = ["quality-reviewer"];
 
@@ -41,7 +42,7 @@ export const REVIEW_ROLES = ["quality-reviewer"];
 export const FEATURE_KEY = "FEATURE";
 
 export const reviewsDir = (ctx) =>
-  join(process.env.CHAT_SESSION_DIR || ctx.sessionDir, "reviews");
+  join(sessionDirFromEnv() || ctx.sessionDir, "reviews");
 
 export const reviewFlag = (ctx, taskId, role) =>
   join(reviewsDir(ctx), `${taskId}-${role}`);
@@ -51,11 +52,7 @@ export const reviewFlag = (ctx, taskId, role) =>
 // is what keeps the work from being merged anyway. Producer: lib/validation.mjs. Consumer:
 // block-merger-without-review.mjs. Shared here so the two cannot disagree on the path.
 export const validationGaveUpFlag = (ctx, taskId) =>
-  join(
-    process.env.CHAT_SESSION_DIR || ctx.sessionDir,
-    "validation-gave-up",
-    String(taskId),
-  );
+  join(sessionDirFromEnv() || ctx.sessionDir, "validation-gave-up", String(taskId));
 
 // Cleared when that worktree's whole chain passes: giving up must be recoverable, or the
 // documented fix ("dispatch a developer to fix the failing step") cannot work and the ticket is

@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { agentTranscriptPath } from "./lib/agent-meta.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
@@ -50,7 +51,7 @@ try {
     at: new Date().toISOString(),
   };
   writeFileSync(
-    join(process.env.CHAT_SESSION_DIR || ctx.sessionDir, "smoke-result.json"),
+    join(sessionDirFromEnv() || ctx.sessionDir, "smoke-result.json"),
     `${JSON.stringify(result)}\n`,
   );
   ctx.log(

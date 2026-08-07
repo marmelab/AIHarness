@@ -18,9 +18,10 @@ import { dirname, join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { harnessFile, REPO } from "./lib/paths.mjs";
 import { detectInflight } from "./lib/session-state.mjs";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 
 // A managed launcher owns the session context — stay out of its way.
-if (process.env.CHAT_SESSION_DIR) process.exit(0);
+if (sessionDirFromEnv()) process.exit(0);
 
 let input = {};
 try {

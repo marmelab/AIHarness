@@ -12,12 +12,13 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { sessionDirFromEnv } from "./config.mjs";
 
-// Mirrors reviews.mjs: on a managed launcher the orchestrator's <session_dir> is
-// CHAT_SESSION_DIR, not the recomputed /tmp/<repo>/<id> path, so the result has to land
-// where the orchestrator will actually look for it.
+// Mirrors reviews.mjs: on a managed launcher the orchestrator's <session_dir> is the
+// one config.launcher.sessionDirEnv names, not the recomputed /tmp/<repo>/<id> path, so
+// the result has to land where the orchestrator will actually look for it.
 export const e2eResultPath = (ctx) =>
-  join(process.env.CHAT_SESSION_DIR || ctx.sessionDir, "e2e-result.json");
+  join(sessionDirFromEnv() || ctx.sessionDir, "e2e-result.json");
 
 /** Parsed result, or null when absent/unreadable/malformed. */
 export function readE2eResult(ctx) {

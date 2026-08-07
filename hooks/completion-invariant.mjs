@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { readAgentMeta } from "./lib/agent-meta.mjs";
 import { isOrchestrator } from "./lib/teams.mjs";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 import { getUnmergedTaskBranches, git } from "./lib/git.mjs";
 import { reviewFlag } from "./lib/reviews.mjs";
 import { sessionBranch, simpleBranch } from "./lib/topology.mjs";
@@ -135,10 +136,7 @@ try {
 function rejectOnceOnRedE2e() {
   let result;
   try {
-    const p = join(
-      process.env.CHAT_SESSION_DIR || ctx.sessionDir,
-      "e2e-result.json",
-    );
+    const p = join(sessionDirFromEnv() || ctx.sessionDir, "e2e-result.json");
     if (!existsSync(p)) return; // not run this round -> nothing to react to
     result = JSON.parse(readFileSync(p, "utf8"));
   } catch {
@@ -186,10 +184,7 @@ function rejectOnceOnRedE2e() {
 function rejectOnceOnUnevidencedSmoke() {
   let result;
   try {
-    const p = join(
-      process.env.CHAT_SESSION_DIR || ctx.sessionDir,
-      "smoke-result.json",
-    );
+    const p = join(sessionDirFromEnv() || ctx.sessionDir, "smoke-result.json");
     if (!existsSync(p)) return; // no smoke this round
     result = JSON.parse(readFileSync(p, "utf8"));
   } catch {

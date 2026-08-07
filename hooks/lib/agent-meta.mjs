@@ -40,6 +40,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { sessionDirFromEnv } from "./config.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
 
 // A path component we are about to build a filesystem path from. Rejects anything
@@ -209,9 +210,7 @@ const sessionDirOf = (payload) => {
   const sessionId =
     sessionIdOf(payload) ||
     process.env.CLAUDE_CODE_SESSION_ID ||
-    (process.env.CHAT_SESSION_DIR
-      ? basename(process.env.CHAT_SESSION_DIR)
-      : "") ||
+    basename(sessionDirFromEnv() || "") ||
     "default";
   return join(TMP_ROOT, sanitizePath(REPO), sessionId);
 };

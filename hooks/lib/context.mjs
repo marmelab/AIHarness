@@ -9,7 +9,11 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { decisionBlock } from "./io.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
 import { exec } from "./process.mjs";
-import { loadConfig, worktreeProvision } from "./config.mjs";
+import {
+  loadConfig,
+  sessionDirFromEnv,
+  worktreeProvision,
+} from "./config.mjs";
 
 /**
  * @param {string | Record<string, unknown>} input
@@ -25,9 +29,8 @@ export function createHookContext(input, name = "hook") {
   // in PostToolUse/PreToolUse contexts; for SubagentStart the env is the parent's,
   // so fall back to i.agent_name which Claude Code populates with the child's name.
   const agentName = process.env.CLAUDE_AGENT_NAME || clean(i.agent_name) || "";
-  const chatSessionId = process.env.CHAT_SESSION_DIR
-    ? basename(process.env.CHAT_SESSION_DIR)
-    : "";
+  const launcherSessionDir = sessionDirFromEnv();
+  const chatSessionId = launcherSessionDir ? basename(launcherSessionDir) : "";
 
   const sessionId =
     clean(i.session_id) ||
