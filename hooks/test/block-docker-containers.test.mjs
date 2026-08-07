@@ -100,7 +100,9 @@ describe("block-docker-containers hook", () => {
 
     test("no config at all also blocks (safe baseline, never fail-open)", () => {
       expect(
-        isBlocked(runHook("", "docker run supabase/postgres:15", NO_CONFIG_REPO)),
+        isBlocked(
+          runHook("", "docker run supabase/postgres:15", NO_CONFIG_REPO),
+        ),
       ).toBe(true);
     });
 
@@ -109,9 +111,9 @@ describe("block-docker-containers hook", () => {
       expect(
         isBlocked(runHook("", "docker run localstack/localstack", repo)),
       ).toBe(false);
-      expect(isBlocked(runHook("", "docker run supabase/postgres:15", repo))).toBe(
-        true,
-      );
+      expect(
+        isBlocked(runHook("", "docker run supabase/postgres:15", repo)),
+      ).toBe(true);
     });
 
     test("the block message names what is currently allowed", () => {

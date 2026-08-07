@@ -44,10 +44,33 @@ describe("bareRole", () => {
 
 describe("role predicates accept both the bare and the namespaced form", () => {
   const cases = [
-    [isDeveloper, ["developer", "aiharness:developer", "developer-TASK-001", "aiharness:developer-TASK-001"]],
-    [isQualityReviewer, ["quality-reviewer", "aiharness:quality-reviewer", "quality-reviewer-TASK-002"]],
+    [
+      isDeveloper,
+      [
+        "developer",
+        "aiharness:developer",
+        "developer-TASK-001",
+        "aiharness:developer-TASK-001",
+      ],
+    ],
+    [
+      isQualityReviewer,
+      [
+        "quality-reviewer",
+        "aiharness:quality-reviewer",
+        "quality-reviewer-TASK-002",
+      ],
+    ],
     [isMerger, ["merger", "aiharness:merger", "merger-TASK-003"]],
-    [isOrchestrator, ["orchestrator", "aiharness:orchestrator", "chat-orchestrator", "orchestrator-abc"]],
+    [
+      isOrchestrator,
+      [
+        "orchestrator",
+        "aiharness:orchestrator",
+        "chat-orchestrator",
+        "orchestrator-abc",
+      ],
+    ],
   ];
 
   for (const [predicate, names] of cases) {
@@ -73,7 +96,12 @@ describe("role predicates still reject what is not their role", () => {
   });
 
   test("empty identity matches nothing", () => {
-    for (const p of [isDeveloper, isMerger, isOrchestrator, isQualityReviewer]) {
+    for (const p of [
+      isDeveloper,
+      isMerger,
+      isOrchestrator,
+      isQualityReviewer,
+    ]) {
       expect(p("")).toBe(false);
       expect(p(undefined)).toBe(false);
     }
