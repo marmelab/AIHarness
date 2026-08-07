@@ -58,16 +58,16 @@ export function check(input, ctx) {
     return; // can't persist a marker -> don't risk blocking a real dispatch
   }
 
-// Only debounce dispatches that will actually PROCEED. An explicitly-backgrounded one is
-// denied by force-foreground-orchestrator-dispatch and re-issued, so recording a marker for
-// it would reject the corrective retry as a "duplicate" (seen once: the planner never ran,
-// yet its marker blocked the retry for 60 min).
-//
-// This used to read `run_in_background !== false`, which silently disabled the whole
-// debounce: a nested subagent's Agent tool does not expose the parameter, so the condition
-// was always true and every pipeline role exited here. Observed as two planner dispatches
-// twelve seconds apart with no log line from this hook at all. The predicate is shared with
-// force-foreground now, so the two cannot drift apart again.
+  // Only debounce dispatches that will actually PROCEED. An explicitly-backgrounded one is
+  // denied by force-foreground-orchestrator-dispatch and re-issued, so recording a marker for
+  // it would reject the corrective retry as a "duplicate" (seen once: the planner never ran,
+  // yet its marker blocked the retry for 60 min).
+  //
+  // This used to read `run_in_background !== false`, which silently disabled the whole
+  // debounce: a nested subagent's Agent tool does not expose the parameter, so the condition
+  // was always true and every pipeline role exited here. Observed as two planner dispatches
+  // twelve seconds apart with no log line from this hook at all. The predicate is shared with
+  // force-foreground now, so the two cannot drift apart again.
   const childRole = PIPELINE_ROLES.has(d.subagentType)
     ? d.subagentType
     : PIPELINE_ROLES.has(d.role)
@@ -75,7 +75,8 @@ export function check(input, ctx) {
       : "";
   if (childRole && isExplicitlyBackgrounded(input)) return;
 
-  if (d.subagentType === "planner") return checkPlanner(ctx, d, { prompt, caller, markerDir });
+  if (d.subagentType === "planner")
+    return checkPlanner(ctx, d, { prompt, caller, markerDir });
   if (DEBOUNCE_ROLES.has(d.subagentType))
     return checkDebounce(ctx, d, { prompt, caller, markerDir });
 }

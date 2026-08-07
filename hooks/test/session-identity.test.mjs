@@ -87,9 +87,9 @@ describe("a context built with no session id", () => {
   });
 
   test("resolves normally from CLAUDE_CODE_SESSION_ID alone", () => {
-    expect(readMember("sessionId", { CLAUDE_CODE_SESSION_ID: "from-env" })).toBe(
-      "VALUE from-env\n",
-    );
+    expect(
+      readMember("sessionId", { CLAUDE_CODE_SESSION_ID: "from-env" }),
+    ).toBe("VALUE from-env\n");
   });
 });
 

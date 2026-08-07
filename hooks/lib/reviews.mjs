@@ -54,7 +54,11 @@ export const reviewFlag = (ctx, taskId, role) =>
 // is what keeps the work from being merged anyway. Producer: lib/validation.mjs. Consumer:
 // block-merger-without-review.mjs. Shared here so the two cannot disagree on the path.
 export const validationGaveUpFlag = (ctx, taskId) =>
-  join(sessionDirFromEnv() || ctx.sessionDir, "validation-gave-up", String(taskId));
+  join(
+    sessionDirFromEnv() || ctx.sessionDir,
+    "validation-gave-up",
+    String(taskId),
+  );
 
 // Cleared when that worktree's whole chain passes: giving up must be recoverable, or the
 // documented fix ("dispatch a developer to fix the failing step") cannot work and the ticket is
