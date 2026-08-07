@@ -122,6 +122,33 @@ if (isFeatureReview(input)) {
 }
 if (!trigger) process.exit(0);
 
+// --- has this exact code already been judged? ----------------------------------------
+// A trigger is not on its own a reason to run: the question is whether the answer would
+// be new. It would not be when the session branch has not moved since the last verdict,
+// and re-running then is worse than useless, because the first thing a run does is
+// replace a terminal verdict with `running` -- the very state the orchestrator is
+// waiting to stop seeing before it can finalise. That is the shape the livelock took:
+// 14 runs against one unchanged sha, each one rearming the wait that triggered it.
+//
+// `skipped` is deliberately not terminal here. It means the host had no free stack, so
+// the same sha genuinely deserves another attempt.
+const headNow = headSha();
+const judgedAlready =
+  previous && previous.sessionSha && previous.sessionSha === headNow;
+if (
+  judgedAlready &&
+  (previous.status === "passed" || previous.status === "failed")
+) {
+  ctx.accept(
+    `e2e already ${previous.status} for ${headNow.slice(0, 8)} -> not re-run (trigger=${trigger})`,
+  );
+}
+if (judgedAlready && previous.status === "running" && stillRunning(previous)) {
+  ctx.accept(
+    `e2e already running for ${headNow.slice(0, 8)} (pid=${previous.pid}) -> not re-launched (trigger=${trigger})`,
+  );
+}
+
 if (trigger === "feature-review") {
   // A feature review just ran, so any result from an earlier round describes code that has
   // since changed. Drop it before deciding, so the orchestrator can never read a stale
@@ -216,6 +243,26 @@ const output =
     ? `\ne2e-smoke: TIMEOUT after ${E2E_TIMEOUT_MS / 60000} minutes, the suite was killed.`
     : "");
 const status = classify(r, output);
+
+// A skip is the absence of a verdict, so it must never replace one. Two suites raced
+// once for the same sha: the winner recorded a pass, the loser found no free stack 15
+// seconds later and wrote `skipped` over it, and the run's only green verdict was gone.
+// The guard above closes that race at launch time; this closes it at write time, for
+// the pair already in flight when the first result lands.
+if (status === "skipped") {
+  const landed = readE2eResult(ctx);
+  if (
+    landed &&
+    landed.sessionSha === headSha() &&
+    (landed.status === "passed" || landed.status === "failed")
+  ) {
+    appendProgress(
+      ctx.sessionDir,
+      `[e2e] suite skipped (no free stack), keeping the ${landed.status} already recorded for this commit`,
+    );
+    ctx.accept(`e2e skipped, kept ${landed.status} src=${src}`);
+  }
+}
 
 writeResult({
   status,
