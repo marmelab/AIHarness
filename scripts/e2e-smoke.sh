@@ -15,7 +15,8 @@
 #             treats a skip as "not run here, run it later", not as a failure).
 #
 # Env: E2E_SMOKE_SLOTS (default 5), E2E_SMOKE_MIN_MB (default 2500), E2E_SMOKE_DRY=1
-#      (resolve slot/ports/config and print them, then exit WITHOUT Docker - for tests).
+#      (resolve slot/ports/config and print them, then exit WITHOUT Docker - for tests),
+#      E2E_SMOKE_SPECS (optional space-separated spec paths to run FIRST, see below).
 set -uo pipefail
 
 REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
@@ -29,6 +30,11 @@ HARNESS_NAME="${HARNESS_NAME:-$(node -e "
 # E2E_SMOKE_SRC=<WORKTREE_BASE>/_session (the session worktree, on session/<short>, with
 # node_modules already provisioned). Default $REPO = a base-branch baseline check.
 SRC="${E2E_SMOKE_SRC:-$REPO}"
+# Specs the session added or changed. They run FIRST, inside the same stack boot, so a
+# broken new spec surfaces right after boot instead of after the whole suite. The boot is
+# the expensive part (~2 min), which is why this is one run of the script with two
+# playwright invocations rather than two runs of the script.
+SPECS="${E2E_SMOKE_SPECS:-}"
 SLOTS="${E2E_SMOKE_SLOTS:-5}"
 MIN_MB="${E2E_SMOKE_MIN_MB:-2500}"
 DRY="${E2E_SMOKE_DRY:-0}"
@@ -158,6 +164,28 @@ npx wait-on -t 120000 "http-get://127.0.0.1:$api_port/auth/v1/health" "http-get:
   || skip "isolated stack did not become ready in time."
 
 # --- run the suite ----------------------------------------------------------
+# Changed specs first. A failure here is THE answer: report it and stop, rather than
+# spending the rest of the suite's runtime to learn the same thing.
+if [ -n "$SPECS" ]; then
+  # Only specs that still exist: a renamed or deleted one would fail playwright with "no
+  # tests found" and read as a suite failure.
+  present=""
+  for spec in $SPECS; do
+    [ -f "$SRC/$spec" ] && present="$present $spec"
+  done
+  if [ -n "$present" ]; then
+    echo "e2e-smoke: running changed specs first:$present"
+    ( cd "$SRC" && CI=true PLAYWRIGHT_BASE_URL="http://127.0.0.1:$app_port" npx playwright test $present )
+    changed_result=$?
+    if [ "$changed_result" -ne 0 ]; then
+      echo "e2e-smoke: changed specs FAILED (exit=$changed_result), skipping the rest of the suite"
+      echo "e2e-smoke: suite exit=$changed_result (slot $slot)"
+      exit $changed_result
+    fi
+    echo "e2e-smoke: changed specs passed, running the full suite"
+  fi
+fi
+
 echo "e2e-smoke: running Playwright against the isolated stack..."
 ( cd "$SRC" && CI=true PLAYWRIGHT_BASE_URL="http://127.0.0.1:$app_port" npx playwright test )
 result=$?
