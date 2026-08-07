@@ -10,16 +10,16 @@ Coupling was counted mechanically, not judged: occurrences of `supabase|RLS|Post
 `shadcn|fakerest|react-admin|ra-core|vite`, and the project name. **112 of the 156 files,
 10 282 lines, contained zero project vocabulary.**
 
-| area | files | clean | coupled |
-|---|---|---|---|
-| `hooks/lib/` | 16 | 15 | 1 |
-| `hooks/` | 31 | 24 | 7 |
-| `hooks/test/` | 40 | 35 | 5 |
-| `commands/` | 8 | 8 | 0 |
-| `rules/` | 15 | 10 | 5 |
-| `agents/` | 7 | 3 | 4 |
-| `scripts/` | 8 | 5 | 3 |
-| `skills/` | 23 | 9 | 14 |
+| area          | files | clean | coupled |
+| ------------- | ----- | ----- | ------- |
+| `hooks/lib/`  | 16    | 15    | 1       |
+| `hooks/`      | 31    | 24    | 7       |
+| `hooks/test/` | 40    | 35    | 5       |
+| `commands/`   | 8     | 8     | 0       |
+| `rules/`      | 15    | 10    | 5       |
+| `agents/`     | 7     | 3     | 4       |
+| `scripts/`    | 8     | 5     | 3       |
+| `skills/`     | 23    | 9     | 14      |
 
 Across the 47 files of `hooks/` and `hooks/lib/`, real code coupling came to **four
 lines**: a deprecated author-identity regex branch and a lock filename. Everything else
@@ -103,13 +103,13 @@ places had to stop assuming:
 The repo used to carry six files aimed at a developer working WITHOUT the harness. Five
 were redundant once the harness arrived, and they are out (still in `main`'s history):
 
-| dropped | already owned by |
-|---|---|
+| dropped                  | already owned by                                                                                                                                                                       |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `end-of-feature-cleanup` | its four steps each have an owner: `ponytail-review` (loaded by the quality-reviewer), the documentator, `adr-writing` (loaded by the developer), and the ticket's acceptance criteria |
-| `retro-capitalize` | the documentator's Mode 1 and Mode 2, same destination table, orchestrator-triggered |
-| `simplify` | ponytail, including the guardrails ("never simplify away input validation, security, accessibility") verbatim in intent |
-| `review-hotspots` | the quality-reviewer's required "Hotspots for human review" section, same 1-to-5 cap and same priority order |
-| `code-reviewer` | 27 lines competing with Anthropic's maintained `code-review` plugin and `security-review` |
+| `retro-capitalize`       | the documentator's Mode 1 and Mode 2, same destination table, orchestrator-triggered                                                                                                   |
+| `simplify`               | ponytail, including the guardrails ("never simplify away input validation, security, accessibility") verbatim in intent                                                                |
+| `review-hotspots`        | the quality-reviewer's required "Hotspots for human review" section, same 1-to-5 cap and same priority order                                                                           |
+| `code-reviewer`          | 27 lines competing with Anthropic's maintained `code-review` plugin and `security-review`                                                                                              |
 
 `pr-description` stayed, because it is the one that filled a verifiable gap: the team's
 Problem / Solution / How to test convention otherwise lives only in a personal
@@ -124,8 +124,8 @@ points at `/ponytail-review` instead of a `/simplify` the plugin no longer ships
 **The four coupled agent prompts.** `agents/quality-reviewer.md` (47 coupling hits, whole
 sections: `A.6b Supabase schema changes`, `B.1 Supabase RLS`), `agents/planner.md` (24),
 `agents/developer.md` (12) and `agents/orchestrator.md` (11) still inline stack facts
-instead of reading them. This is the one place the harness's own rule, *project facts live
-in `harness.config.json`*, is not followed.
+instead of reading them. This is the one place the harness's own rule, _project facts live
+in `harness.config.json`_, is not followed.
 
 Until the adapter owns those fragments, a non-Supabase project has to edit three large
 prompts by hand. Extracting them is the next step, and it deserves its own review: it

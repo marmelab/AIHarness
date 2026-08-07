@@ -22,24 +22,24 @@ a camelCase function/hook, an exported const) is **defined** or **used** in
 the `Grep` tool. Reach for LSP first whenever the question is "where / what / who",
 not "which files contain this string".
 
-| Instead of this bash-grep… | …use this LSP call |
-|---|---|
-| `grep -rn "DealStage" src/` (every use of a type) | `findReferences` (impact/blast radius) |
-| `grep -rn "mergeContacts" src/` (where defined) | `goToDefinition` |
-| `grep -rn "LatestNotes\|useContactImport" src/` (locate a symbol) | `workspaceSymbol` |
-| `grep -n "export" file.tsx` (what a file exports) | `documentSymbol` |
-| `grep -rn "buildActivityLog" src/` (who calls it) | `incomingCalls` |
+| Instead of this bash-grep…                                        | …use this LSP call                     |
+| ----------------------------------------------------------------- | -------------------------------------- |
+| `grep -rn "DealStage" src/` (every use of a type)                 | `findReferences` (impact/blast radius) |
+| `grep -rn "mergeContacts" src/` (where defined)                   | `goToDefinition`                       |
+| `grep -rn "LatestNotes\|useContactImport" src/` (locate a symbol) | `workspaceSymbol`                      |
+| `grep -n "export" file.tsx` (what a file exports)                 | `documentSymbol`                       |
+| `grep -rn "buildActivityLog" src/` (who calls it)                 | `incomingCalls`                        |
 
-| Operation | Use it to |
-|---|---|
-| `goToDefinition` | jump to where a symbol is declared (type, function, component, prop) |
-| `findReferences` | find every real use of a symbol before changing or renaming it — impact analysis |
-| `hover` | get a symbol's resolved type / signature / JSDoc without opening its file |
-| `documentSymbol` | outline a file's exports/functions/components before reading it whole |
-| `workspaceSymbol` | locate a symbol by name across the repo (`query` required) — faster than grepping for a file path |
-| `goToImplementation` | find concrete implementations of an interface or abstract member |
-| `prepareCallHierarchy` | get the call-hierarchy anchor at a position (precedes incoming/outgoing calls) |
-| `incomingCalls` / `outgoingCalls` | trace the call graph into / out of a function |
+| Operation                         | Use it to                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `goToDefinition`                  | jump to where a symbol is declared (type, function, component, prop)                              |
+| `findReferences`                  | find every real use of a symbol before changing or renaming it — impact analysis                  |
+| `hover`                           | get a symbol's resolved type / signature / JSDoc without opening its file                         |
+| `documentSymbol`                  | outline a file's exports/functions/components before reading it whole                             |
+| `workspaceSymbol`                 | locate a symbol by name across the repo (`query` required) — faster than grepping for a file path |
+| `goToImplementation`              | find concrete implementations of an interface or abstract member                                  |
+| `prepareCallHierarchy`            | get the call-hierarchy anchor at a position (precedes incoming/outgoing calls)                    |
+| `incomingCalls` / `outgoingCalls` | trace the call graph into / out of a function                                                     |
 
 Positions are **1-based** (`line`, `character`), exactly as shown in `Read` output
 and editors.

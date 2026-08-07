@@ -7,7 +7,7 @@ description: Replay a list of git-revert commits against the current base branch
 
 The chat-service's HTTP `/rollback` route attempted to `git revert -m 1 <sha>` each merge commit on the base branch, and one of them conflicted. It aborted that revert and handed you the failed commit plus every commit it still had left to undo. Your job: replay them **against the current base branch**, resolving conflicts as you go. You are dispatched **alone** — no team, no peers. The merger is dispatched separately by the orchestrator after you stop.
 
-The conflict exists because a *later* session edited the same lines this rollback wants to undo. That conflict only shows up against the current base branch — not against the stale `session/<SESSION_SHORT_ID>` your worktree was forked from. So your **first** step realigns your branch onto `BASE_BRANCH`; then the revert reproduces the real conflict for you to resolve, and the merger's promotion fast-forwards cleanly afterward.
+The conflict exists because a _later_ session edited the same lines this rollback wants to undo. That conflict only shows up against the current base branch — not against the stale `session/<SESSION_SHORT_ID>` your worktree was forked from. So your **first** step realigns your branch onto `BASE_BRANCH`; then the revert reproduces the real conflict for you to resolve, and the merger's promotion fast-forwards cleanly afterward.
 
 ## Spawn prompt — what you receive
 
@@ -118,7 +118,7 @@ Heuristic, in order:
 1. **Read both sides side-by-side**. Identify which lines come from the target commit's `+` (look at Step 1's diff) and which come from later commits.
 2. **Keep**: everything on the "HEAD" side that does NOT correspond to one of the target commit's `+` lines.
 3. **Drop**: the target commit's `+` lines (and only those).
-4. If the target commit added a whole new function/file/component that's now referenced elsewhere, you'll need to also remove those references — but only the references that exist *because* of the target commit. The `SubagentStop` hooks (typecheck, unit tests, e2e) run after you stop; if they fail with `Cannot find name 'X'` for some `X` that the target commit introduced, that's your signal to remove the reference. If they fail for something the target commit DIDN'T introduce, you went too far — revert your last edit.
+4. If the target commit added a whole new function/file/component that's now referenced elsewhere, you'll need to also remove those references — but only the references that exist _because_ of the target commit. The `SubagentStop` hooks (typecheck, unit tests, e2e) run after you stop; if they fail with `Cannot find name 'X'` for some `X` that the target commit introduced, that's your signal to remove the reference. If they fail for something the target commit DIDN'T introduce, you went too far — revert your last edit.
 
 After resolving every conflict file:
 
@@ -145,6 +145,7 @@ If at any point you can't make progress (a conflict you genuinely can't read, th
 ```bash
 cd <WORKTREE_PATH> && git revert --abort 2>/dev/null || true
 ```
+
 ```
 FAILED: rollback merge failed: <one-line, plain-English reason — say what was confusing>
 ```

@@ -15,15 +15,15 @@ Two modes, both orchestrator-triggered. The spawn prompt's `reason:` line select
 
 ## Allowed outputs
 
-| Type | Path | How it becomes active |
-|---|---|---|
-| Ledger index | `$CLAUDE_PROJECT_DIR/docs/learnings/patterns.md` | passive — read by the maintainer |
-| Rule (Markdown) | `$CLAUDE_CONFIG_DIR/local/rules/<slug>.md` | read on demand by agents via `Read` |
-| Skill | `$CLAUDE_CONFIG_DIR/local/skills/<slug>/SKILL.md` | exposed to Claude Code via a symlink the entrypoint creates at next container boot |
-| Agent | `$CLAUDE_CONFIG_DIR/local/agents/<slug>.md` | same as skills |
-| Hook (script) | `$CLAUDE_CONFIG_DIR/local/hooks/<slug>.sh` | requires manual wiring in `settings.local.json` — propose the JSON patch, do not apply it |
-| Hook wiring | `/home/developer/.claude/settings.local.json` | only edit this when explicitly approved by the user; survives reboots |
-| Project memory | `$CLAUDE_PROJECT_DIR/MEMORY.md` | read explicitly by domain-aware agents (planner, developer) at the start of their work — not auto-imported into every spawn |
+| Type            | Path                                              | How it becomes active                                                                                                       |
+| --------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Ledger index    | `$CLAUDE_PROJECT_DIR/docs/learnings/patterns.md`  | passive — read by the maintainer                                                                                            |
+| Rule (Markdown) | `$CLAUDE_CONFIG_DIR/local/rules/<slug>.md`        | read on demand by agents via `Read`                                                                                         |
+| Skill           | `$CLAUDE_CONFIG_DIR/local/skills/<slug>/SKILL.md` | exposed to Claude Code via a symlink the entrypoint creates at next container boot                                          |
+| Agent           | `$CLAUDE_CONFIG_DIR/local/agents/<slug>.md`       | same as skills                                                                                                              |
+| Hook (script)   | `$CLAUDE_CONFIG_DIR/local/hooks/<slug>.sh`        | requires manual wiring in `settings.local.json` — propose the JSON patch, do not apply it                                   |
+| Hook wiring     | `/home/developer/.claude/settings.local.json`     | only edit this when explicitly approved by the user; survives reboots                                                       |
+| Project memory  | `$CLAUDE_PROJECT_DIR/MEMORY.md`                   | read explicitly by domain-aware agents (planner, developer) at the start of their work — not auto-imported into every spawn |
 
 Every other path is blocked by the `restrict-documentator-write.mjs` hook. In particular, the canonical paths `/home/developer/.claude/{agents,skills,hooks,rules}/` and `/home/developer/.claude/settings.json` are off-limits — they are recopied from the image at every boot, so any write there is wiped on restart.
 
@@ -31,13 +31,13 @@ You do not touch `$CLAUDE_PROJECT_DIR/src/`, `<WORKTREE_BASE>/**`, or anything e
 
 ## Sources you read
 
-| Source | Path |
-|---|---|
-| ADRs (developer's structural decisions) | `$CLAUDE_PROJECT_DIR/adr/ADR-*.md` |
-| Hook logs (objective failures) | `<launcher logsDir>/<session-id>/hooks.log` (config.launcher.logsDir, e.g. `/chat-service/logs`) |
-| Session logs (retries, friction) | `<launcher logsDir>/<session-id>/log.jsonl` |
-| Existing ledger | `$CLAUDE_PROJECT_DIR/docs/learnings/patterns.md` |
-| Existing local artifacts | `$CLAUDE_CONFIG_DIR/local/{rules,skills,hooks,agents}/` |
+| Source                                  | Path                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| ADRs (developer's structural decisions) | `$CLAUDE_PROJECT_DIR/adr/ADR-*.md`                                                               |
+| Hook logs (objective failures)          | `<launcher logsDir>/<session-id>/hooks.log` (config.launcher.logsDir, e.g. `/chat-service/logs`) |
+| Session logs (retries, friction)        | `<launcher logsDir>/<session-id>/log.jsonl`                                                      |
+| Existing ledger                         | `$CLAUDE_PROJECT_DIR/docs/learnings/patterns.md`                                                 |
+| Existing local artifacts                | `$CLAUDE_CONFIG_DIR/local/{rules,skills,hooks,agents}/`                                          |
 
 Session logs can be large — read targeted ranges with `Read(offset, limit)`, do not slurp.
 
@@ -70,12 +70,12 @@ You may WRITE only `$CLAUDE_PROJECT_DIR/MEMORY.md` (and, for a Mode-1-style capt
 3. Read the diff's domain-relevant files (types, migrations, dataProvider, resource definitions, entity-naming copy). Skip styling, formatting, infra.
 4. **Route each candidate learning to its correct home.** Do not funnel everything into MEMORY.md:
 
-   | Learning | Destination | Action |
-   |---|---|---|
-   | Business detail / pitfall specific to THIS project, not inferable from code | `MEMORY.md` (`## Business Knowledge`) | WRITE (one sentence per bullet, freshest first) |
-   | General code convention, transposable to other projects | `.claude/rules/<slug>.md` | RECOMMEND in report (or Mode-1 capture in the local tree) |
-   | Reusable workflow / command sequence | `.claude/skills/<name>/SKILL.md` | RECOMMEND in report (or Mode-1 capture in the local tree) |
-   | Structural decision with weighed alternatives | an ADR under `adr/` | RECOMMEND (the developer writes ADRs in-worktree; flag if one is missing) |
+   | Learning                                                                    | Destination                           | Action                                                                    |
+   | --------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
+   | Business detail / pitfall specific to THIS project, not inferable from code | `MEMORY.md` (`## Business Knowledge`) | WRITE (one sentence per bullet, freshest first)                           |
+   | General code convention, transposable to other projects                     | `.claude/rules/<slug>.md`             | RECOMMEND in report (or Mode-1 capture in the local tree)                 |
+   | Reusable workflow / command sequence                                        | `.claude/skills/<name>/SKILL.md`      | RECOMMEND in report (or Mode-1 capture in the local tree)                 |
+   | Structural decision with weighed alternatives                               | an ADR under `adr/`                   | RECOMMEND (the developer writes ADRs in-worktree; flag if one is missing) |
 
 5. Skip any candidate that is: already recorded, ephemeral, inferable from code alone, or a pure refactor/copy.
 6. **Nothing worth capitalizing → write nothing, commit nothing.** Reply `synthesized: nothing to capitalize`. This is a complete, valid outcome.

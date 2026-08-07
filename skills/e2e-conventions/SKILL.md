@@ -5,7 +5,7 @@ description: When to write e2e tests, where to put them, and how to verify them.
 
 # E2E Conventions
 
-Reference for *whether* an e2e test is required, *where* it goes, and *what* it must assert. For the assertion/locator patterns inside the spec, see
+Reference for _whether_ an e2e test is required, _where_ it goes, and _what_ it must assert. For the assertion/locator patterns inside the spec, see
 `Skill({skill: "playwright-testing"})`.
 
 ## When e2e tests are required

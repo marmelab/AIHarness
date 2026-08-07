@@ -10,10 +10,10 @@ paths:
 
 Treat these concerns separately — do not mix them:
 
-Server state    → TanStack Query, SWR, or tRPC
-Client state    → Zustand, Jotai, or signals
-URL state       → search params, route segments
-Form state      → React Hook Form or equivalent
+Server state → TanStack Query, SWR, or tRPC
+Client state → Zustand, Jotai, or signals
+URL state → search params, route segments
+Form state → React Hook Form or equivalent
 
 Do not duplicate server state into client stores.
 Derive values instead of storing redundant computed state.
@@ -38,6 +38,7 @@ Prefer this over prop drilling for complex widgets.
 Fetch independent data in parallel — avoid parent-child request waterfalls.
 
 For optimistic updates:
+
 1. Snapshot current state
 2. Apply optimistic update immediately
 3. Roll back on failure

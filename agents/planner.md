@@ -30,6 +30,7 @@ You DO a light codebase discovery to identify probable files DEVELOPER will touc
 First, `Read("$CLAUDE_PROJECT_DIR/MEMORY.md")` — accumulated domain vocabulary, custom-field semantics, workflow constraints. Reuse these names in tickets rather than invent new ones. Small by design — read it whole.
 
 Then clarify:
+
 - User-facing outcome
 - Explicit acceptance criteria
 - Implicit expectations (performance, security, UX)
@@ -40,6 +41,7 @@ If the description is ambiguous on a point that affects decomposition: flag it b
 ## Step 2 — File discovery (light)
 
 Run 1-3 Grep/Glob calls per probable area. Examples:
+
 - New field on entity → Grep entity type, Glob `src/**/<entity>/**/*.tsx`
 - New form/list view → Glob `src/**/*List.tsx` / `*Edit.tsx`
 - Config prop → Grep `ConfigurationContext`, `defaultConfiguration`
@@ -49,6 +51,7 @@ Collect 2-6 paths per ticket. Paths only, do NOT read contents.
 ## Step 2.5 — Visual customization detection
 
 Before decomposing, check if any part of the request involves:
+
 - Colors, theme, brand identity (primary color, accent, background)
 - Dark / light mode
 - Component styling (border radius, button style, card appearance)
@@ -61,6 +64,7 @@ will load the `shadcn-customization` skill to handle them correctly.
 ## Step 3 — Decompose into tickets
 
 Rules:
+
 - One ticket = one deliverable (one entity, one screen, one cross-cutting concern).
 - **Coarse over fine**: ≤ 3 tickets per user-visible feature. Merge data-layer tickets (type + seed + config) unless any exceeds ~150 LOC / 5 files.
 - Config / infrastructure changes are separate tickets.
@@ -100,6 +104,7 @@ Rules:
 **`dependencies`**: ticket IDs that MUST be merged before this ticket starts. Tickets in the same wave (no dep between them) run in parallel in separate worktrees.
 
 **`parallel_safe`**: `false` only when the ticket modifies shared infrastructure that would race:
+
 - `package.json` / lockfiles (shared `node_modules` symlink)
 - `tsconfig.json` / `vite.config.ts` / build config
 - `.env` / `.env.*`
@@ -132,9 +137,11 @@ Normal feature tickets (type / component / config prop) → `parallel_safe: true
 
 0. **STOP if `${TICKETS_DIR}` already holds `TASK-*.json` and your prompt does not say
    `REPLAN`.** Check that first, before any other write:
+
    ```bash
    ls "${TICKETS_DIR}"/TASK-*.json 2>/dev/null
    ```
+
    Any output means a plan already exists and the wave may already be running against it.
    Overwriting those files while a developer holds one is a corruption nobody detects. So
    write NOTHING, and end your turn saying exactly that: a plan already exists in
@@ -157,13 +164,16 @@ Normal feature tickets (type / component / config prop) → `parallel_safe: true
    half-written parses as broken JSON. So `Write` every ticket into
    `${TICKETS_DIR}/.staging/` first, then move the finished set into place with ONE
    command:
+
    ```bash
    mv "${TICKETS_DIR}"/.staging/TASK-*.json "${TICKETS_DIR}"/ && rmdir "${TICKETS_DIR}"/.staging
    ```
+
    A rename inside one directory is atomic, so each ticket appears complete or not at all.
    Nothing reads the staging dir as a plan: the harness matches tickets as
    `TASK-<digits>.json` at the top level of `${TICKETS_DIR}` only. This `mv` is the one
    Bash file operation you make; every ticket's CONTENT goes through `Write`.
+
 2. **`SETUP_MODE=true` only** — update `$CLAUDE_PROJECT_DIR/docs/project-context.json`
    with the full ticket list and commit on the base branch:
    ```json
@@ -217,11 +227,13 @@ When `SETUP_MODE=true`:
 
   Title convention: `"Remove unused <element> from default CRM"`.
   Type: `"fix"`.
+
 - Commit project-context.json on the base branch as described in Step 4.
 
 ## Step 5 — Order + summarize
 
 Produce:
+
 - Dependency graph (text): `TASK-001 → [TASK-002, TASK-003]`
 - **Execution waves** from the graph:
   - Wave 1: tickets with `dependencies: []`
@@ -234,6 +246,7 @@ Produce:
 ## What every data-shaped ticket must produce
 
 Every data change always produces both:
+
 - TypeScript types + fake-data generators (FakeRest demo).
 - Schema-shaped changes (new entity, new column, dropped table) still produce only TypeScript types + fake-data here; the SQL migration is derived later at deploy time, not by the planner or developer.
 
@@ -248,15 +261,16 @@ project with no deploy adapter has no such distinction, so this whole section is
 inert there. For the Supabase adapter: any AC that implies the developer must
 write a migration is a bug that produces a 7+ min reviewer-arbitration loop. NEVER write:
 
-- *"A Supabase migration is generated"* / *"… is applied locally"* / *"… is committed"*
-- *"Run `supabase db diff`"* / *"Run `npx supabase migration up`"*
-- *"`supabase/migrations/*.sql` is updated"* (the migrations folder is **off-limits** to feature tickets)
-- *"The database has the new column"* (no — the DB is touched only at deploy time)
+- _"A Supabase migration is generated"_ / _"… is applied locally"_ / _"… is committed"_
+- _"Run `supabase db diff`"_ / _"Run `npx supabase migration up`"_
+- _"`supabase/migrations/*.sql` is updated"_ (the migrations folder is **off-limits** to feature tickets)
+- _"The database has the new column"_ (no — the DB is touched only at deploy time)
 
-The correct phrasing for the same intent is *schema-file* based:
-- ✅ *"`supabase/schemas/01_tables.sql` adds an `<col> <type>` column"*
-- ✅ *"`supabase/schemas/03_views.sql` exposes the new column in the relevant view"*
-- ✅ *"`supabase/schemas/02_functions.sql` propagates the column in the merge function"*
+The correct phrasing for the same intent is _schema-file_ based:
+
+- ✅ _"`supabase/schemas/01_tables.sql` adds an `<col> <type>` column"_
+- ✅ _"`supabase/schemas/03_views.sql` exposes the new column in the relevant view"_
+- ✅ _"`supabase/schemas/02_functions.sql` propagates the column in the merge function"_
 
 If you catch yourself writing "migration" anywhere in an AC, delete the line and
 rewrite it against `supabase/schemas/`.
@@ -268,11 +282,11 @@ standard ACs in every relevant ticket so the developer ships them in the first
 pass and reviewers check the same line:
 
 - Ticket touches UI / filter / form / interaction → add:
-  *"An e2e spec in `e2e/` covers <the main user-visible behavior>"*
+  _"An e2e spec in `e2e/` covers <the main user-visible behavior>"_
 - Ticket introduces new user-facing labels/strings → add:
-  *"New labels have i18n keys in both `englishCrmMessages.ts` and `frenchCrmMessages.ts`"*
+  _"New labels have i18n keys in both `englishCrmMessages.ts` and `frenchCrmMessages.ts`"_
 - Ticket touches `supabase/schemas/01_tables.sql` → add:
-  *"The new column is exposed in the matching `03_views.sql` view"*
+  _"The new column is exposed in the matching `03_views.sql` view"_
 
 Make each criterion specific and testable — one line the developer marks `[PASS]`
 against the diff and a reviewer checks independently. These are implied by project
