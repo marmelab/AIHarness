@@ -24,13 +24,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
 import { reviewsDir } from "./lib/reviews.mjs";
 import { getBaseBranch, git } from "./lib/git.mjs";
-import { sessionBaseBranch, sessionBranch } from "./lib/topology.mjs";
+import { sessionBranch } from "./lib/topology.mjs";
 
-if (process.env.CHAT_SESSION_DIR) process.exit(0);
+if (sessionDirFromEnv()) process.exit(0);
 
 let input = {};
 try {
@@ -41,8 +42,35 @@ try {
 const ctx = createHookContext(input, "render-status");
 
 const progressLog = join(ctx.sessionDir, "harness-progress.log");
-// No technical progress log → not a #technical-harness run → stay inert.
+// No technical progress log -> not a #technical-harness run -> stay inert.
 if (!existsSync(progressLog)) process.exit(0);
+
+// The board is derived from the progress log, so an unchanged log renders the same
+// board. This hook fires on EVERY subagent stop, and the expensive part is sessionDiff:
+// a `git diff` plus a `git diff --stat` per dev branch, on every stop, to re-emit bytes
+// nobody asked for. The last rendered mtime is kept in status.json, next to the output
+// it describes, so the check costs one stat and needs no extra state file.
+const outDir = join(REPO, ".harness", ctx.sessionShort);
+const statusJsonPath = join(outDir, "status.json");
+const progressMtimeMs = (() => {
+  try {
+    return statSync(progressLog).mtimeMs;
+  } catch {
+    return 0;
+  }
+})();
+const lastRenderedMtimeMs = (() => {
+  try {
+    const prev = JSON.parse(readFileSync(statusJsonPath, "utf8"));
+    return prev.progressMtimeMs ?? 0;
+  } catch {
+    return 0; // absent / unreadable / pre-dates this field -> render
+  }
+})();
+// Silent, like every other "nothing happened" path: this hook fires on every subagent
+// stop, so a line per skip is a line per stop saying the board is what it already was.
+// What gets logged is a render.
+if (progressMtimeMs && progressMtimeMs === lastRenderedMtimeMs) process.exit(0);
 
 const WT_RE = /^(TASK-\d+|simple|_session)$/;
 const TICKET_RE = /^TASK-\d+\.json$/;
@@ -94,10 +122,7 @@ const approved = (id) =>
 const E2E_ICON = { passed: "✅", skipped: "⏭", failed: "❌" };
 function e2eLine() {
   try {
-    const p = join(
-      process.env.CHAT_SESSION_DIR || ctx.sessionDir,
-      "e2e-result.json",
-    );
+    const p = join(sessionDirFromEnv() || ctx.sessionDir, "e2e-result.json");
     if (!existsSync(p)) return "_not run this round_";
     const r = JSON.parse(readFileSync(p, "utf8"));
     return `${E2E_ICON[r.status] ?? "?"} **${r.status}**${r.finishedAt ? ` · ${r.finishedAt}` : ""}`;
@@ -138,8 +163,9 @@ function diffSection(label, range) {
 }
 
 function sessionDiff() {
-  const anchor = sessionBaseBranch(ctx);
-  const baseRef = verifyRef(anchor) ? anchor : getBaseBranch();
+  // The session's fork anchor when it exists, the repo HEAD otherwise (see
+  // getBaseBranch on the window where that is all there is).
+  const baseRef = getBaseBranch(ctx);
   const sessRef = sessionBranch(ctx);
   const sections = [];
 
@@ -243,6 +269,9 @@ function build() {
   const statusJson = {
     short: ctx.sessionShort,
     updated,
+    // What the skip above compares against. Written last, so a render that throws
+    // leaves the previous value and the next stop re-renders.
+    progressMtimeMs,
     tickets: {
       total: tickets.length,
       merged,
@@ -257,14 +286,10 @@ function build() {
 
 try {
   const { statusMd, ticketsMd, statusJson, diffPatch } = build();
-  const outDir = join(REPO, ".harness", ctx.sessionShort);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "STATUS.md"), statusMd);
   writeFileSync(join(outDir, "TICKETS.md"), ticketsMd);
-  writeFileSync(
-    join(outDir, "status.json"),
-    JSON.stringify(statusJson, null, 2),
-  );
+  writeFileSync(statusJsonPath, JSON.stringify(statusJson, null, 2));
   if (diffPatch) writeFileSync(join(outDir, "session.diff"), diffPatch);
   ctx.log(`rendered board -> ${outDir}`);
 } catch (e) {

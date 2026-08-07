@@ -143,6 +143,15 @@ describe("cleanup-worktree skips by role, through bareRole", () => {
   const stop = (agentType) => {
     const sessionId = `ab${seq++}0ef56-1111-2222-3333-444455556666`;
     const layout = runtimeLayout(join(TMP, `rt${seq}`), sessionId);
+    // The sweep needs a worktree base to sweep; without one the hook has nothing to
+    // do and says nothing, which would make the merger case pass for the wrong reason.
+    // The base carries the harness's OWN state dirs, which is the normal shape: they
+    // are not worktrees and never will be, and each one used to earn a log line per
+    // stop saying so.
+    const base = join(join(TMP, "scratch"), sanitizePath(APP_DIR), sessionId);
+    for (const d of ["breaker", "reviews", "locks", "tickets"]) {
+      mkdirSync(join(base, d), { recursive: true });
+    }
     spawnAgent(
       layout,
       "a00000000000000041",
@@ -164,15 +173,28 @@ describe("cleanup-worktree skips by role, through bareRole", () => {
   };
 
   test.each(["merger", "aiharness:merger"])("%s proceeds to the sweep", (t) => {
-    expect(stop(t)).not.toContain("cleanup runs on merger stops");
+    expect(stop(t)).toContain("[cleanup-worktree] ACCEPT removed=");
   });
 
+  // The volume criterion, not a style preference: this hook wrote 1521 lines in one
+  // session and 1299 of them were skips. A sweep that removes nothing is the common
+  // case, and it must cost one line, with the reasons folded into it.
+  test("a sweep that removes nothing writes exactly one line", () => {
+    const log = stop("merger");
+    const lines = log
+      .split("\n")
+      .filter((l) => l.includes("[cleanup-worktree]"));
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain("removed=0");
+  });
+
+  // Every stop of every role reaches this hook, so the roles it has nothing to do for
+  // must leave NOTHING behind: one line each would be one line per subagent stop for
+  // the whole session, all of them saying the hook was not asked for anything.
   test.each(["developer", "aiharness:developer"])(
-    "%s is skipped, and the log says on what basis",
+    "%s writes no line at all",
     (t) => {
-      const log = stop(t);
-      expect(log).toContain("cleanup runs on merger stops");
-      expect(log).toContain("via agent-id");
+      expect(stop(t)).not.toContain("[cleanup-worktree]");
     },
   );
 });

@@ -24,12 +24,13 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 
 const LINK_NAME = ".harness-session";
 
 // A managed launcher (chat-service) owns the session and its own UI; there is
 // no VS Code workspace to manage.
-if (process.env.CHAT_SESSION_DIR) process.exit(0);
+if (sessionDirFromEnv()) process.exit(0);
 
 let input = {};
 try {

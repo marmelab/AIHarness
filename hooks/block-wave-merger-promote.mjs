@@ -17,52 +17,53 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import { isMerger } from "./lib/teams.mjs";
 import { sessionBranch } from "./lib/topology.mjs";
 
-const input = JSON.parse(readFileSync(0, "utf8"));
-const ctx = createHookContext(input, "block-wave-merger-promote");
+export function check(input, ctx) {
+  // Only the merger runs Stage B; every other agent is out of scope for this guard.
+  if (![ctx.agentName, ctx.agentType].some(isMerger)) return;
 
-// Only the merger runs Stage B; every other agent is out of scope for this guard.
-if (![ctx.agentName, ctx.agentType].some(isMerger)) process.exit(0);
+  const cmd = input.tool_input?.command || "";
+  if (!cmd) return;
 
-const cmd = input.tool_input?.command || "";
-if (!cmd) process.exit(0);
+  // Stage-B signature: a `git merge` that pulls in the session branch (promotion),
+  // or the promotion commit message. Stage A merges a <short>/TASK-XXX branch INTO
+  // the session branch and never names session/<short> as a merge argument, so it
+  // does not match.
+  const session = sessionBranch(ctx); // session/<short>
+  const isStageBPromotion =
+    /\bgit\s+merge\b/.test(cmd) &&
+    (cmd.includes(session) || /merge\(session\)/.test(cmd));
+  if (!isStageBPromotion) return;
 
-// Stage-B signature: a `git merge` that pulls in the session branch (promotion),
-// or the promotion commit message. Stage A merges a <short>/TASK-XXX branch INTO
-// the session branch and never names session/<short> as a merge argument, so it
-// does not match.
-const session = sessionBranch(ctx); // session/<short>
-const isStageBPromotion =
-  /\bgit\s+merge\b/.test(cmd) &&
-  (cmd.includes(session) || /merge\(session\)/.test(cmd));
-if (!isStageBPromotion) process.exit(0);
+  // Read the dispatch-time authorization marker. Fail CLOSED.
+  let promote = false;
+  let markerSeen = false;
+  try {
+    const marker = JSON.parse(
+      readFileSync(join(ctx.sessionDir, "merger-stage.json"), "utf8"),
+    );
+    markerSeen = true;
+    promote = marker.promote === true;
+  } catch {
+    promote = false; // no/unreadable marker -> not authorized
+  }
 
-// Read the dispatch-time authorization marker. Fail CLOSED.
-let promote = false;
-let markerSeen = false;
-try {
-  const marker = JSON.parse(
-    readFileSync(join(ctx.sessionDir, "merger-stage.json"), "utf8"),
+  if (promote) return;
+
+  ctx.fail(
+    "Blocked: this merger is a Stage-A-only dispatch and must NOT promote the session branch to the base branch.\n\n" +
+      `It tried to run Stage B (promotion):\n  ${cmd}\n\n` +
+      (markerSeen
+        ? "Its dispatch is not authorized to promote (a per-ticket TASK-XXX wave merge, or STAGE: a-only)."
+        : "No promotion-authorization marker was found for this session (fail-closed).") +
+      "\n\nStage B runs ONLY via a dedicated `MODE: promote` merger after the LAST wave, or a SIMPLE / MIGRATION single-shot. " +
+      `A per-ticket wave merger runs Stage A ONLY: merge <short>/TASK-XXX into ${session} and stop. ` +
+      'See merger.md ("TASK-XXX -> Stage A only") and orchestrator.md\'s promotion block.',
+    { log: `BLOCK stage-A merger tried Stage B (markerSeen=${markerSeen})` },
   );
-  markerSeen = true;
-  promote = marker.promote === true;
-} catch {
-  promote = false; // no/unreadable marker -> not authorized
 }
 
-if (promote) process.exit(0);
-
-ctx.fail(
-  "Blocked: this merger is a Stage-A-only dispatch and must NOT promote the session branch to the base branch.\n\n" +
-    `It tried to run Stage B (promotion):\n  ${cmd}\n\n` +
-    (markerSeen
-      ? "Its dispatch is not authorized to promote (a per-ticket TASK-XXX wave merge, or STAGE: a-only)."
-      : "No promotion-authorization marker was found for this session (fail-closed).") +
-    "\n\nStage B runs ONLY via a dedicated `MODE: promote` merger after the LAST wave, or a SIMPLE / MIGRATION single-shot. " +
-    `A per-ticket wave merger runs Stage A ONLY: merge <short>/TASK-XXX into ${session} and stop. ` +
-    'See merger.md ("TASK-XXX -> Stage A only") and orchestrator.md\'s promotion block.',
-  { log: `BLOCK stage-A merger tried Stage B (markerSeen=${markerSeen})` },
-);
+runStandalone(import.meta.url, "block-wave-merger-promote", check);

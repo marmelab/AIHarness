@@ -2,12 +2,45 @@
 
 import { REPO } from "./paths.mjs";
 import { exec } from "./process.mjs";
+import { sessionBaseBranch } from "./topology.mjs";
 
 export function git(args = [], opts = {}) {
   return exec("git", ["-C", REPO, ...args], opts);
 }
 
-export function getBaseBranch() {
+/**
+ * The ref a hook diffs against.
+ *
+ * With a ctx, the session's FORK ANCHOR wins: `session-base/<short>` is a fixed commit
+ * created alongside the session branch, so "what has this session changed" keeps
+ * meaning the same thing for the whole session. The repo's HEAD does not: it is
+ * whatever the human has checked out right now.
+ *
+ * EXPOSURE WINDOW, and it is real. Before the anchor exists there is nothing to anchor
+ * to and the answer is the current HEAD. That window is open from the start of a
+ * session until its first developer dispatch, because setup-worktree creates the
+ * session branch, the anchor and the recorded base-branch name together, from HEAD. A
+ * human who switches branches inside that window silently moves the base: the session
+ * forks from, validates against, and later promotes into whatever happened to be
+ * checked out at that moment. Nothing detects it, because a different HEAD is
+ * indistinguishable from an intentional one. The window closes at the first dispatch
+ * and never reopens: once recorded, neither the anchor nor the name is rewritten.
+ *
+ * Callers that need the base branch NAME rather than a diff base (setup-worktree
+ * creating the session branch, the merger promoting into it) must NOT pass a ctx: a
+ * name is what a promotion merges into, and the anchor is a commit. session-state's
+ * forkBaseBranch answers that question, from `sessionbase.<short>.branch`.
+ *
+ * @param {{sessionShort?: string}} [ctx]
+ * @returns {string}
+ */
+export function getBaseBranch(ctx) {
+  if (ctx?.sessionShort) {
+    const anchor = sessionBaseBranch(ctx);
+    if (git(["rev-parse", "--verify", "--quiet", anchor]).status === 0) {
+      return anchor;
+    }
+  }
   const r = git(["symbolic-ref", "--short", "HEAD"]);
   return (r.status === 0 ? r.stdout.trim() : "") || "main";
 }

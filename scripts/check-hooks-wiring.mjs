@@ -59,6 +59,26 @@ for (const entries of Object.values(manifest.hooks ?? {})) {
   }
 }
 
+// A PreToolUse dispatcher registers ONCE and calls its guards in-process, so those
+// guards are reached through it rather than through their own registration. Follow the
+// dispatcher's imports and count what it pulls in as registered: without this every
+// guard behind a dispatcher would read as an orphan, and the orphan check (which is the
+// thing that catches a genuinely forgotten registration) would have to be switched off.
+const importedGuards = (relPath) => {
+  let body = "";
+  try {
+    body = readFileSync(join(ROOT, relPath), "utf8");
+  } catch {
+    return [];
+  }
+  return [...body.matchAll(/^import .*? from "\.\/([\w.-]+\.mjs)";$/gm)].map(
+    (m) => `hooks/${m[1]}`,
+  );
+};
+for (const reg of [...registered]) {
+  for (const guard of importedGuards(reg)) registered.add(guard);
+}
+
 // Hooks on disk that nothing registers. Not fatal on its own (a hook can be invoked by
 // another hook), but it is nearly always a forgotten registration, so it fails the check
 // and an intentional exception is added here explicitly.

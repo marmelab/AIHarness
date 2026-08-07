@@ -5,11 +5,13 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -105,6 +107,59 @@ describe("render-status", () => {
     // No e2e verdict on disk yet: say so rather than imply the suite is green.
     expect(md).toContain("## End-of-feature e2e");
     expect(md).toContain("_not run this round_");
+  });
+
+  // This hook fires on EVERY subagent stop, and the board is derived from the progress
+  // log, so an unchanged log renders the same bytes. The skip is what keeps a session's
+  // stops from each paying for a git diff per dev branch.
+  describe("re-render skip", () => {
+    test("a second stop with an unchanged progress log renders nothing new", () => {
+      const { base, outDir, run } = setup();
+      run();
+      const first = statSync(join(outDir, "STATUS.md")).mtimeMs;
+      const stored = JSON.parse(
+        readFileSync(join(outDir, "status.json"), "utf8"),
+      ).progressMtimeMs;
+      expect(stored).toBeGreaterThan(0);
+
+      const r = run();
+      expect(r.status).toBe(0);
+      expect(statSync(join(outDir, "STATUS.md")).mtimeMs).toBe(first);
+      // And it says nothing: one line per stop reporting that nothing changed is the
+      // same noise the render itself was. The first run logged once, so the count is
+      // what must not grow.
+      const lines = () =>
+        readFileSync(join(base, "hooks.log"), "utf8")
+          .split("\n")
+          .filter((l) => l.includes("[render-status]")).length;
+      expect(lines()).toBe(1);
+      run();
+      expect(lines()).toBe(1);
+    });
+
+    test("an appended progress line renders again", () => {
+      const { base, outDir, run } = setup();
+      run();
+      const before = readFileSync(join(outDir, "STATUS.md"), "utf8");
+      appendFileSync(
+        join(base, "harness-progress.log"),
+        "12:09:00 TASK-002 developer DONE\n",
+      );
+      run();
+      const after = readFileSync(join(outDir, "STATUS.md"), "utf8");
+      expect(after).not.toBe(before);
+      expect(after).toContain("TASK-002 developer DONE");
+    });
+
+    // The mtime is stored in the board's own status.json, so a board that was never
+    // written (or was deleted) renders rather than trusting a stale marker.
+    test("a missing status.json renders again", () => {
+      const { outDir, run } = setup();
+      run();
+      rmSync(join(outDir, "status.json"));
+      run();
+      expect(existsSync(join(outDir, "status.json"))).toBe(true);
+    });
   });
 
   test("surfaces a red end-of-feature e2e on the board", () => {

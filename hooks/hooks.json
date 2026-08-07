@@ -1,5 +1,5 @@
 {
-  "description": "The agent-harness enforcement layer: worktree provisioning, dispatch gates, validation on stop, review-verdict bookkeeping, session bootstrap and teardown. Paths resolve through ${CLAUDE_PLUGIN_ROOT}, so the hooks run from wherever the plugin is installed.",
+  "description": "The agent-harness enforcement layer: worktree provisioning, dispatch gates, validation on stop, review-verdict bookkeeping, session bootstrap and teardown. Paths resolve through ${CLAUDE_PLUGIN_ROOT}, so the hooks run from wherever the plugin is installed. WARNING, read rules/hook-authoring.md before trusting a SubagentStop matcher: agent_type is empty on that event, so those matchers select NOTHING today and every SubagentStop hook fires on every stop. They are documentation sitting in a field the runtime may start honouring, at which point each one needs re-auditing for namespaced roles (aiharness:developer, not developer) and for tokens no agent answers to (simple-developer).",
   "hooks": {
     "SessionStart": [
       {
@@ -39,32 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-pr-checks.mjs",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-bash.mjs",
             "timeout": 150
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-docker-containers.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/circuit-breaker.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-orchestrator-merge.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-wave-merger-promote.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/restrict-documentator-bash.mjs"
           }
         ]
       },
@@ -86,35 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-nested-orchestrator.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-duplicate-dispatch.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-merger-without-review.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/block-promote-unmerged.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/record-merger-stage.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/enforce-dev-dispatch.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/force-foreground-orchestrator-dispatch.mjs"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/setup-worktree.mjs",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-agent.mjs",
             "timeout": 180,
             "statusMessage": "Setting up worktree..."
           }

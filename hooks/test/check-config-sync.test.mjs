@@ -104,3 +104,34 @@ describe("check-config-sync", () => {
     expect(r.status).toBe(0);
   });
 });
+
+// The SubagentStop matchers select nothing today (agent_type is empty on that event), so
+// a token naming no agent is harmless AND undetectable by any other means. The day the
+// runtime honours matchers it becomes a matcher that silently selects nothing, which is
+// exactly the class of failure this repo cannot afford to rediscover by accident. Report
+// it now, on the repo's own wiring, so the re-audit list is generated rather than
+// remembered. See rules/hook-authoring.md.
+describe("matcher tokens that name no agent", () => {
+  test("are reported as a NOTE, without failing the check", () => {
+    const r = spawnSync("node", [SCRIPT, "--app", REPO_ROOT], {
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("name no agent on disk");
+    expect(r.stdout).toContain("simple-developer");
+    expect(r.stdout).toContain("rules/hook-authoring.md");
+  });
+
+  test("and the roles that DO have an agent are not reported", () => {
+    const r = spawnSync("node", [SCRIPT, "--app", REPO_ROOT], {
+      encoding: "utf8",
+    });
+    const note = r.stdout
+      .split("\n")
+      .find((l) => l.includes("name no agent on disk"));
+    for (const role of ["developer", "quality-reviewer", "merger", "planner"]) {
+      expect(note).not.toContain(` ${role},`);
+      expect(note.endsWith(` ${role}.`)).toBe(false);
+    }
+  });
+});

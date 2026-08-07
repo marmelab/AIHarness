@@ -154,6 +154,34 @@ export const validateRoles = (cfg) =>
   roleNames(cfg).filter((r) => cfg.roles[r]?.validate);
 // Managed-launcher extension points (empty object when no launcher overlay).
 export const launcher = (cfg) => cfg.launcher ?? {};
+// The env var carrying the managed launcher's session dir. A launcher that uses a
+// different name declares it as config.launcher.sessionDirEnv.
+export const sessionDirEnvName = (cfg) =>
+  cfg.launcher?.sessionDirEnv || DEFAULTS.launcher.sessionDirEnv;
+
+/**
+ * The managed launcher's session dir, or "" when there is no managed launcher.
+ *
+ * The ONE place that env var is read. Every consumer used to read
+ * process.env.CHAT_SESSION_DIR directly, which made config.launcher.sessionDirEnv a
+ * documented extension point that changed nothing: under a launcher exporting any
+ * other name, the review verdict flags, the e2e result and the status board were
+ * written to and read from the recomputed /tmp/<repo>/<id> path instead of the dir
+ * the launcher owns. Nothing errors in that state; the verdicts are simply not where
+ * anyone looks for them.
+ *
+ * @param {object} [cfg] a config already loaded by the caller
+ * @returns {string}
+ */
+export function sessionDirFromEnv(cfg) {
+  let name;
+  try {
+    name = sessionDirEnvName(cfg ?? loadConfig());
+  } catch {
+    name = DEFAULTS.launcher.sessionDirEnv;
+  }
+  return process.env[name] || "";
+}
 export const allowedContainers = (cfg) => cfg.containers?.allow ?? [];
 // The format-kind validation step (null when none), used by format-on-write.
 export const formatStep = (cfg) =>

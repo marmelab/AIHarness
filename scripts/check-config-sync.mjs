@@ -14,7 +14,7 @@
 // Usage: node scripts/check-config-sync.mjs [--app <repo>]
 // Exit 0 = in sync; exit 1 = drift (prints the offending tokens).
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, roleNames } from "../hooks/lib/config.mjs";
@@ -87,7 +87,34 @@ export function checkConfigSync(repo) {
   }
   const tokens = settingsRoleTokens(settings);
   const missing = tokens.filter((t) => !roles.has(t));
-  return { ok: missing.length === 0, missing, tokens, roles: [...roles] };
+  return {
+    ok: missing.length === 0,
+    missing,
+    tokens,
+    roles: [...roles],
+    agentless: agentlessTokens(tokens),
+  };
+}
+
+// Matcher tokens that name a declared role NO agent is dispatched under. Reported, not
+// failed: a role can legitimately exist in the config without its own agent file
+// (simple-developer is the SIMPLE flow's validate/debounce identity, dispatched as
+// `developer`). It matters because the matcher is inert TODAY for a different reason
+// (agent_type is empty at SubagentStop, so nothing is filtered at all), and the day the
+// runtime starts honouring matchers this token will select nothing while looking correct.
+// See rules/hook-authoring.md.
+function agentlessTokens(tokens) {
+  let agents;
+  try {
+    agents = new Set(
+      readdirSync(join(HERE, "..", "agents"))
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => f.replace(/\.md$/, "")),
+    );
+  } catch {
+    return []; // no agents dir to compare against
+  }
+  return tokens.filter((t) => !agents.has(t));
 }
 
 // Run as CLI when invoked directly (not when imported by a test).
@@ -105,6 +132,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         `Rename the role in BOTH files, or add it to config.roles.`,
     );
     process.exit(1);
+  }
+  if (r.agentless.length) {
+    process.stdout.write(
+      `check-config-sync: NOTE ${r.agentless.length} matcher token(s) name no agent on disk: ${r.agentless.join(", ")}.\n` +
+        `  Harmless while SubagentStop matchers filter nothing (agent_type is empty), and inert the day they do.\n` +
+        `  See rules/hook-authoring.md "The SubagentStop matchers do not filter".\n`,
+    );
   }
   process.stdout.write(
     `check-config-sync: OK (${r.tokens.length} role matcher(s) all declared)\n`,

@@ -36,8 +36,9 @@ import { REPO } from "./lib/paths.mjs";
 import { removeWorktreesUnder } from "./lib/worktree.mjs";
 import { detectInflight } from "./lib/session-state.mjs";
 import { removeWorktreeFolders } from "./lib/workspace-folders.mjs";
+import { sessionDirFromEnv } from "./lib/config.mjs";
 
-if (process.env.CHAT_SESSION_DIR) process.exit(0);
+if (sessionDirFromEnv()) process.exit(0);
 
 let raw = "";
 try {

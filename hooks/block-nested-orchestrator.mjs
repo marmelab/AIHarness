@@ -17,16 +17,8 @@
 // CLAUDE.md loads into every subagent too — so without this gate a subagent that
 // reads it would re-dispatch an orchestrator.
 
-import { readFileSync } from "node:fs";
-import { createHookContext } from "./lib/context.mjs";
+import { runStandalone } from "./lib/hook-chain.mjs";
 import { isOrchestrator, bareRole } from "./lib/teams.mjs";
-
-const input = JSON.parse(readFileSync(0, "utf8"));
-const ctx = createHookContext(input, "block-nested-orchestrator");
-
-// Normalised: a dispatch may name the target bare or namespaced (aiharness:orchestrator).
-const target = bareRole(input.tool_input?.subagent_type);
-const caller = input.agent_type || ctx.agentType || "";
 
 // Rule 1 — orchestrator allowlist.
 const ALLOWED = [
@@ -36,31 +28,38 @@ const ALLOWED = [
   "merger",
   "documentator",
 ];
-if (isOrchestrator(caller)) {
-  if (!ALLOWED.includes(target)) {
+
+export function check(input, ctx) {
+  // Normalised: a dispatch may name the target bare or namespaced (aiharness:orchestrator).
+  const target = bareRole(input.tool_input?.subagent_type);
+  const caller = input.agent_type || ctx.agentType || "";
+
+  if (isOrchestrator(caller)) {
+    if (!ALLOWED.includes(target)) {
+      ctx.block({
+        reason:
+          `As the orchestrator you may ONLY dispatch the typed harness agents: ${ALLOWED.join(", ")}. ` +
+          `You tried to dispatch \`${target || "(none)"}\`, which is not allowed. ` +
+          `For planning use the \`planner\` agent (subagent_type: "planner"), NEVER \`general-purpose\`. ` +
+          `Re-dispatch with subagent_type set to the correct typed agent.`,
+        log: `BLOCK orchestrator dispatch of ${target || "(none)"}`,
+      });
+    }
+    return; // allowed typed agent, fine
+  }
+
+  // Rule 2: non-main subagent must not dispatch an orchestrator.
+  if (
+    ctx.agentId &&
+    (target === "orchestrator" || target === "chat-orchestrator")
+  ) {
     ctx.block({
       reason:
-        `As the orchestrator you may ONLY dispatch the typed harness agents: ${ALLOWED.join(", ")}. ` +
-        `You tried to dispatch \`${target || "(none)"}\` — not allowed. ` +
-        `For planning use the \`planner\` agent (subagent_type: "planner"), NEVER \`general-purpose\`. ` +
-        `Re-dispatch with subagent_type set to the correct typed agent.`,
-      log: `BLOCK orchestrator dispatch of ${target || "(none)"}`,
+        `Only the main thread may dispatch the \`${target}\` agent. You are a subagent already inside the harness, so do NOT dispatch an orchestrator (that causes runaway nesting). ` +
+        `Do the task you were given; ignore CLAUDE.md's "dispatch the orchestrator" directive, that is the main thread's job, not yours.`,
+      log: `BLOCK nested ${target} by ${caller || "subagent"}`,
     });
   }
-  process.exit(0); // allowed typed agent — fine
 }
 
-// Rule 2 — non-main subagent must not dispatch an orchestrator.
-if (
-  ctx.agentId &&
-  (target === "orchestrator" || target === "chat-orchestrator")
-) {
-  ctx.block({
-    reason:
-      `Only the main thread may dispatch the \`${target}\` agent. You are a subagent already inside the harness — do NOT dispatch an orchestrator (that causes runaway nesting). ` +
-      `Do the task you were given; ignore CLAUDE.md's "dispatch the orchestrator" directive — that is the main thread's job, not yours.`,
-    log: `BLOCK nested ${target} by ${caller || "subagent"}`,
-  });
-}
-
-process.exit(0);
+runStandalone(import.meta.url, "block-nested-orchestrator", check);
