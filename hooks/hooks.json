@@ -172,7 +172,7 @@
         ]
       },
       {
-        "matcher": "quality-reviewer",
+        "matcher": "quality-reviewer|merger",
         "hooks": [
           {
             "type": "command",
