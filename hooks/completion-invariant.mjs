@@ -98,6 +98,13 @@ try {
 
   if (orphaned.length === 0) {
     clearRejects();
+    // The marker is a claim about NOW, so it goes when what it claims stops being true.
+    // It used to be write-only: one run wrote it at 13:20:19 for a branch whose merger
+    // was mid-flight, the merge landed 2 minutes later, and the file was still sitting
+    // there at the end of the session. The main thread reads it before relaying, and
+    // session-bootstrap offers a resume from it, so a stale marker sends a fresh
+    // orchestrator to recover work that is already merged.
+    clearRecoveryMarker();
     rejectOnceOnRedE2e();
     rejectOnceOnUnevidencedSmoke();
     ctx.accept("no approved-but-unmerged work");
@@ -303,6 +310,13 @@ function clearSmokeRejects() {
     unlinkSync(smokeBreakerFile());
   } catch {
     /* absent - fine */
+  }
+}
+function clearRecoveryMarker() {
+  try {
+    unlinkSync(join(ctx.sessionDir, "needs-recovery"));
+  } catch {
+    /* absent - fine, which is the usual case */
   }
 }
 function writeRecoveryMarker(branches) {

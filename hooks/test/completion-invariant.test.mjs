@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -116,6 +117,40 @@ describe("completion-invariant — orphaned work", () => {
     unmergedTaskBranch("TASK-002");
     const r = run(transcriptWithMeta("orchestrator"));
     expect(r.status).toBe(0);
+  });
+});
+
+// The marker is a claim about NOW. It was write-only: one run wrote it at 13:20:19 for a
+// branch whose merger was mid-flight, the merge landed two minutes later, and the file was
+// still there at the end of the session. The main thread reads it before relaying and
+// session-bootstrap offers a resume from it, so a stale one sends a fresh orchestrator to
+// recover work that is already merged.
+describe("completion-invariant: needs-recovery is cleared when the orphan resolves", () => {
+  const marker = () => join(sessionDir, "needs-recovery");
+
+  test("a resolved orphan removes the marker", () => {
+    writeFileSync(
+      marker(),
+      JSON.stringify({ reason: "orphaned-task-branches", branches: ["x/T-1"] }),
+    );
+    // Nothing unmerged and approved: the invariant holds.
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(0);
+    expect(existsSync(marker())).toBe(false);
+  });
+
+  test("an orphan that is still orphaned keeps its marker", () => {
+    unmergedTaskBranch("TASK-003");
+    approveTask("TASK-003");
+    // Rejected twice (the budget), then the marker is written and the stop allowed.
+    run(transcriptWithMeta("orchestrator"));
+    run(transcriptWithMeta("orchestrator"));
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(0);
+    expect(existsSync(marker())).toBe(true);
+    expect(JSON.parse(readFileSync(marker(), "utf8")).branches).toContain(
+      `${SHORT}/TASK-003`,
+    );
   });
 });
 

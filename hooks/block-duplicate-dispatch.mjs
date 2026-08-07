@@ -209,6 +209,19 @@ function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
     `dispatch-${sha(`${caller}::${d.subagentType}::${idPart}`)}`,
   );
 
+  // A merger retry after a FAILED is the one dispatch whose prompt is byte-identical to
+  // the one before it: a developer retry carries RETRY_FEEDBACK, so its prompt and its key
+  // already differ. That identity is what blocked a legitimate second attempt 67 seconds
+  // after a merger came back FAILED, and this hook runs BEFORE the dispatch so it cannot
+  // see that the first one has returned.
+  //
+  // The fix is the caller's, not this hook's: orchestrator.md now says to put RETRY in the
+  // prompt, and since the key already includes the prompt, that alone makes the retry a
+  // different dispatch. No exemption is needed here and none is granted, which is what
+  // keeps an async-ack ECHO of the retry itself debounced like any other. The token is
+  // read for the log line only, so a retry is legible in the audit trail.
+  const isRetry = /(^|\s)RETRY(\s|:|$)/m.test(prompt);
+
   if (existsSync(marker)) {
     let ageMs = Infinity;
     try {
@@ -222,7 +235,8 @@ function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
           `A \`${d.subagentType}\` dispatch for ${label} was made ${Math.round(ageMs / 1000)}s ago and is still in flight. ` +
           `A dispatch can return immediately as "Async agent launched … agentId: <id>" WITHOUT blocking — that acknowledgement means "dispatched", not "done". ` +
           `Do NOT re-dispatch the same role for the same ticket: wait for its task-notification, then read the agent's output file and parse its contract line. ` +
-          `Two ${d.subagentType}s on the same ticket race on one worktree/branch — that is always a bug.`,
+          `Two ${d.subagentType}s on the same ticket race on one worktree/branch — that is always a bug. ` +
+          `If the first one has ALREADY returned FAILED and you are retrying it, re-dispatch with RETRY in the prompt.`,
         log: `BLOCK duplicate ${d.subagentType} key=${idPart} age=${Math.round(ageMs / 1000)}s caller=${caller}`,
       });
     }
@@ -232,7 +246,9 @@ function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
   } catch {
     // can't record → allow this dispatch through
   }
-  ctx.log(`ALLOW ${d.subagentType} dispatch key=${idPart} caller=${caller}`);
+  ctx.log(
+    `ALLOW ${isRetry ? "RETRY " : ""}${d.subagentType} dispatch key=${idPart} caller=${caller}`,
+  );
 }
 
 runStandalone(import.meta.url, "block-duplicate-dispatch", check);

@@ -5,14 +5,16 @@
 // e2e-on-feature-review). VALIDATE_DRY_RUN=1 skips the chain; =fail simulates a failure.
 //
 // This hook fires on EVERY subagent stop (the SubagentStop matcher does not filter and
-// `agent_type` in the payload is empty), so deciding whose stop it is IS the hook. Three
+// `agent_type` in the payload is empty), so deciding whose stop it is IS the hook. Four
 // gates, in order, each accepting with a logged reason:
 //
 //   1. Identity unresolvable  -> accept. lib/agent-meta.mjs has already logged one loud
 //                                WARN for the session; there is nothing to attribute.
 //   2. Not a validate role    -> accept. A reviewer, merger, planner or orchestrator owns
 //                                no worktree, so its stop has nothing to validate.
-//   3. No attributable worktree -> accept. A developer whose ticket cannot be recovered
+//   3. Mid-turn stop          -> accept. A stop is not a finish: the runtime fires this
+//                                event on turn breaks too. See lib/contract-line.mjs.
+//   4. No attributable worktree -> accept. A developer whose ticket cannot be recovered
 //                                is not a licence to validate its siblings' work.
 //
 // There is no unscoped fallback. Sweeping every session worktree is strictly worse than
@@ -30,6 +32,7 @@ import {
   validateRoleSet,
 } from "./lib/teams.mjs";
 import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
+import { turnState } from "./lib/contract-line.mjs";
 import {
   sessionBranch,
   simpleWorktreePath,
@@ -65,7 +68,26 @@ if (!matchesRole(identity, validateRoles)) {
   );
 }
 
-// --- gate 3: which worktree is theirs -----------------------------------------------
+// --- gate 3: did this agent finish, or is it between turns? --------------------------
+// The chain is the developer's stop contract: it runs when the developer says it is done,
+// rejects the stop on a failure, and hands back the errors. Running it on a turn break
+// instead makes it a periodic interrupt of work in progress. That is what one run
+// measured: 78 chains for ~13 dispatches, 21 rejections of "uncommitted work" against
+// trees whose developer was still editing, and 8 force-commits of that work by the
+// format step, two of which reached the session branch as `chore(TASK-XXX): commit work
+// the agent left uncommitted`.
+//
+// `unknown` (no readable last message) runs the chain, exactly as before: not being able
+// to look is not evidence of a turn break, and skipping validation on a doubt is the one
+// outcome worse than running it too often.
+const state = turnState(payload, identity);
+if (state === "mid-turn") {
+  ctx.accept(
+    `skip: ${identity} stopped mid-turn (no ${bareRole(identity)} contract line in its last message), nothing validated`,
+  );
+}
+
+// --- gate 4: which worktree is theirs -----------------------------------------------
 // A per-ticket developer validates <base>/TASK-XXX; a single-shot developer on the
 // <short>/simple branch (rollback / migration) validates <base>/simple.
 const ids = [ctx.agentName, ctx.agentType].filter(Boolean);

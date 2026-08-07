@@ -496,6 +496,8 @@ The `STAGE: a-only` line is mandatory on every wave merger: it merges the task b
 
 Per result: `DONE: T commit=…` → `stage = DONE`; `FAILED:`/malformed → `stage = FAILED`. (The `block-merger-without-review` hook gates each merger dispatch on the recorded quality-reviewer `APPROVED` verdict.)
 
+**Retrying a merger that came back `FAILED`: put `RETRY` in the prompt.** A merger retry is the one dispatch whose prompt is IDENTICAL to the one before it (a developer retry carries `RETRY_FEEDBACK`, so it already differs), and `block-duplicate-dispatch` cannot tell that from the async-ack echo it exists to swallow. One run lost 90 seconds to exactly that: a transient merge failure, an immediate retry, blocked as a duplicate at `age=67s`. `RETRY` says which case it is and lands in the log. Retry a merge ONCE; a second failure is a real conflict, not a transient.
+
 **If the merger dispatch is blocked for `no APPROVED verdict yet`:** the flag is written by the `record-review-verdict` hook from the reviewer's contract line, so a missing flag means the hook did not read an `APPROVED` line. Do NOT re-dispatch the reviewer to "create the record", and **never create, touch, or delete files under `<session_dir>/reviews` or `<session_dir>/breaker` yourself**: those files ARE the guard, and `bash-guard` blocks you from mutating them. Forging the flag bypasses review, which is always a bug.
 
 Read the reviewer's actual contract line for that ticket:
@@ -583,6 +585,7 @@ A skip is fine (deferred to a human `make test-e2e-ci`, the headless target; `ma
 Then promote the session branch to the base branch (the branch the session was forked from — both SETUP and COMPLEX). Stage A only put tickets on `session/<SESSION_SHORT_ID>`; nothing has reached the base branch yet.
 
 - **≥ 1 ticket reached `DONE`** → dispatch the promotion merger in the **foreground** and handle its result inline (do NOT run Stage 1–3 transitions for it):
+
   ```
   Agent({
     subagent_type: "merger",
@@ -595,6 +598,7 @@ Then promote the session branch to the base branch (the branch the session was f
   - `FAILED: PROMOTE promote conflict: files=[…]` → one progress line (_"Synchronising your changes…"_) and STATE PD-PROMOTE-FIX.
   - `FAILED: PROMOTE main opt-in required` → the base resolves to `main`/`master`; do NOT bypass. Surface to the user that this commits **directly to `main`** and confirm; on confirmation, re-dispatch the promote merger with `ALLOW_MAIN: 1` added to its prompt. `#technical-harness` never promotes, so it never reaches here.
   - `FAILED: PROMOTE …` (other) → one failure line and STATE DONE.
+
 - **Every ticket FAILED** → skip promotion. SETUP → STATE SETUP-DONE; COMPLEX → report per-ticket and STATE DONE.
 
 Business-knowledge capture (documentator Mode 2) is spawned at STATE PD-RESPOND on satisfaction (background, output never shows in chat).
