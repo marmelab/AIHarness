@@ -1,13 +1,23 @@
-// A hook context REQUIRES a session id.
+// Session-scoped state REQUIRES a session id; a hook context does not.
 //
-// Every marker the harness owns is keyed on it: the breaker counters, the review
-// verdict flags, the validation give-up markers, the worktree base. The old fallback
-// put two id-less contexts in the same /tmp/<repo>/default/, where one session's
-// breaker budget throttles another's agent and one session's APPROVED flag lets
-// another's merger through. That is a collision, not a default.
+// Every marker the harness owns is keyed on the id: the breaker counters, the review
+// verdict flags, the validation give-up markers, the worktree base. The old fallback put
+// two id-less contexts in the same /tmp/<repo>/default/, where one session's breaker
+// budget throttles another's agent and one session's APPROVED flag lets another's merger
+// through. That is a collision, not a default.
+//
+// The refusal therefore sits on the STATE, not on the context. Refusing the context
+// itself takes guards offline that never touch session state (both documentator
+// restrictions only report a refusal on stderr) to protect markers they never write.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +26,7 @@ import { sanitizePath } from "../lib/paths.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const hook = (name) => join(HERE, "..", `${name}.mjs`);
+const CONTEXT = join(HERE, "..", "lib", "context.mjs");
 
 let TMP, APP_DIR, TMP_ROOT, env;
 
@@ -36,46 +47,89 @@ afterEach(() => rmSync(TMP, { recursive: true, force: true }));
 
 const defaultDir = () => join(TMP_ROOT, sanitizePath(APP_DIR), "default");
 
-describe("createHookContext with no session id", () => {
-  test("refuses to build a context instead of sharing one", () => {
-    const r = spawnSync(
-      "node",
-      [
-        "-e",
-        `import(${JSON.stringify(join(HERE, "..", "lib", "context.mjs"))}).then((m) => {
-           try {
-             m.createHookContext({}, "probe");
-             console.log("NO THROW");
-           } catch (e) {
-             console.log("THREW: " + e.message);
-           }
-         })`,
-      ],
-      { env, encoding: "utf8" },
-    );
-    expect(r.stdout).toContain("THREW:");
-    expect(r.stdout).toContain("no session id");
+// Read one member of a context built with no session id, and report what happened.
+const readMember = (member, extraEnv = {}) => {
+  const probe = join(TMP, `probe-${member}.mjs`);
+  writeFileSync(
+    probe,
+    `import { createHookContext } from ${JSON.stringify(CONTEXT)};
+     const ctx = createHookContext({}, "probe");
+     try {
+       console.log("VALUE " + ctx[${JSON.stringify(member)}]);
+     } catch (e) {
+       console.log("THREW " + e.message);
+     }`,
+  );
+  return spawnSync("node", [probe], {
+    env: { ...env, ...extraEnv },
+    encoding: "utf8",
+  }).stdout;
+};
+
+describe("a context built with no session id", () => {
+  test.each([
+    "sessionId",
+    "sessionShort",
+    "sessionDir",
+    "worktreeBase",
+    "logFile",
+    "ticketsDir",
+  ])("refuses to hand out %s", (member) => {
+    const out = readMember(member);
+    expect(out).toContain("THREW");
+    expect(out).toContain("no session id");
   });
 
-  test("still builds one from CLAUDE_CODE_SESSION_ID alone", () => {
-    const r = spawnSync(
-      "node",
-      [
-        "-e",
-        `import(${JSON.stringify(join(HERE, "..", "lib", "context.mjs"))}).then((m) =>
-           console.log(m.createHookContext({}, "probe").sessionId))`,
-      ],
-      { env: { ...env, CLAUDE_CODE_SESSION_ID: "from-env" }, encoding: "utf8" },
+  // The members that say who is calling, not where their state lives, still answer:
+  // a guard that only reports a refusal has nothing to collide over.
+  test.each(["name", "repo"])("still answers %s", (member) => {
+    expect(readMember(member)).toContain("VALUE ");
+  });
+
+  test("resolves normally from CLAUDE_CODE_SESSION_ID alone", () => {
+    expect(readMember("sessionId", { CLAUDE_CODE_SESSION_ID: "from-env" })).toBe(
+      "VALUE from-env\n",
     );
-    expect(r.stdout.trim()).toBe("from-env");
   });
 });
 
-describe("a PreToolUse chain with no session id", () => {
+// The regression this shape exists to prevent: these two guards need no session state,
+// and an earlier version of the refusal took them offline in any environment that does
+// not export CLAUDE_CODE_SESSION_ID, which is every CI run and every plain shell.
+describe("a guard that needs no session state still runs", () => {
+  test("restrict-documentator-write refuses a forbidden path", () => {
+    const r = spawnSync("node", [hook("restrict-documentator-write")], {
+      input: JSON.stringify({
+        tool_name: "Write",
+        tool_input: { file_path: "/app/src/index.ts" },
+      }),
+      env: { ...env, DOCUMENTATOR_RUN: "1" },
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  });
+
+  test("restrict-documentator-bash refuses a non-whitelisted command", () => {
+    const r = spawnSync("node", [hook("pre-tool-bash")], {
+      input: JSON.stringify({
+        tool_name: "Bash",
+        tool_input: { command: "rm -rf /" },
+      }),
+      env: { ...env, DOCUMENTATOR_RUN: "1" },
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  });
+});
+
+describe("a PreToolUse chain whose guard reaches for session state", () => {
+  // circuit-breaker keys its counter on the session dir, so this is the call that
+  // actually needs an id.
   const payload = {
     tool_name: "Bash",
     agent_type: "developer",
-    tool_input: { command: "echo hello" },
+    agent_id: "a1111111111111111",
+    tool_input: { command: "npm install lodash" },
   };
 
   test("reports the failure and lets the call through", () => {
@@ -89,14 +143,12 @@ describe("a PreToolUse chain with no session id", () => {
     expect(r.stdout).not.toContain('"decision":"block"');
     // Loud: the reason is on the one channel still available.
     expect(r.stderr).toContain("no session id");
-    expect(r.stderr).toContain("[bash-guard]");
+    expect(r.stderr).toContain("[circuit-breaker]");
   });
 
-  // The collision this replaces: a counted Bash call writes a breaker counter, and
-  // under the old fallback two unrelated sessions wrote theirs to the same file.
   test("writes no breaker counter into a shared default session dir", () => {
     spawnSync("node", [hook("pre-tool-bash")], {
-      input: JSON.stringify({ ...payload, agent_id: "a1111111111111111" }),
+      input: JSON.stringify(payload),
       env,
       encoding: "utf8",
     });

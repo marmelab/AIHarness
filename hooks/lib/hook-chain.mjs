@@ -54,19 +54,14 @@ export function readPayload() {
  */
 export function runChain(guards, input = readPayload()) {
   for (const [name, check] of guards) {
-    let ctx;
-    try {
-      ctx = createHookContext(input, name);
-    } catch (e) {
-      // No session identity, so there is no session state to key on and nowhere to
-      // log. Report on stderr (the one channel left) and skip this guard rather than
-      // wedge the tool call: fail open on ignorance.
-      process.stderr.write(`[${name}] ${String(e?.message ?? e)}\n`);
-      continue;
-    }
+    const ctx = createHookContext(input, name);
     try {
       check(input, ctx);
     } catch (e) {
+      // Includes a guard reaching for session state in a context that has no session
+      // id: that throws at the point of access, and this is where it becomes one
+      // reported line instead of a dead chain. ctx.log falls back to stderr when there
+      // is no session dir to write to, so the report survives having nowhere to go.
       ctx.log(`ERROR ${String(e?.stack ?? e).slice(0, 300)}`);
     }
   }

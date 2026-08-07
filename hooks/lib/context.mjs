@@ -37,28 +37,32 @@ export function createHookContext(input, name = "hook") {
   // is therefore not a default, it is a collision: two contexts that both fail to
   // resolve an id land in the same /tmp/<repo>/default/, where one session's breaker
   // budget throttles another's agent and one session's APPROVED flag lets another's
-  // merger through. Refuse to produce a context instead. Callers that run for every
-  // caller (the PreToolUse dispatchers) catch this, report it, and let the tool call
-  // through: a hook that cannot scope its own state must not write into someone
-  // else's, and must not wedge the run either.
+  // merger through.
+  //
+  // The refusal is on the STATE, not on the context. Several hooks legitimately need no
+  // session state at all (restrict-documentator-write and -bash only report a refusal
+  // on stderr), and refusing them a context for want of an id they never use would take
+  // guards offline to protect markers they never touch. So every session-scoped member
+  // below is a getter that throws when there is no id, and reading one is the thing
+  // that fails.
   const sessionId =
     clean(i.session_id) ||
     process.env.CLAUDE_CODE_SESSION_ID ||
     chatSessionId ||
     "";
-  if (!sessionId) {
+  const requireSessionId = () => {
+    if (sessionId) return sessionId;
     throw new Error(
       `${name}: no session id (payload session_id, CLAUDE_CODE_SESSION_ID and the ` +
-        `launcher session dir are all empty), so this hook has no session state to ` +
-        `read or write. Every marker is keyed on it, and a shared fallback would mix ` +
-        `two unrelated sessions' breaker counters and review verdicts.`,
+        `launcher session dir are all empty), so there is no session state to key on. ` +
+        `Every marker is keyed on it, and a shared fallback would mix two unrelated ` +
+        `sessions' breaker counters and review verdicts.`,
     );
-  }
+  };
   const agentType = clean(i.agent_type) || agentName;
 
-  const sessionShort = sessionId.split("-")[0];
-  const sessionDir = join(TMP_ROOT, sanitizePath(REPO), sessionId);
-  const logFile = join(sessionDir, "hooks.log");
+  const sessionDirOf = () =>
+    join(TMP_ROOT, sanitizePath(REPO), requireSessionId());
 
   /**
    * Append to hooks.log. EVERY line gets the `[timestamp] [hook]` prefix, including
@@ -72,16 +76,27 @@ export function createHookContext(input, name = "hook") {
    */
   const log = (...parts) => {
     const stamp = `[${new Date().toISOString()}] [${name}] `;
-    const body = parts.join(" ");
+    const text =
+      parts
+        .join(" ")
+        .split("\n")
+        .map((line) => `${stamp}${line}`)
+        .join("\n") + "\n";
+    // hooks.log is itself session-scoped, so with no id there is nowhere to put this.
+    // stderr rather than silence: a hook running without a session identity is a
+    // misconfiguration worth seeing, and dropping the line would hide it.
+    if (!sessionId) {
+      try {
+        process.stderr.write(text);
+      } catch {
+        // logging must never break a hook
+      }
+      return;
+    }
     try {
+      const logFile = join(sessionDirOf(), "hooks.log");
       mkdirSync(dirname(logFile), { recursive: true });
-      appendFileSync(
-        logFile,
-        body
-          .split("\n")
-          .map((line) => `${stamp}${line}`)
-          .join("\n") + "\n",
-      );
+      appendFileSync(logFile, text);
     } catch {
       // logging must never break a hook
     }
@@ -157,15 +172,29 @@ export function createHookContext(input, name = "hook") {
   return {
     name,
     repo: REPO,
-    sessionId,
     agentType,
     agentName,
     agentId,
-    sessionShort,
-    sessionDir,
-    worktreeBase: sessionDir,
-    logFile,
-    ticketsDir: process.env.TICKETS_DIR || join(sessionDir, "tickets"),
+
+    // Session-scoped, so each one refuses rather than resolving to a shared path.
+    get sessionId() {
+      return requireSessionId();
+    },
+    get sessionShort() {
+      return requireSessionId().split("-")[0];
+    },
+    get sessionDir() {
+      return sessionDirOf();
+    },
+    get worktreeBase() {
+      return sessionDirOf();
+    },
+    get logFile() {
+      return join(sessionDirOf(), "hooks.log");
+    },
+    get ticketsDir() {
+      return process.env.TICKETS_DIR || join(sessionDirOf(), "tickets");
+    },
 
     log,
     error,
