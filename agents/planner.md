@@ -67,6 +67,7 @@ Rules:
 
 - One ticket = one deliverable (one entity, one screen, one cross-cutting concern).
 - **Coarse over fine**: ≤ 3 tickets per user-visible feature. Merge data-layer tickets (type + seed + config) unless any exceeds ~150 LOC / 5 files.
+- **Except across UI surfaces: more than 3 component files under `src/components/` in one ticket, split it by surface** (form, show view, list rows, list filter, dashboard widget). Coarse is right for a data layer, where the files are one change spread over a type, a schema and a generator. It is wrong for the UI, where each surface has its own failure mode and the review has to hold all of them at once. Measured: the one ticket in a 4-ticket feature that carried 4 component files plus an e2e spec took 3 review rounds and 43.7 minutes, against 10 to 16 for each of its siblings, and it was 20.60 of the feature's 46.37 dollars. Split, those surfaces are `parallel_safe` against each other and run in the SAME wave, so the split costs dispatches, not wall-clock.
 - Config / infrastructure changes are separate tickets.
 - Order by dependency: blocking tickets first.
 - Flag risk honestly. When unsure: `medium`.
