@@ -1,6 +1,6 @@
 {
   "name": "aiharness",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "Marmelab's agent harness: an implementation pipeline where subagents (planner, developer, quality-reviewer, merger, documentator) carry a change through git worktrees under deterministic hook enforcement. Every gate is a hook rather than a prompt instruction, so it fires whether or not the model cooperates. Ships the enforcement core, the agent team, the generic skills, and a Supabase deploy adapter. Projects supply a harness.config.json and their own domain skills.",
   "author": {
     "name": "Jerome",
