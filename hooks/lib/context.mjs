@@ -32,11 +32,28 @@ export function createHookContext(input, name = "hook") {
   const launcherSessionDir = sessionDirFromEnv();
   const chatSessionId = launcherSessionDir ? basename(launcherSessionDir) : "";
 
+  // Every piece of session state is keyed on this id: the breaker counters, the review
+  // verdict flags, the validation give-up markers, the worktree base. A shared fallback
+  // is therefore not a default, it is a collision: two contexts that both fail to
+  // resolve an id land in the same /tmp/<repo>/default/, where one session's breaker
+  // budget throttles another's agent and one session's APPROVED flag lets another's
+  // merger through. Refuse to produce a context instead. Callers that run for every
+  // caller (the PreToolUse dispatchers) catch this, report it, and let the tool call
+  // through: a hook that cannot scope its own state must not write into someone
+  // else's, and must not wedge the run either.
   const sessionId =
     clean(i.session_id) ||
     process.env.CLAUDE_CODE_SESSION_ID ||
     chatSessionId ||
-    "default";
+    "";
+  if (!sessionId) {
+    throw new Error(
+      `${name}: no session id (payload session_id, CLAUDE_CODE_SESSION_ID and the ` +
+        `launcher session dir are all empty), so this hook has no session state to ` +
+        `read or write. Every marker is keyed on it, and a shared fallback would mix ` +
+        `two unrelated sessions' breaker counters and review verdicts.`,
+    );
+  }
   const agentType = clean(i.agent_type) || agentName;
 
   const sessionShort = sessionId.split("-")[0];

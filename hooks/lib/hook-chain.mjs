@@ -54,7 +54,16 @@ export function readPayload() {
  */
 export function runChain(guards, input = readPayload()) {
   for (const [name, check] of guards) {
-    const ctx = createHookContext(input, name);
+    let ctx;
+    try {
+      ctx = createHookContext(input, name);
+    } catch (e) {
+      // No session identity, so there is no session state to key on and nowhere to
+      // log. Report on stderr (the one channel left) and skip this guard rather than
+      // wedge the tool call: fail open on ignorance.
+      process.stderr.write(`[${name}] ${String(e?.message ?? e)}\n`);
+      continue;
+    }
     try {
       check(input, ctx);
     } catch (e) {
