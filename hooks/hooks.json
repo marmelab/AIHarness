@@ -1,5 +1,5 @@
 {
-  "description": "The agent-harness enforcement layer: worktree provisioning, dispatch gates, validation on stop, review-verdict bookkeeping, session bootstrap and teardown. Paths resolve through ${CLAUDE_PLUGIN_ROOT}, so the hooks run from wherever the plugin is installed.",
+  "description": "The agent-harness enforcement layer: worktree provisioning, dispatch gates, validation on stop, review-verdict bookkeeping, session bootstrap and teardown. Paths resolve through ${CLAUDE_PLUGIN_ROOT}, so the hooks run from wherever the plugin is installed. WARNING, read rules/hook-authoring.md before trusting a SubagentStop matcher: agent_type is empty on that event, so those matchers select NOTHING today and every SubagentStop hook fires on every stop. They are documentation sitting in a field the runtime may start honouring, at which point each one needs re-auditing for namespaced roles (aiharness:developer, not developer) and for tokens no agent answers to (simple-developer).",
   "hooks": {
     "SessionStart": [
       {

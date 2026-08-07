@@ -79,6 +79,34 @@ itself off. Shared predicates live in `lib/` (`isExplicitlyBackgrounded`, `bareR
 - every `SubagentStop` matcher must name a declared role.
 - the core imports only node builtins and relative paths.
 
+## The SubagentStop matchers do not filter, and one day they will
+
+Every `SubagentStop` matcher in `hooks.json` currently selects nothing. The runtime sends
+an EMPTY `agent_type` on that event, so the matcher has nothing to compare and every
+registered SubagentStop hook fires on every stop, whatever role it names. That is why each
+of those hooks re-derives identity itself, through `lib/agent-meta.mjs` and the predicates
+in `lib/teams.mjs`, and treats "not my role" as "not my business".
+
+So the matchers are not load-bearing today. They are DOCUMENTATION that happens to sit in a
+field the runtime will start honouring. When it does, every one of them has to be re-audited
+before it is trusted, because two of the ways they are written today would go from harmless
+to silently wrong:
+
+- **Namespaced roles.** A plugin-provided agent reports `aiharness:developer`, not
+  `developer`. Every matcher token is bare. This is the same bug that made a whole family of
+  guards inert once the harness shipped as a plugin (see `bareRole` in `lib/teams.mjs`); a
+  matcher has no `bareRole` to go through.
+- **Tokens that are not agents.** `simple-developer` is a declared role in
+  `harness.config.json` and appears in the `validate-on-stop` matcher, but no agent is ever
+  dispatched under that name: the SIMPLE flow dispatches `developer`. `check-config-sync`
+  reports it, and the token will match nothing the day matching starts working.
+
+Concretely, when a runtime upgrade makes `agent_type` non-empty at SubagentStop: check every
+matcher against BOTH spellings of every role, drop the tokens no agent answers to, and only
+then consider removing a hook's own identity check. Until then, never write a hook that
+depends on its matcher having selected it: `hooks.json` says who a hook is FOR, the hook
+itself decides whether the stop is its business.
+
 ## Log the identity you resolved
 
 A guard that treats "not my role" as "not my business" is indistinguishable from a guard that
