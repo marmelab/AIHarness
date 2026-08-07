@@ -12,6 +12,10 @@
 // end-of-feature suite FAILED. Reading that file is only a prompt-level instruction, so
 // this is the deterministic backstop that a red suite cannot be swallowed in silence.
 // One reject (own budget, no recovery marker), then the stop is allowed.
+//
+// Third invariant, same shape: stopping while <session_dir>/smoke-result.json says the
+// feature-smoke approved without driving a browser. A smoke that ran nothing is not
+// evidence the feature runs, and it is the one claim no other gate can check.
 
 import {
   existsSync,
@@ -34,6 +38,8 @@ const REJECT_LIMIT = 2; // reject at most twice, then allow + mark for recovery
 // it was supposed to read, then let the stop through. Its own 2-round fix bound takes it
 // from there, and "never wedge the pipeline" still holds.
 const E2E_REJECT_LIMIT = 1;
+// A smoke that approved without driving anything: same single-shot budget, same reason.
+const SMOKE_REJECT_LIMIT = 1;
 
 let ctx;
 try {
@@ -92,6 +98,7 @@ try {
   if (orphaned.length === 0) {
     clearRejects();
     rejectOnceOnRedE2e();
+    rejectOnceOnUnevidencedSmoke();
     ctx.accept("no approved-but-unmerged work");
   }
 
@@ -171,6 +178,43 @@ function rejectOnceOnRedE2e() {
   );
 }
 
+// --- feature-smoke with no evidence -------------------------------------------
+// record-smoke-evidence.mjs writes <session_dir>/smoke-result.json. `approved-no-evidence`
+// means the smoke reported every flow green while its transcript shows no browser was
+// ever driven, by the MCP tools or from Bash: a verdict inferred from the source rather
+// than observed. Same shape as the red-e2e invariant, own single-shot budget.
+function rejectOnceOnUnevidencedSmoke() {
+  let result;
+  try {
+    const p = join(
+      process.env.CHAT_SESSION_DIR || ctx.sessionDir,
+      "smoke-result.json",
+    );
+    if (!existsSync(p)) return; // no smoke this round
+    result = JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return; // unreadable / malformed -> fail-open, like the rest of this hook
+  }
+  if (result?.status !== "approved-no-evidence") return;
+
+  const rejects = readSmokeRejects();
+  if (rejects >= SMOKE_REJECT_LIMIT) {
+    clearSmokeRejects();
+    ctx.log(`unevidenced smoke persists after ${rejects} reject(s), allowing`);
+    return;
+  }
+  writeSmokeRejects(rejects + 1);
+  ctx.fail(
+    `Completion invariant: the feature-smoke reported APPROVED, but its transcript shows no ` +
+      `browser was driven (no Playwright MCP call and no Bash Playwright script). A smoke that ` +
+      `ran nothing is not evidence the feature runs. Re-dispatch the quality-reviewer with ` +
+      `MODE: feature-smoke, or state explicitly in your final report that the feature was NOT ` +
+      `smoke-tested and why. Do not end your turn presenting it as verified. ` +
+      `(attempt ${rejects + 1}/${SMOKE_REJECT_LIMIT})`,
+    { log: `reject ${rejects + 1}/${SMOKE_REJECT_LIMIT} unevidenced-smoke` },
+  );
+}
+
 // --- markers -----------------------------------------------------------------
 function breakerFile() {
   const dir = join(ctx.sessionDir, "breaker");
@@ -230,6 +274,38 @@ function writeE2eRejects(n) {
 function clearE2eRejects() {
   try {
     unlinkSync(e2eBreakerFile());
+  } catch {
+    /* absent - fine */
+  }
+}
+// Third budget, same reasoning as the second: an unevidenced smoke must not spend the
+// merge-stall or e2e attempts, and neither of those may spend this one.
+function smokeBreakerFile() {
+  const dir = join(ctx.sessionDir, "breaker");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best effort */
+  }
+  return join(dir, "completion-invariant-smoke-rejects");
+}
+function readSmokeRejects() {
+  try {
+    return parseInt(readFileSync(smokeBreakerFile(), "utf8"), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+function writeSmokeRejects(n) {
+  try {
+    writeFileSync(smokeBreakerFile(), String(n));
+  } catch {
+    /* best effort */
+  }
+}
+function clearSmokeRejects() {
+  try {
+    unlinkSync(smokeBreakerFile());
   } catch {
     /* absent - fine */
   }

@@ -227,3 +227,76 @@ describe("completion-invariant — red e2e", () => {
     expect(spawnSync("test", ["-f", orphanBudget]).status).not.toBe(0);
   });
 });
+
+describe("completion-invariant: feature-smoke with no evidence", () => {
+  const writeSmokeResult = (status) =>
+    writeFileSync(
+      join(sessionDir, "smoke-result.json"),
+      JSON.stringify({ status, verdict: "APPROVED", evidence: {} }),
+    );
+
+  test("rejects the stop once when the smoke approved without driving a browser", () => {
+    writeSmokeResult("approved-no-evidence");
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("no browser was driven");
+  });
+
+  test("allows the stop on the next attempt, never wedging the pipeline", () => {
+    writeSmokeResult("approved-no-evidence");
+    const tp = transcriptWithMeta("orchestrator");
+    expect(run(tp).status).toBe(2);
+    expect(run(tp).status).toBe(0);
+  });
+
+  // A smoke that DID drive a browser is the normal case and must cost nothing, whether
+  // it drove it through the MCP tools or from Bash.
+  test.each(["approved", "blocked", "unknown"])(
+    "accepts a smoke recorded as %s",
+    (status) => {
+      writeSmokeResult(status);
+      expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
+    },
+  );
+
+  test("accepts when no smoke ran this round", () => {
+    expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
+  });
+
+  test("ignores an unevidenced smoke on a non-orchestrator stop", () => {
+    writeSmokeResult("approved-no-evidence");
+    expect(run(transcriptWithMeta("developer")).status).toBe(0);
+  });
+
+  test("keeps its budget separate from the e2e and orphan budgets", () => {
+    writeSmokeResult("approved-no-evidence");
+    run(transcriptWithMeta("orchestrator"));
+    const budget = (name) => join(sessionDir, "breaker", name);
+    expect(
+      spawnSync("test", ["-f", budget("completion-invariant-smoke-rejects")])
+        .status,
+    ).toBe(0);
+    expect(
+      spawnSync("test", ["-f", budget("completion-invariant-e2e-rejects")])
+        .status,
+    ).not.toBe(0);
+    expect(
+      spawnSync("test", ["-f", budget("completion-invariant-rejects")]).status,
+    ).not.toBe(0);
+  });
+
+  // The two invariants share one stop, and each spends only its own budget: the red
+  // suite is raised first, and the smoke check still gets its attempt afterwards
+  // instead of being swallowed by the e2e reject.
+  test("a red e2e and an unevidenced smoke each get their own attempt", () => {
+    writeE2eResult("failed");
+    writeSmokeResult("approved-no-evidence");
+    const tp = transcriptWithMeta("orchestrator");
+    const first = run(tp);
+    expect(first.status).toBe(2);
+    expect(first.stderr).toContain("e2e suite FAILED");
+    const second = run(tp);
+    expect(second.status).toBe(2);
+    expect(second.stderr).toContain("no browser was driven");
+  });
+});

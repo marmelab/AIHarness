@@ -117,10 +117,12 @@ process.stdout.write(
       hookEventName: "SessionStart",
       additionalContext:
         `<playwright-mcp-status>NOT USABLE (package or Chromium missing). The Playwright MCP browser is being ` +
-        `provisioned in the background (log: ${installLog}). For THIS session the harness ` +
-        `feature-smoke (MODE: feature-smoke) cannot drive the UI and will fall back to ` +
-        `static/compile checks; the Supabase e2e-smoke (CLI Playwright) is unaffected. It ` +
-        `will be available next session. To provision now: run \`make install-playwright-browsers\`.` +
+        `provisioned in the background (log: ${installLog}); it will be available next ` +
+        `session. To provision now: run \`make install-playwright-browsers\`. This affects ` +
+        `the browser tools in THIS session only. A subagent drives the browser from Bash ` +
+        `when the MCP tools are not in its tool list, so the harness feature-smoke and the ` +
+        `Supabase e2e-smoke both still run, provided the Chromium the same install ` +
+        `provisions is present.` +
         `</playwright-mcp-status>`,
     },
   }) + "\n",

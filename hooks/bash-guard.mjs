@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// PreToolUse(Bash) — single guard for Bash commands. Blocks commands that open browser windows (headed Playwright, Vite --open) for every caller, blocks the orchestrator from mutating the review/dispatch guard state under <sessionDir>/{reviews,breaker}, and blocks gated subagents from running validation commands (validate-on-stop.mjs runs them automatically on SubagentStop).
+// PreToolUse(Bash): single guard for Bash commands. Blocks commands that open browser windows (headed Playwright, Vite --open) for every caller, blocks the orchestrator from mutating the review/dispatch guard state under <sessionDir>/{reviews,breaker}, blocks gated subagents from running validation commands (validate-on-stop.mjs runs them automatically on SubagentStop), and blocks them from writing files through Bash instead of the Write/Edit tools.
+// Every block names the rule that fired in its log line, and the file-write refusal names the allowed alternative for the cause that fired: an editing agent is sent to the Write tool, an agent capturing a process's output is given the sinks it may use.
 
 import { readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
@@ -14,6 +15,7 @@ import {
   extraForbidden,
   launcher,
 } from "./lib/config.mjs";
+import { isScratchpadTarget, scratchpadDir } from "./lib/scratchpad.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "bash-guard");
@@ -31,22 +33,28 @@ const opensHeadedPlaywright = (c) =>
 const opensViteBrowser = (c) =>
   /(vite|npm run (dev|start|start-demo))/.test(c) && c.includes("--open");
 
+// Every rule carries the label the log line reports, so a block is judgeable
+// after the fact from hooks.log alone: the agent-facing message already names
+// the rule, and a log that only says "browser" or "file-write" cannot say which
+// of five phrasings the agent was refused for.
 const BROWSER_RULES = [
   [
+    "headed-playwright",
     opensHeadedPlaywright,
     "Playwright must stay headless (this sandbox has no display): drop --headed / --ui / --debug, and don't run `playwright open` / `codegen`. Headless is the default, no flag needed.",
   ],
   [
+    "vite-open",
     opensViteBrowser,
     "Vite must not use --open (opens a browser window). Remove the --open flag.",
   ],
 ];
 
-const browserViolation = BROWSER_RULES.find(([matches]) => matches(cmd));
+const browserViolation = BROWSER_RULES.find(([, matches]) => matches(cmd));
 if (browserViolation) {
   ctx.block({
-    reason: browserViolation[1],
-    log: `browser cmd=${cmd.slice(0, 120)}`,
+    reason: browserViolation[2],
+    log: `browser rule=${browserViolation[0]} cmd=${cmd.slice(0, 120)}`,
   });
 }
 
@@ -82,7 +90,7 @@ if (isOrchestrator(agent || ctx.agentType)) {
         "Refusing this command: the orchestrator must not write to or delete files under <session_dir>/reviews or <session_dir>/breaker — those ARE the review/dispatch guards. " +
         "If a merger dispatch was blocked for 'no APPROVED verdict', do NOT fabricate the flag and do NOT re-dispatch the reviewer: the reviewer writes its own flag on APPROVED (quality-reviewer.md). A missing flag means the reviewer did NOT approve — read its output file and act on the real verdict. " +
         "If a dispatch was blocked as 'still in flight', wait for its task-notification instead of clearing the marker.",
-      log: `BLOCK orchestrator guard-state mutation cmd=${cmd.slice(0, 120)}`,
+      log: `orchestrator rule=guard-state-mutation cmd=${cmd.slice(0, 120)}`,
     });
   }
 }
@@ -172,7 +180,7 @@ try {
 if (activeCategories.has("e2e") && runsE2eTests(cmd)) {
   ctx.block({
     reason: `Validation command forbidden: ${CATEGORY_RULES.e2e[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
-    log: `e2e any-caller cmd=${cmd.slice(0, 120)}`,
+    log: `any-caller rule=e2e cmd=${cmd.slice(0, 120)}`,
   });
 }
 
@@ -186,14 +194,14 @@ const who = agent || ctx.agentType || "";
 if (!isDeveloper(who) && !isQualityReviewer(who)) process.exit(0);
 
 const VALIDATION_RULES = [...activeCategories]
-  .map((c) => CATEGORY_RULES[c])
-  .filter(Boolean);
+  .filter((c) => CATEGORY_RULES[c])
+  .map((c) => [c, ...CATEGORY_RULES[c]]);
 
-const violation = VALIDATION_RULES.find(([matches]) => matches(cmd));
+const violation = VALIDATION_RULES.find(([, matches]) => matches(cmd));
 if (violation) {
   ctx.block({
-    reason: `Validation command forbidden: ${violation[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
-    log: `cmd=${cmd.slice(0, 120)}`,
+    reason: `Validation command forbidden: ${violation[2]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
+    log: `rule=${violation[0]} cmd=${cmd.slice(0, 120)}`,
   });
 }
 
@@ -201,6 +209,11 @@ if (violation) {
 // Write/Edit tools, never Bash redirection/in-place edits. Bash writes bypass the
 // Write|Edit-only block-migration-writes guard (a developer could otherwise write a migration in
 // bash).
+//
+// `>` is two different acts wearing one syntax: producing a FILE (an edit the
+// Write tool must own) and capturing a running process's OUTPUT (a reviewer
+// reading a dev server's log). They are refused with different messages, because
+// a refusal that names no allowed exit is a wall an agent can only probe.
 // The managed-launcher log dir (e.g. CRM Builder's /chat-service/logs) is a
 // launcher extension point: config.launcher.logsDir. A redirect into it is
 // exempt (agents legitimately append their logs there). When unset, only
@@ -211,51 +224,79 @@ try {
 } catch {
   logsDir = "";
 }
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const logsAlt = logsDir ? `${escapeRe(logsDir)}\\/\\S*|` : "";
-const REDIRECT_TARGET_RE = new RegExp(
-  `(^|[^0-9&])>>?\\s*(\\/dev\\/null\\b|${logsAlt}\\/|\\.\\.?\\/|~\\/|[a-zA-Z0-9._-]+\\/|[a-zA-Z0-9._-]+\\.[a-zA-Z0-9]+)`,
-  "g",
-);
-const writesRedirect = (c) => {
-  // Evaluate the /dev/null and logs exemptions PER redirect, so an unrelated
-  // `cmd 2>/dev/null` can't disarm detection of a real `> file` write in the
-  // same command.
-  for (const m of c.matchAll(REDIRECT_TARGET_RE)) {
-    const target = m[2];
-    if (target === "/dev/null") continue;
-    if (logsDir && target.startsWith(logsDir + "/")) continue;
-    return true;
-  }
-  return false;
+
+// `>` / `>>` and the token it writes to. The character before `>` may be neither
+// a digit nor `&` (fd duplication, `2>&1`) nor `=`. `=>` is a JavaScript arrow,
+// and reading it as a redirect refuses every `node -e` one-liner that passes a
+// callback, which is how an agent drives a headless browser from Bash.
+const REDIRECT_RE = /(^|[^0-9&=])>>?\s*("[^"]*"|'[^']*'|[^\s;|&)<>]+)/g;
+// A target counts only when it names a path or a suffixed file, so an
+// unresolvable `> $LOG` stays out (matching what the guard has always caught).
+const looksLikeFile = (t) =>
+  /^(\/|\.\.?\/|~\/)/.test(t) ||
+  /^[a-zA-Z0-9._-]+\//.test(t) ||
+  /^[a-zA-Z0-9._-]+\.[a-zA-Z0-9]+/.test(t);
+const unquote = (t) => t.replace(/^["']|["']$/g, "");
+
+// tee writes to its file argument(s); skip leading flags (e.g. -a) to reach the
+// target. Bare `| tee` (no file) only duplicates to stdout, not a write.
+const teeTarget = (c) => {
+  const m = c.match(/\|\s*tee\s+((?:-\S+\s+)*)(\S+)/);
+  return m ? unquote(m[2]) : "";
 };
 const writesSedInPlace = (c) => /sed\s+(-[a-zA-Z]*i\b|--in-place)/.test(c);
 const writesAwkInPlace = (c) => /awk\s+-i\s+inplace/.test(c);
-const writesTee = (c) => {
-  // tee writes to its file argument(s); skip leading flags (e.g. -a) to reach
-  // the target, and exempt the /dev/null sink. Bare `| tee` (no file) only
-  // duplicates to stdout — not a write.
-  const m = c.match(/\|\s*tee\s+((?:-\S+\s+)*)(\S+)/);
-  return !!m && m[2] !== "/dev/null";
-};
 const writesScript = (c) =>
   /(node|python3?)\s+-[ecp].*(writeFileSync|writeFile|write_text|os\.write|fs\.write)/.test(
     c,
   );
 
-const FILE_WRITE_RULES = [
-  [writesRedirect, "bash redirection to a file (> or >>)"],
-  [writesSedInPlace, "sed -i (in-place edit)"],
-  [writesAwkInPlace, "awk -i inplace"],
-  [writesTee, "pipe to tee (file write)"],
-  [writesScript, "scripted file write via node/python"],
-];
+// The reviewer roles are the ones that RUN the app to verify it, so they own the
+// session scratchpad as a log sink. bareRole handles the namespaced
+// (aiharness:quality-reviewer) and suffixed runtime names.
+const isReviewer = isQualityReviewer(who);
+const exemptTarget = (t) =>
+  t === "/dev/null" ||
+  (logsDir && t.startsWith(`${logsDir}/`)) ||
+  (isReviewer && isScratchpadTarget(t, ctx.sessionId));
 
-const writeViolation = FILE_WRITE_RULES.find(([matches]) => matches(cmd));
+// Evaluate the exemptions PER target, so an unrelated `cmd 2>/dev/null` cannot
+// disarm detection of a real `> file` write in the same command.
+const redirectViolations = [];
+for (const m of cmd.matchAll(REDIRECT_RE)) {
+  const target = unquote(m[2]);
+  if (!looksLikeFile(target) || exemptTarget(target)) continue;
+  redirectViolations.push(["redirect", target]);
+}
+const tee = teeTarget(cmd);
+
+const writeViolation = [
+  ...redirectViolations,
+  ...(writesSedInPlace(cmd) ? [["sed-in-place", ""]] : []),
+  ...(writesAwkInPlace(cmd) ? [["awk-in-place", ""]] : []),
+  ...(tee && !exemptTarget(tee) ? [["tee", tee]] : []),
+  ...(writesScript(cmd) ? [["scripted-write", ""]] : []),
+][0];
+
 if (writeViolation) {
+  const [rule, target] = writeViolation;
+  // A log-shaped or extensionless target is a process writing down what it
+  // printed; any other suffix is an artefact the editing tools must produce.
+  const base = target.split("/").pop() || "";
+  const capturesOutput =
+    (rule === "redirect" || rule === "tee") &&
+    (/\.(log|out|err)$/i.test(base) || !/\.[A-Za-z0-9]+$/.test(base));
+
+  const scratchpadSink = isReviewer
+    ? `redirect it into this session's scratchpad directory (\`${scratchpadDir(ctx.sessionId) || `.../${ctx.sessionId}/scratchpad`}\`)`
+    : "redirecting into the session scratchpad directory is allowed for the quality-reviewer only";
+  const logsSink = logsDir ? `; redirect it under \`${logsDir}/\`` : "";
+
   ctx.block({
-    reason: `File editing via Bash is forbidden: ${writeViolation[1]}. Use the Write or Edit tool instead — Bash writes bypass prettier/typecheck and the migration-write guard. See developer.md.`,
-    log: `file-write cmd=${cmd.slice(0, 120)}`,
+    reason: capturesOutput
+      ? `Capturing process output to a file via Bash is gated (${rule} -> ${target}), because the same syntax writes source files. Allowed forms, in order of preference: (1) drop the redirect entirely and read the stdout/stderr the Bash tool already returns to you; (2) start a long-running process (a dev server) with \`run_in_background: true\` instead of \`nohup\` / \`&\`, then read its output back through the background-task output, no file needed; (3) discard it with \`> /dev/null 2>&1\`; (4) ${scratchpadSink}${logsSink}. See quality-reviewer.md, "Running the app for runtime verification".`
+      : `File editing via Bash is forbidden: ${rule}${target ? ` -> ${target}` : ""}. Use the Write or Edit tool instead: a Bash write bypasses prettier/typecheck and the migration-write guard. See developer.md.`,
+    log: `file-write rule=${rule} kind=${capturesOutput ? "process-output" : "file-edit"} cmd=${cmd.slice(0, 120)}`,
   });
 }
 

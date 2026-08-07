@@ -1,6 +1,6 @@
 // Tests for bash-guard.mjs — browser rules (any caller) and validation-command rules (gated agents only). Blocks are decision JSON on stdout with exit 0; allowed commands produce no decision.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,8 @@ writeFileSync(
   JSON.stringify(STANDARD_CONFIG),
 );
 
+const SESSION_ID = "test-1234";
+
 const runHook = (agent, command) => {
   const env = {
     ...process.env,
@@ -53,7 +55,7 @@ const runHook = (agent, command) => {
   const input = JSON.stringify({
     tool_name: "Bash",
     agent_type: agent,
-    session_id: "test-1234",
+    session_id: SESSION_ID,
     tool_input: { command },
   });
   return spawnSync("node", [HOOK], { input, env, encoding: "utf8" });
@@ -396,6 +398,159 @@ describe("bash-guard hook", () => {
         `cd ${SD}/reviews && touch TASK-002-quality-reviewer`,
       );
       expect(isBlocked(r)).toBe(true);
+    });
+  });
+
+  // A refusal an agent cannot comply with is a refusal it retries in another
+  // phrasing. The two causes hiding behind `>` need two different exits: an
+  // editing agent is sent to the Write tool, an agent capturing a process's
+  // output is told which sinks it may use.
+  describe("file-write rules: guidance per cause", () => {
+    const SCRATCHPAD = `/tmp/claude-1000/-workspaces-app/${SESSION_ID}/scratchpad`;
+    const WRITE_TOOL = "Use the Write or Edit tool instead";
+    const OUTPUT_SINKS = "Capturing process output to a file via Bash is gated";
+
+    test("redirect to a source file → the file-edit message", () => {
+      const r = runHook("developer", "echo 'export const x = 1' > src/x.ts");
+      expect(isBlocked(r)).toBe(true);
+      expect(r.stdout).toContain(WRITE_TOOL);
+      expect(r.stdout).not.toContain(OUTPUT_SINKS);
+    });
+
+    test.each([
+      ["sed -i", "sed -i 's/a/b/' src/x.ts"],
+      ["awk -i inplace", "awk -i inplace '{print}' src/x.ts"],
+      ["scripted write", `node -e "require('fs').writeFileSync('a.ts','x')"`],
+    ])("%s → the file-edit message", (_label, command) => {
+      const r = runHook("developer", command);
+      expect(isBlocked(r)).toBe(true);
+      expect(r.stdout).toContain(WRITE_TOOL);
+    });
+
+    test("redirecting a dev server's log names the allowed forms", () => {
+      const r = runHook(
+        "developer",
+        "npm run dev:demo > /tmp/dev-5300.log 2>&1",
+      );
+      expect(isBlocked(r)).toBe(true);
+      expect(r.stdout).toContain(OUTPUT_SINKS);
+      // The whole point: the exits are named, not left to be guessed.
+      expect(r.stdout).toContain("> /dev/null 2>&1");
+      expect(r.stdout).toContain("run_in_background: true");
+      expect(r.stdout).not.toContain(WRITE_TOOL);
+    });
+
+    test("the developer is told the scratchpad sink is the reviewer's", () => {
+      const r = runHook("developer", "npm run dev:demo > /tmp/dev.log 2>&1");
+      expect(r.stdout).toContain("allowed for the quality-reviewer only");
+    });
+
+    // The reviewer is the role that RUNS the app to verify it, so its log
+    // capture is sanctioned, but only into this session's scratchpad.
+    test("reviewer redirecting into the session scratchpad → allowed", () => {
+      const r = runHook(
+        "quality-reviewer",
+        `cd /wt/TASK-003 && npm run dev:demo -- --port 5303 > ${SCRATCHPAD}/demo-5303.log 2>&1 &`,
+      );
+      expect(r.status).toBe(0);
+      expect(isBlocked(r)).toBe(false);
+    });
+
+    test("developer redirecting into the same scratchpad → still blocked", () => {
+      const r = runHook(
+        "developer",
+        `cd /wt/TASK-003 && npm run dev:demo -- --port 5303 > ${SCRATCHPAD}/demo-5303.log 2>&1 &`,
+      );
+      expect(isBlocked(r)).toBe(true);
+    });
+
+    // The exemption is the scratchpad, not the reviewer: a reviewer writing
+    // anywhere else is refused exactly as before.
+    test("reviewer redirecting outside the scratchpad → blocked", () => {
+      const r = runHook("quality-reviewer", "npm run dev:demo > /tmp/demo.log");
+      expect(isBlocked(r)).toBe(true);
+    });
+
+    test("another session's scratchpad is not this session's → blocked", () => {
+      const r = runHook(
+        "quality-reviewer",
+        "npm run dev:demo > /tmp/claude-1000/-workspaces-app/other-session/scratchpad/demo.log 2>&1",
+      );
+      expect(isBlocked(r)).toBe(true);
+    });
+
+    // `=>` is a JavaScript arrow, never a shell redirect. Reading it as one
+    // refused every `node -e` one-liner that passes a callback, which is how an
+    // agent drives a headless browser from Bash.
+    test.each([
+      `node -e "j(rows, {}, (e, csv) => console.log(csv))"`,
+      `npx tsx -e "p.on('console', (m) => errs.push(m.text()))"`,
+    ])("an arrow function is not a redirect: %s", (command) => {
+      const r = runHook("quality-reviewer", command);
+      expect(r.status).toBe(0);
+      expect(isBlocked(r)).toBe(false);
+    });
+
+    test("2>/dev/null alone → allowed", () => {
+      expect(isBlocked(runHook("developer", "ls /nope 2>/dev/null"))).toBe(
+        false,
+      );
+    });
+
+    // Regression: a real write must not be waved through because an unrelated
+    // /dev/null redirect appears in the same command.
+    test("a /dev/null redirect does not disarm a real write", () => {
+      const r = runHook("developer", "grep -r x . 2>/dev/null > out.ts");
+      expect(isBlocked(r)).toBe(true);
+    });
+
+    test("pipe to tee a file → blocked", () => {
+      expect(isBlocked(runHook("developer", "echo x | tee src/x.ts"))).toBe(
+        true,
+      );
+    });
+
+    test("tee to /dev/null → allowed", () => {
+      expect(isBlocked(runHook("developer", "echo x | tee /dev/null"))).toBe(
+        false,
+      );
+    });
+
+    test("a plain read command with no redirect → allowed", () => {
+      expect(isBlocked(runHook("developer", "cat src/x.ts"))).toBe(false);
+    });
+  });
+
+  // A block is only judgeable after the fact if the log says WHICH rule fired:
+  // the agent-facing message names it, the log used to record only the family.
+  describe("every block records its rule in the log line", () => {
+    const logFor = (agent, command) => {
+      runHook(agent, command);
+      const log = join(
+        tmpRoot,
+        standardRepo.replace(/\//g, "_"),
+        SESSION_ID,
+        "hooks.log",
+      );
+      return readFileSync(log, "utf8");
+    };
+
+    test.each([
+      ["", "npx playwright test --headed", "rule=headed-playwright"],
+      ["", "npm run dev -- --open", "rule=vite-open"],
+      ["developer", "npm run typecheck", "rule=typecheck"],
+      ["developer", "npx vitest run", "rule=unit"],
+      ["", "make test-e2e", "rule=e2e"],
+      ["orchestrator", "touch /tmp/s/reviews/f", "rule=guard-state-mutation"],
+      ["developer", "echo x > src/x.ts", "rule=redirect kind=file-edit"],
+      [
+        "developer",
+        "npm run dev > /tmp/d.log 2>&1",
+        "rule=redirect kind=process-output",
+      ],
+      ["developer", "sed -i 's/a/b/' src/x.ts", "rule=sed-in-place"],
+    ])("%s running '%s' logs %s", (agent, command, label) => {
+      expect(logFor(agent, command)).toContain(label);
     });
   });
 });
