@@ -607,7 +607,10 @@ export function runValidationSteps(
     const r = runStep(ctx, step, { cwd: ctx.repo, base });
     if (!r.ok) {
       progress(`[validate:repo] ${step.id} FAILED`);
-      ctx.log(`FAIL step=${step.id}\n${r.output}`);
+      // STEP-FAIL, not FAIL: the caller that owns the stop logs the one FAIL verdict,
+      // and two lines saying the same thing under the same verb is what made a failure
+      // read as two.
+      ctx.log(`STEP-FAIL step=${step.id} wt=repo`);
       return { ok: false, step: step.id, output: r.output + "\n" };
     }
     ctx.log(`${step.id} OK`);
@@ -644,7 +647,7 @@ function runWorktreeChain(ctx, wt, perWorktree, { base, owner, progress }) {
       // stopped.
       if (r.step) {
         progress(`[validate:${label}] ${id} FAILED`);
-        ctx.log(`FAIL step=${id} wt=${wt}\n${r.output}`);
+        ctx.log(`STEP-FAIL step=${id} wt=${wt}`);
         return {
           ok: false,
           step: id,
@@ -658,7 +661,7 @@ function runWorktreeChain(ctx, wt, perWorktree, { base, owner, progress }) {
         `[validate:${label}] ${id} FAILED (${fails}/${STEP_FAIL_LIMIT})`,
       );
       ctx.log(
-        `FAIL step=${id} wt=${wt} attempt=${fails}/${STEP_FAIL_LIMIT}\n${r.output}`,
+        `STEP-FAIL step=${id} wt=${wt} attempt=${fails}/${STEP_FAIL_LIMIT}`,
       );
 
       if (fails >= STEP_FAIL_LIMIT) {

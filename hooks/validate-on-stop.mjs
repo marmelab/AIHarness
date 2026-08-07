@@ -35,6 +35,7 @@ import {
   simpleWorktreePath,
   taskWorktreePath,
 } from "./lib/topology.mjs";
+import { forLog } from "./lib/log-output.mjs";
 import { runValidationSteps } from "./lib/validation.mjs";
 
 const raw = readFileSync(0, "utf8");
@@ -143,10 +144,18 @@ const result = runValidationSteps(ctx, {
 });
 
 if (!result.ok) {
+  // The ONE line that says FAIL for this stop, and the only place the captured output
+  // reaches the log: stripped of ANSI escapes, bounded, and prefixed line by line. The
+  // agent still gets it verbatim on stderr, which is the channel it is written for.
+  const captured = forLog(result.output);
   ctx.fail(
     `Validation failed at step '${result.step}'. Fix the errors and commit before completing:\n` +
       result.output,
-    { log: `step=${result.step}` },
+    {
+      log:
+        `step=${result.step} wt=${ownWorktree}` +
+        (captured ? `\n${captured}` : ""),
+    },
   );
 }
 

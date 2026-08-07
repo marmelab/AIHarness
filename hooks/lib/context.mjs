@@ -61,15 +61,26 @@ export function createHookContext(input, name = "hook") {
   const logFile = join(sessionDir, "hooks.log");
 
   /**
+   * Append to hooks.log. EVERY line gets the `[timestamp] [hook]` prefix, including
+   * the continuation lines of a multi-line message: a captured compiler or test
+   * output pasted in raw used to leave hundreds of lines with no timestamp and no
+   * hook name, which is what the file's whole grammar is for. Callers pass captured
+   * output through lib/log-output.mjs forLog() first, so it is also stripped of ANSI
+   * escapes and bounded.
    * @param {...unknown} parts
    * @returns {void}
    */
   const log = (...parts) => {
+    const stamp = `[${new Date().toISOString()}] [${name}] `;
+    const body = parts.join(" ");
     try {
       mkdirSync(dirname(logFile), { recursive: true });
       appendFileSync(
         logFile,
-        `[${new Date().toISOString()}] [${name}] ${parts.join(" ")}\n`,
+        body
+          .split("\n")
+          .map((line) => `${stamp}${line}`)
+          .join("\n") + "\n",
       );
     } catch {
       // logging must never break a hook
