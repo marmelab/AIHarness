@@ -13,7 +13,7 @@ Reference for the assertion, locator, and structure patterns used inside an e2e 
 - Setting up browser testing for the app (config, fixtures, auth, parallelism).
 - Migrating tests from Cypress or Selenium.
 
-For *whether* a change requires an e2e test and *where* the spec goes, see
+For _whether_ a change requires an e2e test and _where_ the spec goes, see
 `Skill({skill: "e2e-conventions"})`.
 
 ---
@@ -26,16 +26,16 @@ Playwright's `expect(locator)` assertions **auto-retry** until the condition is 
 
 ```typescript
 // Returns null immediately if element doesn't exist yet — race condition!
-const el = await page.$('.order-confirmation');
+const el = await page.$(".order-confirmation");
 expect(el).not.toBeNull();
 
 // Evaluates once, no retry — flaky on slow renders
-const text = await page.textContent('.status');
-expect(text).toBe('Order received');
+const text = await page.textContent(".status");
+expect(text).toBe("Order received");
 
 // Manual waitForSelector + isVisible — redundant, ignores auto-retry
-await page.waitForSelector('.status');
-const visible = await page.locator('.status').isVisible();
+await page.waitForSelector(".status");
+const visible = await page.locator(".status").isVisible();
 expect(visible).toBe(true);
 ```
 
@@ -43,16 +43,16 @@ expect(visible).toBe(true);
 
 ```typescript
 // Auto-retries until element is visible or timeout
-await expect(page.getByText('Order received')).toBeVisible();
+await expect(page.getByText("Order received")).toBeVisible();
 
 // Auto-retries until text matches
-await expect(page.getByTestId('status')).toHaveText('Order received');
+await expect(page.getByTestId("status")).toHaveText("Order received");
 
 // Auto-retries for element count
-await expect(page.getByRole('listitem')).toHaveCount(3);
+await expect(page.getByRole("listitem")).toHaveCount(3);
 
 // Auto-retries for attribute values
-await expect(page.getByRole('button', { name: 'Submit' })).toBeEnabled();
+await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
 ```
 
 **Why it matters:** `page.$()` and `page.textContent()` execute once and return immediately. If the UI hasn't rendered yet, the test fails intermittently. Web-first assertions (`expect(locator).toBeVisible()`, `.toHaveText()`, `.toHaveCount()`) retry automatically until the assertion passes or the timeout expires, making tests reliable without explicit waits.
@@ -66,8 +66,8 @@ Prefer locators that match what the user sees. CSS selectors break when class na
 ### WRONG — CSS/XPath selectors
 
 ```typescript
-page.locator('.btn-primary.submit-order');
-page.locator('#order-form > div:nth-child(3) > button');
+page.locator(".btn-primary.submit-order");
+page.locator("#order-form > div:nth-child(3) > button");
 page.locator('//button[@class="submit"]');
 ```
 
@@ -75,17 +75,17 @@ page.locator('//button[@class="submit"]');
 
 ```typescript
 // 1. BEST — role-based (matches accessible name)
-page.getByRole('button', { name: 'Place Order' });
-page.getByRole('heading', { name: /checkout/i });
-page.getByRole('link', { name: 'View cart' });
+page.getByRole("button", { name: "Place Order" });
+page.getByRole("heading", { name: /checkout/i });
+page.getByRole("link", { name: "View cart" });
 
 // 2. GOOD — label, placeholder, text
-page.getByLabel('Email address');
-page.getByPlaceholder('Search products');
-page.getByText('Order #42');
+page.getByLabel("Email address");
+page.getByPlaceholder("Search products");
+page.getByText("Order #42");
 
 // 3. ACCEPTABLE — test IDs (for elements without accessible names)
-page.getByTestId('order-status-badge');
+page.getByTestId("order-status-badge");
 ```
 
 **Why it matters:** `getByRole` tests your app the way a user (and a screen reader) interacts with it. CSS selectors like `.btn-primary` break on refactors. Test IDs are stable but don't validate accessibility — use them only as a fallback.
@@ -101,22 +101,22 @@ Never use `page.waitForTimeout()`, `page.waitForSelector()`, or `setTimeout`. Pl
 ```typescript
 // Arbitrary timeout — slow and still flaky
 await page.waitForTimeout(3000);
-await page.click('.submit-btn');
+await page.click(".submit-btn");
 
 // waitForSelector is redundant before a locator action
-await page.waitForSelector('.product-card');
-await page.locator('.product-card').first().click();
+await page.waitForSelector(".product-card");
+await page.locator(".product-card").first().click();
 ```
 
 ### RIGHT — rely on auto-waiting
 
 ```typescript
 // Playwright auto-waits for the button to be actionable before clicking
-await page.getByRole('button', { name: 'Submit' }).click();
+await page.getByRole("button", { name: "Submit" }).click();
 
 // Web-first assertion auto-retries until products appear
-await expect(page.getByRole('listitem')).toHaveCount(5);
-await page.getByRole('listitem').first().click();
+await expect(page.getByRole("listitem")).toHaveCount(5);
+await page.getByRole("listitem").first().click();
 ```
 
 **Why it matters:** `waitForTimeout(3000)` is the #1 cause of slow test suites. Playwright already waits for elements to be visible, stable, and enabled before performing actions. Adding explicit waits is redundant and makes tests slower without adding reliability.
@@ -130,46 +130,46 @@ Use `page.route()` to mock API responses for isolated, deterministic tests. Use 
 ### Mocking API responses
 
 ```typescript
-test('shows error when API fails', async ({ page }) => {
-  await page.route('**/api/products', (route) =>
+test("shows error when API fails", async ({ page }) => {
+  await page.route("**/api/products", (route) =>
     route.fulfill({
       status: 500,
-      contentType: 'application/json',
-      body: JSON.stringify({ error: 'Internal server error' }),
-    })
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Internal server error" }),
+    }),
   );
 
-  await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText(/error/i);
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText(/error/i);
 });
 
-test('displays products from mocked API', async ({ page }) => {
-  await page.route('**/api/products', (route) =>
+test("displays products from mocked API", async ({ page }) => {
+  await page.route("**/api/products", (route) =>
     route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: "application/json",
       body: JSON.stringify([
-        { id: 1, name: 'Widget', price: 9.99 },
-        { id: 2, name: 'Gadget', price: 19.99 },
+        { id: 1, name: "Widget", price: 9.99 },
+        { id: 2, name: "Gadget", price: 19.99 },
       ]),
-    })
+    }),
   );
 
-  await page.goto('/');
-  await expect(page.getByRole('listitem')).toHaveCount(2);
+  await page.goto("/");
+  await expect(page.getByRole("listitem")).toHaveCount(2);
 });
 ```
 
 ### Waiting for real API calls
 
 ```typescript
-test('order submission calls the API', async ({ page }) => {
-  await page.goto('/checkout');
-  await page.getByLabel('Name').fill('Jane Doe');
+test("order submission calls the API", async ({ page }) => {
+  await page.goto("/checkout");
+  await page.getByLabel("Name").fill("Jane Doe");
 
   // Set up the response promise BEFORE triggering the action
-  const responsePromise = page.waitForResponse('**/api/orders');
-  await page.getByRole('button', { name: 'Place Order' }).click();
+  const responsePromise = page.waitForResponse("**/api/orders");
+  await page.getByRole("button", { name: "Place Order" }).click();
   const response = await responsePromise;
 
   expect(response.status()).toBe(201);
@@ -185,41 +185,43 @@ test('order submission calls the API', async ({ page }) => {
 ### WRONG — flat tests with repeated setup
 
 ```typescript
-test('shows products', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: /products/i })).toBeVisible();
+test("shows products", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: /products/i })).toBeVisible();
 });
 
-test('can add to cart', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /add/i }).first().click();
-  await expect(page.getByTestId('cart-count')).toHaveText('1');
+test("can add to cart", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /add/i }).first().click();
+  await expect(page.getByTestId("cart-count")).toHaveText("1");
 });
 ```
 
 ### RIGHT — grouped tests with shared setup
 
 ```typescript
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test.describe('Product catalog', () => {
+test.describe("Product catalog", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto("/");
   });
 
-  test('displays product listing', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: /products/i })).toBeVisible();
-    await expect(page.getByRole('listitem')).toHaveCount(5);
+  test("displays product listing", async ({ page }) => {
+    await expect(
+      page.getByRole("heading", { name: /products/i }),
+    ).toBeVisible();
+    await expect(page.getByRole("listitem")).toHaveCount(5);
   });
 
-  test('can add item to cart', async ({ page }) => {
-    await page.getByRole('button', { name: /add/i }).first().click();
-    await expect(page.getByTestId('cart-count')).toHaveText('1');
+  test("can add item to cart", async ({ page }) => {
+    await page.getByRole("button", { name: /add/i }).first().click();
+    await expect(page.getByTestId("cart-count")).toHaveText("1");
   });
 
-  test('can search products', async ({ page }) => {
-    await page.getByPlaceholder('Search').fill('widget');
-    await expect(page.getByRole('listitem')).toHaveCount(1);
+  test("can search products", async ({ page }) => {
+    await page.getByPlaceholder("Search").fill("widget");
+    await expect(page.getByRole("listitem")).toHaveCount(1);
   });
 });
 ```
@@ -235,17 +237,17 @@ Use Playwright's fixture system to share setup logic across tests. Custom fixtur
 ### WRONG — manual setup in every test
 
 ```typescript
-test('admin can manage users', async ({ page }) => {
+test("admin can manage users", async ({ page }) => {
   // Repeated in every admin test
-  await page.goto('/login');
-  await page.getByLabel('Email').fill('admin@example.com');
-  await page.getByLabel('Password').fill('password');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL('/dashboard');
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("admin@example.com");
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL("/dashboard");
 
   // Actual test logic
-  await page.goto('/admin/users');
-  await expect(page.getByRole('table')).toBeVisible();
+  await page.goto("/admin/users");
+  await expect(page.getByRole("table")).toBeVisible();
 });
 ```
 
@@ -253,19 +255,19 @@ test('admin can manage users', async ({ page }) => {
 
 ```typescript
 // e2e/fixtures.ts
-import { test as base, expect } from '@playwright/test';
+import { test as base, expect } from "@playwright/test";
 
 type Fixtures = {
-  adminPage: import('@playwright/test').Page;
+  adminPage: import("@playwright/test").Page;
 };
 
 export const test = base.extend<Fixtures>({
   adminPage: async ({ page }, use) => {
-    await page.goto('/login');
-    await page.getByLabel('Email').fill('admin@example.com');
-    await page.getByLabel('Password').fill('password');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.waitForURL('/dashboard');
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("admin@example.com");
+    await page.getByLabel("Password").fill("password");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL("/dashboard");
     await use(page);
     // Teardown runs automatically after test
   },
@@ -274,11 +276,11 @@ export const test = base.extend<Fixtures>({
 export { expect };
 
 // e2e/admin.spec.ts
-import { test, expect } from './fixtures';
+import { test, expect } from "./fixtures";
 
-test('admin can manage users', async ({ adminPage }) => {
-  await adminPage.goto('/admin/users');
-  await expect(adminPage.getByRole('table')).toBeVisible();
+test("admin can manage users", async ({ adminPage }) => {
+  await adminPage.goto("/admin/users");
+  await expect(adminPage.getByRole("table")).toBeVisible();
 });
 ```
 
@@ -291,15 +293,15 @@ For apps requiring login, authenticate once in a setup project and reuse the ses
 ### playwright.config.ts — setup project
 
 ```typescript
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   projects: [
-    { name: 'setup', testMatch: /.*\.setup\.ts/ },
+    { name: "setup", testMatch: /.*\.setup\.ts/ },
     {
-      name: 'chromium',
-      dependencies: ['setup'],
-      use: { storageState: 'e2e/.auth/user.json' },
+      name: "chromium",
+      dependencies: ["setup"],
+      use: { storageState: "e2e/.auth/user.json" },
     },
   ],
 });
@@ -308,16 +310,16 @@ export default defineConfig({
 ### e2e/auth.setup.ts — run once
 
 ```typescript
-import { test as setup, expect } from '@playwright/test';
+import { test as setup, expect } from "@playwright/test";
 
-const authFile = 'e2e/.auth/user.json';
+const authFile = "e2e/.auth/user.json";
 
-setup('authenticate', async ({ page }) => {
-  await page.goto('/login');
-  await page.getByLabel('Email').fill('user@example.com');
-  await page.getByLabel('Password').fill('password');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL('/dashboard');
+setup("authenticate", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL("/dashboard");
   await page.context().storageState({ path: authFile });
 });
 ```
@@ -332,7 +334,7 @@ Encapsulate page interactions in classes to reduce duplication and make tests re
 
 ```typescript
 // e2e/pages/checkout.page.ts
-import { type Page, type Locator, expect } from '@playwright/test';
+import { type Page, type Locator, expect } from "@playwright/test";
 
 export class CheckoutPage {
   readonly nameInput: Locator;
@@ -341,14 +343,14 @@ export class CheckoutPage {
   readonly confirmationMessage: Locator;
 
   constructor(private page: Page) {
-    this.nameInput = page.getByLabel('Full name');
-    this.emailInput = page.getByLabel('Email');
-    this.submitButton = page.getByRole('button', { name: 'Place Order' });
+    this.nameInput = page.getByLabel("Full name");
+    this.emailInput = page.getByLabel("Email");
+    this.submitButton = page.getByRole("button", { name: "Place Order" });
     this.confirmationMessage = page.getByText(/order.*confirmed/i);
   }
 
   async goto() {
-    await this.page.goto('/checkout');
+    await this.page.goto("/checkout");
   }
 
   async fillAndSubmit(name: string, email: string) {
@@ -363,13 +365,13 @@ export class CheckoutPage {
 }
 
 // e2e/checkout.spec.ts
-import { test, expect } from '@playwright/test';
-import { CheckoutPage } from './pages/checkout.page';
+import { test, expect } from "@playwright/test";
+import { CheckoutPage } from "./pages/checkout.page";
 
-test('completes checkout', async ({ page }) => {
+test("completes checkout", async ({ page }) => {
   const checkout = new CheckoutPage(page);
   await checkout.goto();
-  await checkout.fillAndSubmit('Jane Doe', 'jane@example.com');
+  await checkout.fillAndSubmit("Jane Doe", "jane@example.com");
   await checkout.expectConfirmation();
 });
 ```
@@ -382,27 +384,27 @@ test('completes checkout', async ({ page }) => {
 
 ```typescript
 // playwright.config.ts
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: "html",
   use: {
-    baseURL: 'http://localhost:3000',
-    screenshot: 'only-on-failure',
-    trace: 'on-first-retry',
+    baseURL: "http://localhost:3000",
+    screenshot: "only-on-failure",
+    trace: "on-first-retry",
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+    { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
   webServer: {
-    command: 'npm run dev',
+    command: "npm run dev",
     port: 3000,
     reuseExistingServer: !process.env.CI,
   },
@@ -422,16 +424,19 @@ export default defineConfig({
 ## 10. Visual Regression Testing
 
 ```typescript
-test('homepage matches snapshot', async ({ page }) => {
-  await page.goto('/');
-  await expect(page).toHaveScreenshot('homepage.png');
+test("homepage matches snapshot", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveScreenshot("homepage.png");
 });
 
-test('product card renders correctly', async ({ page }) => {
-  await page.goto('/products');
-  await expect(page.getByTestId('product-card').first()).toHaveScreenshot('product-card.png', {
-    maxDiffPixels: 100,
-  });
+test("product card renders correctly", async ({ page }) => {
+  await page.goto("/products");
+  await expect(page.getByTestId("product-card").first()).toHaveScreenshot(
+    "product-card.png",
+    {
+      maxDiffPixels: 100,
+    },
+  );
 });
 ```
 
@@ -456,7 +461,7 @@ Run `npx playwright test --update-snapshots` to generate baseline images. Snapsh
 - `page.$()` / `page.textContent()` / `isVisible()` checks instead of web-first assertions.
 - CSS or XPath selectors where a `getByRole`/`getByLabel`/`getByText` locator exists.
 - Any `waitForTimeout()`, or `waitForSelector()` before a locator action.
-- `waitForResponse()` set up *after* the action that triggers the call.
+- `waitForResponse()` set up _after_ the action that triggers the call.
 - Login flow repeated per test instead of `storageState` or a fixture.
 - `test.only` left in code, or `fullyParallel` disabled without a shared-state reason.
 

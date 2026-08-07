@@ -1,4 +1,4 @@
-// Tests for lib/smoke-evidence.mjs — recognising that a browser was actually driven.
+// Tests for lib/smoke-evidence.mjs: recognising that a browser was actually driven.
 //
 // The calibration that matters: a real feature-smoke drove Chromium through Bash
 // `node -e` scripts, with no MCP tool call anywhere. A check that accepts only the MCP

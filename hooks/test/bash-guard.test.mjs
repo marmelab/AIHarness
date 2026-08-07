@@ -318,6 +318,31 @@ describe("bash-guard hook", () => {
 
     const SD = "/tmp/_repo/sess-1234";
 
+    // This block fires exactly when the orchestrator is stuck at the merger gate, so its
+    // text is the recovery procedure. It used to say the reviewer writes its own flag and
+    // that a missing flag means the reviewer did not approve. Both stopped being true when
+    // the self-write became an opt-in fallback: the flag is the record-review-verdict
+    // hook's, and a missing flag means no APPROVED line was READ, which is the case the
+    // orchestrator must diagnose from hooks.log instead of re-reviewing or forging it.
+    describe("the recovery guidance names the real writer", () => {
+      const guidance = () =>
+        runHook("orchestrator", `touch ${SD}/reviews/TASK-002-quality-reviewer`)
+          .stdout;
+
+      test("it points at the hook and at hooks.log", () => {
+        const out = guidance();
+        expect(out).toContain("record-review-verdict");
+        expect(out).toContain("hooks.log");
+        expect(out).toContain("contract line");
+      });
+
+      test("it does not claim the reviewer writes the flag, nor that a missing flag is a rejection", () => {
+        const out = guidance();
+        expect(out).not.toMatch(/reviewer writes its own flag/);
+        expect(out).not.toMatch(/did NOT approve/);
+      });
+    });
+
     test("orchestrator touches a review flag → blocked", () => {
       const r = runHook(
         "orchestrator",

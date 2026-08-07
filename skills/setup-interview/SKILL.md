@@ -22,11 +22,11 @@ any other path.
 
 `Read("$CLAUDE_PROJECT_DIR/docs/project-context.json")`:
 
-| State | Action |
-|---|---|
-| File missing | Start a FRESH interview from domain 1. |
-| File exists, `validated: true` | Summarize existing config (template below) and ask: (a) update specific domains, or (b) restart from scratch. |
-| File exists, `validated: false` | Resume from the last `pending` entry in `interview_progress`. |
+| State                           | Action                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| File missing                    | Start a FRESH interview from domain 1.                                                                        |
+| File exists, `validated: true`  | Summarize existing config (template below) and ask: (a) update specific domains, or (b) restart from scratch. |
+| File exists, `validated: false` | Resume from the last `pending` entry in `interview_progress`.                                                 |
 
 ### Existing-config summary template (validated == true)
 
@@ -74,38 +74,46 @@ moving to the next. Never ask multiple domains in one turn.
 ## Domain questions
 
 ### Domain 1 — Business context
+
 - Industry, team size, client type (B2B / B2C / mixed), main objective
   (prospecting, follow-up, support, other).
 
 ### Domain 2 — Entities
+
 - What objects are managed? Relationships between them?
 - ⚠️ If an entity resembles `contact`, `company`, `deal`, `tag`, `task`, or
   `note` (already in Atomic CRM) → propose extending it (`"type": "extend"`)
   rather than recreating it.
 
 ### Domain 3 — Custom fields
+
 - Specific fields per entity beyond standard fields.
 - Type of each field (text / number / date / boolean / list / file).
 - Required vs optional.
 
 ### Domain 4 — Pipeline
+
 - Sales or follow-up cycle stages, transition conditions, final stages
   (won / lost / archived).
 
 ### Domain 5 — User roles
+
 - Who uses the CRM (sales / manager / admin / support).
 - Rights per role: read-only / write / delete / admin.
 - Multi-tenant needed (data isolated per team)?
 
 ### Domain 6 — Integrations
+
 - Email (read / send / tracking)? Slack or other messaging?
 - CSV import/export? Inbound or outbound webhooks? External API?
 
 ### Domain 7 — UI/UX
+
 - Interface language, theme (light / dark / auto), desired dashboards
   (KPIs / charts / lists), information density preferences.
 
-### Domain 8 — Deployment *(skip entirely when MODE=demo)*
+### Domain 8 — Deployment _(skip entirely when MODE=demo)_
+
 - GitHub username, Supabase project name, deployment platform
   (Vercel recommended, or GitHub Pages), custom domain.
 
@@ -118,28 +126,29 @@ Before final validation, derive what should be removed to keep the CRM clean.
 
 **Default Atomic CRM elements** (candidates for removal):
 
-| Element | Remove when… |
-|---|---|
-| `company` entity | User manages individuals only (no B2B account layer) |
-| `deal` entity | No sales pipeline — user tracks contacts/support only |
-| `task` entity | User did not mention task management |
-| `tag` entity | User did not mention categorisation / labelling |
+| Element                | Remove when…                                               |
+| ---------------------- | ---------------------------------------------------------- |
+| `company` entity       | User manages individuals only (no B2B account layer)       |
+| `deal` entity          | No sales pipeline — user tracks contacts/support only      |
+| `task` entity          | User did not mention task management                       |
+| `tag` entity           | User did not mention categorisation / labelling            |
 | Pipeline / kanban view | `deal` entity is removed, or no stage-based flow requested |
-| Analytics dashboard | User did not mention KPIs, charts, or reporting |
-| CSV import/export | User did not mention data migration or bulk operations |
-| Multi-tenant / teams | Domain 5 answered "no" to data isolation per team |
+| Analytics dashboard    | User did not mention KPIs, charts, or reporting            |
+| CSV import/export      | User did not mention data migration or bulk operations     |
+| Multi-tenant / teams   | Domain 5 answered "no" to data isolation per team          |
 
 **Steps:**
 
 1. Compare domain answers against the table above. Derive a candidate removal list.
 2. Present it to the user as a **plain text message**, translated to their language.
 
-   **Language rule (strict):** describe only what the user *sees* in the
+   **Language rule (strict):** describe only what the user _sees_ in the
    interface — sections, screens, buttons. Never mention entities, tables,
    components, types, or any technical term. The user interprets the
    business meaning; you handle the technical implications internally.
 
    Example (translate at runtime):
+
    ```
    Based on what you told me, it looks like you won't need these sections
    in your CRM — I can remove them to keep things clean:
@@ -150,16 +159,18 @@ Before final validation, derive what should be removed to keep the CRM clean.
    ```
 
    Plain-language names to use (never the internal names):
-   | Internal | Say to user |
-   |---|---|
-   | `company` entity | the "Companies" section |
-   | `deal` entity | the "Deals" or "Sales pipeline" section |
-   | `task` entity | the "Tasks" section |
-   | `tag` entity | the label / tag feature |
-   | Pipeline / kanban | the pipeline / kanban board view |
-   | Analytics dashboard | the analytics and reporting section |
-   | CSV import/export | the data import and export feature |
-   | Multi-tenant | team-based data isolation |
+
+   | Internal            | Say to user                             |
+   | ------------------- | --------------------------------------- |
+   | `company` entity    | the "Companies" section                 |
+   | `deal` entity       | the "Deals" or "Sales pipeline" section |
+   | `task` entity       | the "Tasks" section                     |
+   | `tag` entity        | the label / tag feature                 |
+   | Pipeline / kanban   | the pipeline / kanban board view        |
+   | Analytics dashboard | the analytics and reporting section     |
+   | CSV import/export   | the data import and export feature      |
+   | Multi-tenant        | team-based data isolation               |
+
 3. On user confirmation (or "all good"): populate `cleanup` in the JSON and Write.
 4. On user adjustment ("keep X"): remove X from the list, update JSON.
 
@@ -194,12 +205,12 @@ When all 8 applicable domains are `"done"`:
 1. Read the JSON. Produce a compact plain-language summary in the user's
    language.
 2. Output a plain-text message asking for confirmation (translate at runtime):
-   > *"<summary>. All good? I'll lock the project spec. (yes / no)"*
+   > _"<summary>. All good? I'll lock the project spec. (yes / no)"_
 3. On any affirmative (yes / ok / valid / go / looks good, in any language):
    a. Set `validated: true`. `Write` the file.
    b. `Bash("cd \"$CLAUDE_PROJECT_DIR\" && git add docs/project-context.json && git commit -m \"chore(setup): <fresh|update> project context\"")`
    c. Output `VALIDATED` — the orchestrator moves to SETUP-PLAN. No additional
-      text after this token.
+   text after this token.
 4. On negative: ask which domain to revisit; re-enter that domain's questions.
 
 ---
@@ -208,11 +219,11 @@ When all 8 applicable domains are `"done"`:
 
 Every orchestrator turn during SETUP-INTERVIEW ends with **exactly one** of:
 
-| Output | Meaning |
-|---|---|
+| Output              | Meaning                                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Plain text question | Ask the user the next domain question directly; re-enter this skill on the next user turn. No wrapper, no prefix. |
-| `VALIDATED` | JSON committed. Move to STATE SETUP-PLAN. |
-| `FAILED: <reason>` | Unrecoverable error; surface to user, abort setup. |
+| `VALIDATED`         | JSON committed. Move to STATE SETUP-PLAN.                                                                         |
+| `FAILED: <reason>`  | Unrecoverable error; surface to user, abort setup.                                                                |
 
 ---
 
@@ -238,9 +249,7 @@ Every orchestrator turn during SETUP-INTERVIEW ends with **exactly one** of:
       "name": "ticket",
       "type": "create|extend",
       "base_entity": null,
-      "fields": [
-        { "name": "subject", "type": "text", "required": true }
-      ]
+      "fields": [{ "name": "subject", "type": "text", "required": true }]
     }
   ],
   "pipeline_stages": ["open", "in_progress", "resolved"],
@@ -264,11 +273,11 @@ Every orchestrator turn during SETUP-INTERVIEW ends with **exactly one** of:
     "domain_8": "pending"
   },
   "phase_status": {
-    "spec":     { "status": "pending" },
-    "fork":     { "status": "pending" },
+    "spec": { "status": "pending" },
+    "fork": { "status": "pending" },
     "supabase": { "status": "pending" },
-    "env":      { "status": "pending" },
-    "deploy":   { "status": "pending" }
+    "env": { "status": "pending" },
+    "deploy": { "status": "pending" }
   },
   "tickets": []
 }

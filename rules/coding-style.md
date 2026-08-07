@@ -33,11 +33,12 @@ scope silently.
 ## File organization
 
 Many small files over few large files:
+
 - 200-400 lines typical, 800 max
 - High cohesion, low coupling
 - Organize by feature/domain, not by type
 - Extract utilities from large modules
-- Grow the file *count*, not the file: when an edit would push a file past
+- Grow the file _count_, not the file: when an edit would push a file past
   the ~400-line typical ceiling, extract a new focused module instead of
   appending to the existing one
 

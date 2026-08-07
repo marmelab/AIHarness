@@ -9,12 +9,12 @@ CRM Builder / chat-service specifics live in Atomic CRM's project layer (its
 
 ## Extension points (`config.launcher`)
 
-| Key | Meaning | Consumer | Unset behavior |
-|---|---|---|---|
-| `sessionDirEnv` | Env var carrying the managed session dir (default `CHAT_SESSION_DIR`) | `config.sessionDirFromEnv()`, the single reader; every hook resolves the dir through it | falls back to the recomputed `/tmp/<repo>/<id>` session dir |
-| `turnSentinelDir` | Dir where `turn-complete.mjs` drops `pty-turn-done-<sid>` so the launcher knows the turn ended | `turn-complete.mjs` | hook writes nothing (inert) |
-| `postCheckoutScript` | Script the merger runs after checkout to materialize the app variant | `merger.md` (runs it), `block-orchestrator-merge.mjs` (gates it merger-only) | not run; the guard clause is inert |
-| `logsDir` | Managed-launcher log dir agents may redirect into | `bash-guard.mjs` (redirect exemption) | only `/dev/null` is exempt |
+| Key                  | Meaning                                                                                        | Consumer                                                                                | Unset behavior                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `sessionDirEnv`      | Env var carrying the managed session dir (default `CHAT_SESSION_DIR`)                          | `config.sessionDirFromEnv()`, the single reader; every hook resolves the dir through it | falls back to the recomputed `/tmp/<repo>/<id>` session dir |
+| `turnSentinelDir`    | Dir where `turn-complete.mjs` drops `pty-turn-done-<sid>` so the launcher knows the turn ended | `turn-complete.mjs`                                                                     | hook writes nothing (inert)                                 |
+| `postCheckoutScript` | Script the merger runs after checkout to materialize the app variant                           | `merger.md` (runs it), `block-orchestrator-merge.mjs` (gates it merger-only)            | not run; the guard clause is inert                          |
+| `logsDir`            | Managed-launcher log dir agents may redirect into                                              | `bash-guard.mjs` (redirect exemption)                                                   | only `/dev/null` is exempt                                  |
 
 `CHAT_SESSION_DIR` is kept as the generic "managed session dir" variable name:
 it is set by the launcher, not by the core. No hook reads it directly. Everything

@@ -109,18 +109,18 @@ describe("render-status", () => {
     expect(md).toContain("_not run this round_");
   });
 
-  // This hook fires on EVERY subagent stop, and the board is derived from the progress
-  // log, so an unchanged log renders the same bytes. The skip is what keeps a session's
-  // stops from each paying for a git diff per dev branch.
+  // This hook fires on EVERY subagent stop, and the render costs a git diff per dev
+  // branch, so a stop that changed nothing must not render. The skip is what keeps a
+  // session's stops from each paying for that.
   describe("re-render skip", () => {
-    test("a second stop with an unchanged progress log renders nothing new", () => {
+    test("a second stop with nothing changed renders nothing new", () => {
       const { base, outDir, run } = setup();
       run();
       const first = statSync(join(outDir, "STATUS.md")).mtimeMs;
       const stored = JSON.parse(
         readFileSync(join(outDir, "status.json"), "utf8"),
-      ).progressMtimeMs;
-      expect(stored).toBeGreaterThan(0);
+      ).renderKey;
+      expect(stored).toBeTruthy();
 
       const r = run();
       expect(r.status).toBe(0);
@@ -151,7 +151,7 @@ describe("render-status", () => {
       expect(after).toContain("TASK-002 developer DONE");
     });
 
-    // The mtime is stored in the board's own status.json, so a board that was never
+    // The key is stored in the board's own status.json, so a board that was never
     // written (or was deleted) renders rather than trusting a stale marker.
     test("a missing status.json renders again", () => {
       const { outDir, run } = setup();
@@ -159,6 +159,65 @@ describe("render-status", () => {
       rmSync(join(outDir, "status.json"));
       run();
       expect(existsSync(join(outDir, "status.json"))).toBe(true);
+    });
+
+    // The stops that move NO progress line are exactly the ones these columns exist for:
+    // quality-reviewer and merger both run with `validate: false`, so nothing appends for
+    // them. Keying the skip on the log alone left the board showing the state from before
+    // the review and before the cleanup, for the rest of the session.
+    describe("a source other than the progress log moved", () => {
+      const row = (outDir, id) =>
+        readFileSync(join(outDir, "STATUS.md"), "utf8")
+          .split("\n")
+          .find((l) => l.startsWith(`| ${id} `)) ?? "";
+
+      test("a review flag written by a reviewer's stop renders the ✅", () => {
+        const { base, outDir, run } = setup();
+        run();
+        expect(row(outDir, "TASK-002")).not.toContain("✅");
+        writeFileSync(join(base, "reviews", "TASK-002-quality-reviewer"), "");
+        run();
+        expect(row(outDir, "TASK-002")).toContain("✅");
+      });
+
+      test("a worktree removed at merge leaves the board", () => {
+        const { base, outDir, run } = setup();
+        run();
+        expect(readFileSync(join(outDir, "STATUS.md"), "utf8")).toContain(
+          "`TASK-002`",
+        );
+        rmSync(join(base, "TASK-002"), { recursive: true, force: true });
+        run();
+        expect(readFileSync(join(outDir, "STATUS.md"), "utf8")).not.toContain(
+          "`TASK-002`",
+        );
+      });
+
+      test("an e2e verdict written after the feature review reaches the board", () => {
+        const { base, outDir, run } = setup();
+        run();
+        writeFileSync(
+          join(base, "e2e-result.json"),
+          JSON.stringify({ kind: "e2e-result", status: "failed" }),
+        );
+        run();
+        expect(readFileSync(join(outDir, "STATUS.md"), "utf8")).toContain(
+          "❌ **failed**",
+        );
+      });
+
+      test("a ticket status change renders, though the dir listing is unchanged", () => {
+        const { base, outDir, run } = setup();
+        run();
+        writeFileSync(
+          join(base, "tickets", "TASK-002.json"),
+          JSON.stringify({ id: "TASK-002", title: "x", status: "merged" }),
+        );
+        run();
+        expect(readFileSync(join(outDir, "STATUS.md"), "utf8")).toContain(
+          "2/2 merged",
+        );
+      });
     });
   });
 

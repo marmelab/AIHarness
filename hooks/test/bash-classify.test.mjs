@@ -97,6 +97,40 @@ describe("work: anything that actually does something", () => {
   });
 });
 
+// Shell punctuation inside a quoted argument is data, not structure. Reading it as
+// structure counted three ordinary exploration shapes as work, and over-counting is what
+// makes the breaker fire on an agent whose only sin is reading a lot of code.
+describe("free: punctuation that only looks like structure", () => {
+  test.each([
+    [
+      "grep -rn foo src/ 2>/dev/null",
+      "the discard idiom, on the commonest reader",
+    ],
+    ["find . -name '*.ts' 2>/dev/null | head -20", "discard inside a pipeline"],
+    ["cat missing.txt 2>/dev/null", "discard on a read"],
+    ["ls -la /wt >/dev/null", "discard of stdout"],
+    ["grep -rn Foo src 2>err.log", "stderr captured, nothing else written"],
+    ['echo "a -> b"', "an arrow inside a string"],
+    ['grep "a;b" file', "a command separator inside a string"],
+    ["grep 'x && y' file", "an and-list inside a string"],
+    ['grep "a|b" file', "a pipe inside a string"],
+    ['cd /wt && grep -rn "a;b" src 2>/dev/null', "all of it at once"],
+  ])("%j is free (%s)", (cmd) => {
+    expect(isFreeCommand(cmd)).toBe(true);
+  });
+
+  // The quoting fix must not hide a real writer behind a quote or a discard.
+  test.each([
+    ["node build.mjs 2>/dev/null", "a script whose stderr is discarded"],
+    ["npm run build > log.txt 2>&1", "a build whose output is captured"],
+    ['echo "done" > out.txt', "a quoted string redirected into a file"],
+    ['grep -rn "a;b" src && node build.mjs', "work after a quoted separator"],
+    ['cat "a b.ts" >> out.ts', "an append with a quoted path"],
+  ])("%j is still work (%s)", (cmd) => {
+    expect(isFreeCommand(cmd)).toBe(false);
+  });
+});
+
 describe("stripPrefixes", () => {
   test.each([
     ["cd /tmp/wt && grep x", "grep x"],

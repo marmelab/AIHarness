@@ -63,7 +63,10 @@ export function checkConfigSync(repo) {
     try {
       found.push({ ...src, json: JSON.parse(readFileSync(src.path, "utf8")) });
     } catch (e) {
-      return { ok: false, error: `${src.label} is not valid JSON: ${e.message}` };
+      return {
+        ok: false,
+        error: `${src.label} is not valid JSON: ${e.message}`,
+      };
     }
   }
   if (!found.length) {

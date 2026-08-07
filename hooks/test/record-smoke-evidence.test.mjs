@@ -1,4 +1,4 @@
-// Tests for record-smoke-evidence.mjs — the recorder that makes a feature-smoke
+// Tests for record-smoke-evidence.mjs, the recorder that makes a feature-smoke
 // verdict checkable: it writes <session_dir>/smoke-result.json, and never blocks.
 
 import { spawnSync } from "node:child_process";

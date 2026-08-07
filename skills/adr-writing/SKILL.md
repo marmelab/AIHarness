@@ -10,12 +10,14 @@ Load only when you have a structural decision to record. Default behaviour for a
 ## When to write one
 
 Yes:
+
 - New pattern introduced into the codebase (not just used once — recurring).
 - New runtime dependency (npm package, new Supabase extension, external service).
 - Deliberate departure from an existing convention.
 - Non-obvious schema choice (denormalisation, computed column, soft-delete strategy).
 
 No:
+
 - File naming, folder placement.
 - A bug fix or refactor with no structural impact.
 - Style decisions already captured by lint/prettier.

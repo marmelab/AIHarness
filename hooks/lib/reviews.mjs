@@ -17,9 +17,11 @@
 // e2e-on-feature-review does NOT wait for this flag: it parses the same verdict with the
 // same parser, so the two never disagree and neither depends on the other's write.
 //
-// Path source: the quality-reviewer agent (PRIMARY writer) derives the flag dir
-// from its ticket file — `$(dirname TICKET_FILE)/reviews` — i.e. under the
-// `<session_dir>` it was handed (TICKETS_DIR == <session_dir>, see orchestrator.md).
+// Path source: the fallback write, when a dispatch asks for it, is done by the
+// quality-reviewer agent, which derives the flag dir from its ticket file
+// (`$(dirname TICKET_FILE)/reviews`), i.e. under the `<session_dir>` it was handed
+// (TICKETS_DIR == <session_dir>, see orchestrator.md). Every reader here must resolve
+// to that same dir or the two writers disagree.
 // On a managed launcher (CRM Builder's chat-service) that `<session_dir>` is the dir
 // named by `config.launcher.sessionDirEnv`, which is NOT the `/tmp/<repo>/<id>` path
 // ctx.sessionDir recomputes, so the reader/clearer/fallback below resolve it through
@@ -38,7 +40,7 @@ export const REVIEW_ROLES = ["quality-reviewer"];
 // sentinel instead of a TASK id: <sessionDir>/reviews/FEATURE-quality-reviewer.
 // Shared because three places must agree on the spelling: e2e-on-feature-review reads
 // the flag to decide whether to launch the suite, record-review-verdict writes it, and
-// the quality-reviewer agent touches it as the primary writer.
+// the quality-reviewer agent touches it on a `WRITE_VERDICT_FLAG: yes` dispatch.
 export const FEATURE_KEY = "FEATURE";
 
 export const reviewsDir = (ctx) =>
@@ -52,7 +54,11 @@ export const reviewFlag = (ctx, taskId, role) =>
 // is what keeps the work from being merged anyway. Producer: lib/validation.mjs. Consumer:
 // block-merger-without-review.mjs. Shared here so the two cannot disagree on the path.
 export const validationGaveUpFlag = (ctx, taskId) =>
-  join(sessionDirFromEnv() || ctx.sessionDir, "validation-gave-up", String(taskId));
+  join(
+    sessionDirFromEnv() || ctx.sessionDir,
+    "validation-gave-up",
+    String(taskId),
+  );
 
 // Cleared when that worktree's whole chain passes: giving up must be recoverable, or the
 // documented fix ("dispatch a developer to fix the failing step") cannot work and the ticket is

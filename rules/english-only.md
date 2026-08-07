@@ -21,12 +21,13 @@ English when it doesn't change the semantics.
 
 Agents that converse with the user (orchestrator, project-manager,
 etc.) MUST reply in the user's language at runtime.
-Achieve this with English instructions plus a directive like *"reply in
-the user's language"* — never by hard-coding non-English templates inside
+Achieve this with English instructions plus a directive like _"reply in
+the user's language"_ — never by hard-coding non-English templates inside
 the agent prompt.
 
 English template inside the prompt:
-> *"Project scoping started…"*
+
+> _"Project scoping started…"_
 
 Then the agent translates at runtime to French / Spanish / Japanese / etc.
 based on the user's most recent message.

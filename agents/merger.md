@@ -44,16 +44,16 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
 
 ### Spawn prompt parameters
 
-| Parameter | When present | Description |
-|---|---|---|
-| `TASK_ID` | Stage A / SIMPLE / MIGRATION / ROLLBACK | Ticket ID (e.g. `TASK-003`) or the literal `SIMPLE` / `MIGRATION` / `ROLLBACK`. Absent in promotion-only mode — use `PROMOTE` in the contract line. |
-| `MODE` | promotion-only | `MODE: promote` → run Stage B only and stop. (SIMPLE / MIGRATION / ROLLBACK are selected by the `ROLE:` line — see below.) |
-| `STAGE` | technical-harness | `STAGE: a-only` → run **Stage A only** and stop, even in SIMPLE / MIGRATION mode. Never run Stage B / promotion. Used by the `#technical-harness` flow, which leaves the work on the session branch for the developer to promote. Overrides the automatic "Stage A then promotion" coupling. |
-| `BRANCH_NAME` | Stage A / SIMPLE / MIGRATION / ROLLBACK | Feature (or rollback / ops) branch to merge. |
-| `WORKTREE_PATH` | Stage A / SIMPLE / MIGRATION | Absolute path to the feature worktree (`<WORKTREE_BASE>/<TASK_ID>` or `<WORKTREE_BASE>/simple`). |
-| `SESSION_SHORT_ID` | always recommended | Short session id. The orchestrator passes it directly. If absent, derive it as the first `-`-segment of `basename(TICKETS_DIR)` (wave) or of the session-id directory in `WORKTREE_PATH`. |
-| `TICKETS_DIR` | wave only | Directory holding ticket JSON files; absent in SIMPLE / migration / rollback flow. |
-| `APPROVAL_TRAILER` | MIGRATION only | One-line `Approved-by-user: ...` provenance the orchestrator built from the user's migration approval. When present, append it to the migration merge commit (Stage A) so the approval trail lives in git history. Absent = no trailer. |
+| Parameter          | When present                            | Description                                                                                                                                                                                                                                                                                  |
+| ------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TASK_ID`          | Stage A / SIMPLE / MIGRATION / ROLLBACK | Ticket ID (e.g. `TASK-003`) or the literal `SIMPLE` / `MIGRATION` / `ROLLBACK`. Absent in promotion-only mode — use `PROMOTE` in the contract line.                                                                                                                                          |
+| `MODE`             | promotion-only                          | `MODE: promote` → run Stage B only and stop. (SIMPLE / MIGRATION / ROLLBACK are selected by the `ROLE:` line — see below.)                                                                                                                                                                   |
+| `STAGE`            | technical-harness                       | `STAGE: a-only` → run **Stage A only** and stop, even in SIMPLE / MIGRATION mode. Never run Stage B / promotion. Used by the `#technical-harness` flow, which leaves the work on the session branch for the developer to promote. Overrides the automatic "Stage A then promotion" coupling. |
+| `BRANCH_NAME`      | Stage A / SIMPLE / MIGRATION / ROLLBACK | Feature (or rollback / ops) branch to merge.                                                                                                                                                                                                                                                 |
+| `WORKTREE_PATH`    | Stage A / SIMPLE / MIGRATION            | Absolute path to the feature worktree (`<WORKTREE_BASE>/<TASK_ID>` or `<WORKTREE_BASE>/simple`).                                                                                                                                                                                             |
+| `SESSION_SHORT_ID` | always recommended                      | Short session id. The orchestrator passes it directly. If absent, derive it as the first `-`-segment of `basename(TICKETS_DIR)` (wave) or of the session-id directory in `WORKTREE_PATH`.                                                                                                    |
+| `TICKETS_DIR`      | wave only                               | Directory holding ticket JSON files; absent in SIMPLE / migration / rollback flow.                                                                                                                                                                                                           |
+| `APPROVAL_TRAILER` | MIGRATION only                          | One-line `Approved-by-user: ...` provenance the orchestrator built from the user's migration approval. When present, append it to the migration merge commit (Stage A) so the approval trail lives in git history. Absent = no trailer.                                                      |
 
 `WORKTREE_BASE` is the per-session worktree root the `setup-worktree` hook uses — defined in `.claude/rules/worktree-scope.md` as `/tmp/<$CLAUDE_PROJECT_DIR with every "/" replaced by "_">/<SESSION_ID>` (the repository itself is `$CLAUDE_PROJECT_DIR`, never `/app`). The integration worktree is `<WORKTREE_BASE>/_session`.
 
@@ -70,17 +70,21 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
 ### MERGE STEPS — Stage A (task → session branch)
 
 1. **Verify worktree clean**
+
    ```bash
    cd <WORKTREE_PATH> && git status --porcelain
    ```
+
    Non-empty → developer left uncommitted changes. Emit `FAILED: <TASK_ID> uncommitted changes in worktree`, stop.
 
 2. **Merge the task branch into the session branch, in the `_session` worktree.**
    The integration worktree is `<WORKTREE_BASE>/_session` (checked out on `session/<SESSION_SHORT_ID>`). `$CLAUDE_PROJECT_DIR` stays on main for the demo.
+
    ```bash
    cd <WORKTREE_BASE>/_session \
      && git merge --no-ff <BRANCH_NAME> -m "merge(<TASK_ID>): <ticket title>"
    ```
+
    `merge(...)`, NOT the ticket's `feat` / `fix` / `chore` type: this is a merge commit, and
    the developer's own commits already carry the conventional type. Giving the merge a
    `feat(...)` subject made a changelog count the same change twice, once from the developer
@@ -90,6 +94,7 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
    **MIGRATION mode with `APPROVAL_TRAILER`**: append it as a second commit paragraph so the migration's approval provenance is recorded in git history (traceable in the commit), e.g. `git merge --no-ff <BRANCH_NAME> -m "merge(MIGRATION): apply approved schema change" -m "<APPROVAL_TRAILER>"`.
 
 3. **Update ticket status** (skip when `TASK_ID` is `SIMPLE` / `MIGRATION` / `ROLLBACK` or `TICKETS_DIR` is absent)
+
    ```bash
    if [ -n "${TICKETS_DIR:-}" ] && [ "${TASK_ID}" != "SIMPLE" ] && [ "${TASK_ID}" != "MIGRATION" ] && [ "${TASK_ID}" != "ROLLBACK" ]; then
      node -e 'const fs=require("fs");const p=process.argv[1];const d=JSON.parse(fs.readFileSync(p,"utf8"));d.status="merged";fs.writeFileSync(p,JSON.stringify(d,null,2)+"\n")' \
@@ -98,10 +103,12 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
    fi
    ```
 
-4. **Capture short SHA and emit contract line** (Stage-A-only dispatches — the wave `TASK-XXX` path, or any dispatch carrying `STAGE: a-only`; a SIMPLE / MIGRATION flow *without* `STAGE: a-only` skips this and continues to Stage B)
+4. **Capture short SHA and emit contract line** (Stage-A-only dispatches — the wave `TASK-XXX` path, or any dispatch carrying `STAGE: a-only`; a SIMPLE / MIGRATION flow _without_ `STAGE: a-only` skips this and continues to Stage B)
+
    ```bash
    cd <WORKTREE_BASE>/_session && git rev-parse --short HEAD
    ```
+
    Emit as final output: `DONE: <TASK_ID> commit=<short_sha>`
 
 5. **On any failure of steps 1–4**:
@@ -155,6 +162,7 @@ correct.
   - SIMPLE / MIGRATION: `FAILED: SIMPLE promote conflict: files=[<paths>]` / `FAILED: MIGRATION promote conflict: files=[<paths>]`
 
   Do NOT resolve — the orchestrator dispatches a resolver.
+
 - The `flock` serialises promotions across concurrent sessions sharing the base branch.
 - **Direct `main`/`master` promotion needs an opt-in.** The Stage-B block above
   refuses (`exit 3`) when the resolved target is `main`/`master` and `ALLOW_MAIN` is not set,
@@ -194,6 +202,7 @@ cd $CLAUDE_PROJECT_DIR && flock $CLAUDE_PROJECT_DIR/.promote.lock bash -c '
 ---
 
 ### NEVER
+
 - `git add` / `git commit` / `git stash` / `git clean -fd` (except the ticket-status JSON write in Stage A step 3, via the `node -e` snippet — never the Edit/Write tools).
 - `git push`, `gh` commands, `--no-verify`, `--force`.
 - Force-merge on conflict — abort and report failed. This applies to both Stage A (task branch → session branch) and Stage B (session branch → base branch).
@@ -206,6 +215,7 @@ cd $CLAUDE_PROJECT_DIR && flock $CLAUDE_PROJECT_DIR/.promote.lock bash -c '
 ## Failure modes
 
 Short reminders:
+
 - Worktree path doesn't exist or branch is gone → emit `FAILED: <TASK_ID> <reason>`. Don't retry silently.
 - `_session` worktree missing → the `setup-worktree` hook creates it; emit `FAILED: <TASK_ID> _session worktree missing` rather than creating it yourself.
 - `.git/index.lock` contention: wait 2s, retry once. If still locked, emit `FAILED: <TASK_ID> index.lock contention`.

@@ -117,14 +117,14 @@ describe("the env var carrying the launcher's session dir", () => {
 describe("the session-scoped artifacts follow the declared variable", () => {
   test("verdict flags, the give-up marker and the e2e result all land there", () => {
     writeConfig({ sessionDirEnv: "CRM_BUILDER_SESSION" });
-    expect(probeWith({ CRM_BUILDER_SESSION: "/managed/session" })).toMatchObject(
-      {
-        reviewsDir: "/managed/session/reviews",
-        reviewFlag: "/managed/session/reviews/TASK-001-quality-reviewer",
-        gaveUp: "/managed/session/validation-gave-up/TASK-001",
-        e2e: "/managed/session/e2e-result.json",
-      },
-    );
+    expect(
+      probeWith({ CRM_BUILDER_SESSION: "/managed/session" }),
+    ).toMatchObject({
+      reviewsDir: "/managed/session/reviews",
+      reviewFlag: "/managed/session/reviews/TASK-001-quality-reviewer",
+      gaveUp: "/managed/session/validation-gave-up/TASK-001",
+      e2e: "/managed/session/e2e-result.json",
+    });
   });
 
   test("and fall back to the recomputed dir with no managed launcher", () => {

@@ -7,7 +7,7 @@ description: Generate Supabase SQL migrations at deploy time from the session br
 
 ## Overview
 
-A workflow that turns a session's *code* changes into the *minimal* SQL that
+A workflow that turns a session's _code_ changes into the _minimal_ SQL that
 makes the real Supabase schema match what the session's app now expects —
 nothing more.
 You (the `developer`) have been asked to generate the deploy-time migration. The
@@ -48,10 +48,11 @@ This is the branch's full diff since creation. Do NOT use `git merge-base`
 ### 2. Identify schema-relevant changes
 
 From that diff, keep only changes that imply a database schema change:
+
 - Entity TypeScript types (e.g. `src/**/types.ts`, resource type defs).
 - Fake-data generators that add/remove fields.
 - dataProvider resource registrations (new resource = new table).
-Ignore CSS, component layout, copy, tests.
+  Ignore CSS, component layout, copy, tests.
 
 **Checkpoint:** you have an explicit list of schema-relevant changes (possibly
 empty). If empty, jump to step 3's no-op path.
@@ -177,20 +178,20 @@ For Postgres correctness you may load `Skill({skill: "supabase-postgres-best-pra
 
 ## Rationalizations
 
-| Rationalization | Reality |
-|---|---|
-| "I'll diff against the base branch, it's close enough." | Other sessions pollute the base branch. Only the two-dot `session-base..session` range is the true net change. |
-| "This column is probably already deployed, I'll re-emit it to be safe." | Re-emitting a deployed change is drift, not safety. Guard with `IF NOT EXISTS` and emit only the delta. |
-| "The view still selects all the right columns, order doesn't matter." | Postgres rejects any ordinal shift (42P16). Order is a hard correctness constraint, not cosmetics. |
-| "DROP VIEW CASCADE then CREATE is simpler." | It silently drops dependents and loses REVOKEs. Use `CREATE OR REPLACE` unless you are removing/renaming a column. |
-| "No schema change, but I'll write an empty migration anyway." | A no-op deploy is valid. Write nothing and report `NO_MIGRATION_NEEDED`. |
+| Rationalization                                                         | Reality                                                                                                            |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| "I'll diff against the base branch, it's close enough."                 | Other sessions pollute the base branch. Only the two-dot `session-base..session` range is the true net change.     |
+| "This column is probably already deployed, I'll re-emit it to be safe." | Re-emitting a deployed change is drift, not safety. Guard with `IF NOT EXISTS` and emit only the delta.            |
+| "The view still selects all the right columns, order doesn't matter."   | Postgres rejects any ordinal shift (42P16). Order is a hard correctness constraint, not cosmetics.                 |
+| "DROP VIEW CASCADE then CREATE is simpler."                             | It silently drops dependents and loses REVOKEs. Use `CREATE OR REPLACE` unless you are removing/renaming a column. |
+| "No schema change, but I'll write an empty migration anyway."           | A no-op deploy is valid. Write nothing and report `NO_MIGRATION_NEEDED`.                                           |
 
 ## Red Flags
 
 - Diff computed via `git merge-base` or against the base branch.
 - A migration statement without an `IF [NOT] EXISTS` guard.
 - A new table with no RLS, or an RLS policy using `USING (true)`.
-- A view recreated by `DROP … CASCADE` for a mere column *addition*.
+- A view recreated by `DROP … CASCADE` for a mere column _addition_.
 - A new column inserted anywhere but the last position of an existing view.
 - `03_views.sql` and the migration's view definition disagreeing on column order.
 - Re-emitting SQL already present in `supabase/migrations/`.

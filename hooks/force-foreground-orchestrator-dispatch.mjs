@@ -44,26 +44,26 @@ export function check(input, ctx) {
     // Not an orchestrator->pipeline-child dispatch -> none of our business.
     if (!childRole) return ctx.allow("not a pipeline dispatch");
 
-  // Read run_in_background RAW: parseDispatch coerces absent->false, and the three cases
-  // are genuinely different here.
-  //
-  // ABSENT is ACCEPTED, and that is a correction. Requiring an explicit false deadlocked
-  // the harness in a runtime where a nested subagent's Agent tool does not expose the
-  // parameter at all (schema: description, isolation, model, prompt, subagent_type, with
-  // additionalProperties:false). The orchestrator then cannot comply no matter what it
-  // does: observed as five consecutive `BLOCK blocked developer rib=absent` over four
-  // minutes, with every pipeline dispatch impossible. A guard that cannot be satisfied is
-  // not protection, it is a wedge.
-  //
-  // What still fires: an EXPLICIT true. A runtime that exposes the parameter lets the
-  // orchestrator choose, orchestrator.md tells it to choose false, and choosing true for a
-  // pipeline child is always wrong, so that stays blocked.
-  //
-  // What covers the residual risk in the absent case: completion-invariant.mjs, which
-  // rejects the orchestrator's stop when APPROVED work is left unmerged and then hands off
-  // to a recovery run. That backstop is why relaxing here is acceptable now and was not
-  // before: it had been silently inert (it looked for verdict flags in a directory that
-  // never existed) until it was fixed and given tests.
+    // Read run_in_background RAW: parseDispatch coerces absent->false, and the three cases
+    // are genuinely different here.
+    //
+    // ABSENT is ACCEPTED, and that is a correction. Requiring an explicit false deadlocked
+    // the harness in a runtime where a nested subagent's Agent tool does not expose the
+    // parameter at all (schema: description, isolation, model, prompt, subagent_type, with
+    // additionalProperties:false). The orchestrator then cannot comply no matter what it
+    // does: observed as five consecutive `BLOCK blocked developer rib=absent` over four
+    // minutes, with every pipeline dispatch impossible. A guard that cannot be satisfied is
+    // not protection, it is a wedge.
+    //
+    // What still fires: an EXPLICIT true. A runtime that exposes the parameter lets the
+    // orchestrator choose, orchestrator.md tells it to choose false, and choosing true for a
+    // pipeline child is always wrong, so that stays blocked.
+    //
+    // What covers the residual risk in the absent case: completion-invariant.mjs, which
+    // rejects the orchestrator's stop when APPROVED work is left unmerged and then hands off
+    // to a recovery run. That backstop is why relaxing here is acceptable now and was not
+    // before: it had been silently inert (it looked for verdict flags in a directory that
+    // never existed) until it was fixed and given tests.
     const rib = input.tool_input?.run_in_background;
     // Shared with block-duplicate-dispatch, which must debounce exactly what proceeds here.
     if (!isExplicitlyBackgrounded(input)) {

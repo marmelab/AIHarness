@@ -14,7 +14,7 @@ This repo IS the harness. It ships as a Claude Code plugin: `hooks/`, `agents/`,
 
 ```
 npm install
-npm test                          # 387 tests, the hooks' regression net
+npm test                          # 768 tests, the hooks' regression net
 node scripts/check-config-sync.mjs  # every hook matcher resolves to a declared role
 ```
 

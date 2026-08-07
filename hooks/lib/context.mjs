@@ -9,11 +9,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { decisionBlock } from "./io.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
 import { exec } from "./process.mjs";
-import {
-  loadConfig,
-  sessionDirFromEnv,
-  worktreeProvision,
-} from "./config.mjs";
+import { loadConfig, sessionDirFromEnv, worktreeProvision } from "./config.mjs";
 
 /**
  * @param {string | Record<string, unknown>} input

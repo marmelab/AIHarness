@@ -14,7 +14,7 @@ Write("<session_dir>/ask-state.json",
 
 `kind` picks the question (not interchangeable):
 
-| `kind` | When | Asks |
-|---|---|---|
-| `satisfaction` | DB-impacting change, before migration (S-DONE non-empty, PD-ASK) | save the preview to your data? |
-| `live-switch` | demo mode, after migration (PD-LIVE-ASK) | switch the app to your real data? |
+| `kind`         | When                                                             | Asks                              |
+| -------------- | ---------------------------------------------------------------- | --------------------------------- |
+| `satisfaction` | DB-impacting change, before migration (S-DONE non-empty, PD-ASK) | save the preview to your data?    |
+| `live-switch`  | demo mode, after migration (PD-LIVE-ASK)                         | switch the app to your real data? |
