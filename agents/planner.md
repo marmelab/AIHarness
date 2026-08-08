@@ -67,6 +67,7 @@ Rules:
 
 - One ticket = one deliverable (one entity, one screen, one cross-cutting concern).
 - **Coarse over fine**: ≤ 3 tickets per user-visible feature. Merge data-layer tickets (type + seed + config) unless any exceeds ~150 LOC / 5 files.
+- **Except across UI surfaces: more than 3 component files under `src/components/` in one ticket, split it by surface** (form, show view, list rows, list filter, dashboard widget). Coarse is right for a data layer, where the files are one change spread over a type, a schema and a generator. It is wrong for the UI, where each surface has its own failure mode and the review has to hold all of them at once. Measured: the one ticket in a 4-ticket feature that carried 4 component files plus an e2e spec took 3 review rounds and 43.7 minutes, against 10 to 16 for each of its siblings, and it was 20.60 of the feature's 46.37 dollars. Split, those surfaces are `parallel_safe` against each other and run in the SAME wave, so the split costs dispatches, not wall-clock.
 - Config / infrastructure changes are separate tickets.
 - Order by dependency: blocking tickets first.
 - Flag risk honestly. When unsure: `medium`.
@@ -94,6 +95,7 @@ Rules:
   "parallel_safe": true,
   "branch_name": "TASK-001-company-importance-type",
   "visual_customization": false,
+  "schema_sensitive": false,
   "separate_test_writer": false,
   "status": "pending"
 }
@@ -117,6 +119,14 @@ Normal feature tickets (type / component / config prop) → `parallel_safe: true
 **`branch_name`**: descriptive only — a human-readable label, `<TICKET_ID>-<short-kebab>` (e.g. `TASK-002-deal-stage-filter`). It is NOT used as the git branch: the orchestrator always dispatches with the canonical `BRANCH_NAME: <SESSION_SHORT_ID>/TASK-XXX`, and `setup-worktree` derives the branch it creates solely from the ticket id (`<SESSION_SHORT_ID>/TASK-XXX`), ignoring any suffix. Keep it readable; never prefix with `feature/` or `fix/`.
 
 **`visual_customization`**: set `true` when the ticket touches colors, theme, component styling, dark/light mode, or layout preferences. The developer loads `Skill({skill: "shadcn-customization"})` as its first action on such tickets.
+
+**`schema_sensitive`** (default `false`): set `true` when getting the ticket wrong could put data in the database that the schema forbids, or read data in a shape the schema does not guarantee. It selects the stronger review model, so it is about the CONSEQUENCE of a mistake, not about which files the ticket edits.
+
+Set it `true` for: any ticket touching `supabase/` (schema, view, trigger, RLS, function); a form, import, or default-value change that writes a column carrying a `CHECK` constraint, an enum, a `NOT NULL`, or a foreign key; a merge / dedup / bulk-update path that writes existing rows; anything that backfills.
+
+The case this exists for is a ticket with NO SQL in it at all. A select input on a constrained column, left clearable, submits an empty string and violates the column's `CHECK` on save. The diff is pure TSX, so a rule keyed on "touches `supabase/`" would call it ordinary; the mistake is still a write the database rejects. If a ticket's fields map onto a constrained column, it is `schema_sensitive` whatever its file list says.
+
+Leave `false` for genuinely presentational work: layout, labels, icons, styling, a list column that only reads.
 
 **`separate_test_writer`** (default `false`): set `true` ONLY on a structural or high-risk ticket (`risk_level: "high"`, auth/RLS, migrations, money, data deletion, a widely-reused shared module) where an independent test author adds value. When set, the orchestrator dispatches a dedicated `test-writer` on the developer's worktree between implementation and review. Leave `false` for ordinary tickets: the extra pass is not free and most tickets do not need it.
 

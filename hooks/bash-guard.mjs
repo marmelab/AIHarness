@@ -185,8 +185,21 @@ const VALIDATION_RULES = [...activeCategories]
   .filter((c) => CATEGORY_RULES[c])
   .map((c) => [c, ...CATEGORY_RULES[c]]);
 
+// A quoted argument to a SEARCH command is data, not an invocation. `grep -rn "npm run
+// typecheck" src/` runs no typecheck, and blocking it told a reviewer it had run a
+// forbidden command when it had gone looking for one: the rule matched inside the quotes.
+// Masking is confined to the grep-family segment, up to the next `|`, `;` or `&`, so a
+// real `bash -c "npm run typecheck"` keeps its quotes and stays blocked.
+const SEARCH_SEGMENT = /\b(?:grep|rg|egrep|fgrep|ag|ack)\b[^|;&]*/g;
+const maskSearchPatterns = (c) =>
+  String(c).replace(SEARCH_SEGMENT, (seg) =>
+    seg.replace(/'[^']*'|"[^"]*"/g, '""'),
+  );
+
 const checkValidationCommand = (cmd, ctx) => {
-  const violation = VALIDATION_RULES.find(([, matches]) => matches(cmd));
+  const violation = VALIDATION_RULES.find(([, matches]) =>
+    matches(maskSearchPatterns(cmd)),
+  );
   if (!violation) return;
   ctx.block({
     reason: `Validation command forbidden: ${violation[2]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
@@ -233,8 +246,34 @@ const teeTarget = (c) => {
   const m = c.match(/\|\s*tee\s+((?:-\S+\s+)*)(\S+)/);
   return m ? unquote(m[2]) : "";
 };
-const writesSedInPlace = (c) => /sed\s+(-[a-zA-Z]*i\b|--in-place)/.test(c);
-const writesAwkInPlace = (c) => /awk\s+-i\s+inplace/.test(c);
+const SED_IN_PLACE = /sed\s+(-[a-zA-Z]*i\b|--in-place)/;
+const AWK_IN_PLACE = /awk\s+-i\s+inplace/;
+const writesSedInPlace = (c) => SED_IN_PLACE.test(c);
+const writesAwkInPlace = (c) => AWK_IN_PLACE.test(c);
+
+// The files an in-place edit is about to rewrite, so the same exemptions that apply to a
+// redirect target can apply here. They could not before: these two rules reported an
+// EMPTY target, so `exemptTarget` was never consulted and a reviewer editing its own
+// scratchpad was refused three times in one run for a file no guard is meant to protect.
+//
+// EVERY shell segment carrying the in-place flag is considered, not just the first: one
+// command can edit the scratchpad and then a source file, and exempting it on the strength
+// of its first half is how a guard gets walked past. Quoted expressions are dropped first
+// so a `sed -i 's/a/b/'` script is not read as a path. An UNQUOTED script still looks
+// path-shaped, which makes the exemption fail and the command stay blocked: the safe
+// direction for a guard whose whole job is to refuse.
+const SHELL_SEGMENT = /\s*(?:&&|\|\||;|\|)\s*/;
+const inPlaceTargets = (cmd, flag) =>
+  cmd
+    .split(SHELL_SEGMENT)
+    .filter((s) => flag.test(s))
+    .flatMap((seg) =>
+      seg
+        .replace(/'[^']*'|"[^"]*"/g, " ")
+        .split(/\s+/)
+        .filter((t) => t && !t.startsWith("-") && /[/.]/.test(t))
+        .filter((t) => !/^(sed|awk|inplace)$/.test(t)),
+    );
 const writesScript = (c) =>
   /(node|python3?)\s+-[ecp].*(writeFileSync|writeFile|write_text|os\.write|fs\.write)/.test(
     c,
@@ -259,10 +298,21 @@ const checkFileWrite = (cmd, ctx, isReviewer) => {
   }
   const tee = teeTarget(cmd);
 
+  // An in-place edit is exempt only when every path it names is exempt, and only when it
+  // names one: an empty list means the operands could not be read, which is not a licence.
+  const inPlaceExempt = (flag) => {
+    const targets = inPlaceTargets(cmd, flag);
+    return targets.length > 0 && targets.every(exemptTarget);
+  };
+
   const writeViolation = [
     ...redirectViolations,
-    ...(writesSedInPlace(cmd) ? [["sed-in-place", ""]] : []),
-    ...(writesAwkInPlace(cmd) ? [["awk-in-place", ""]] : []),
+    ...(writesSedInPlace(cmd) && !inPlaceExempt(SED_IN_PLACE)
+      ? [["sed-in-place", inPlaceTargets(cmd, SED_IN_PLACE).join(" ")]]
+      : []),
+    ...(writesAwkInPlace(cmd) && !inPlaceExempt(AWK_IN_PLACE)
+      ? [["awk-in-place", inPlaceTargets(cmd, AWK_IN_PLACE).join(" ")]]
+      : []),
     ...(tee && !exemptTarget(tee) ? [["tee", tee]] : []),
     ...(writesScript(cmd) ? [["scripted-write", ""]] : []),
   ][0];

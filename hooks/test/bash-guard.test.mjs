@@ -426,6 +426,29 @@ describe("bash-guard hook", () => {
     });
   });
 
+  // A quoted pattern is data. The rule matched inside it, so looking FOR a forbidden
+  // command was refused as running one.
+  describe("validation rules: a search pattern is not an invocation", () => {
+    test.each([
+      ["grep", `grep -rn "npm run typecheck" src/`],
+      ["rg", `rg 'make lint' --type ts`],
+      ["grep with a pipe after it", `grep -rn "npx vitest" . | head -5`],
+    ])("%s for a forbidden command → allowed", (_label, command) => {
+      const r = runHook("developer", command);
+      expect(r.status).toBe(0);
+      expect(isBlocked(r)).toBe(false);
+    });
+
+    // The masking is confined to the search segment: a real invocation in quotes, and a
+    // real invocation piped into a grep, are still what they are.
+    test.each([
+      ["bash -c", `bash -c "npm run typecheck"`],
+      ["piped into grep", `npm run typecheck | grep error`],
+    ])("%s → still blocked", (_label, command) => {
+      expect(isBlocked(runHook("developer", command))).toBe(true);
+    });
+  });
+
   // A refusal an agent cannot comply with is a refusal it retries in another
   // phrasing. The two causes hiding behind `>` need two different exits: an
   // editing agent is sent to the Write tool, an agent capturing a process's
@@ -493,6 +516,32 @@ describe("bash-guard hook", () => {
     // anywhere else is refused exactly as before.
     test("reviewer redirecting outside the scratchpad → blocked", () => {
       const r = runHook("quality-reviewer", "npm run dev:demo > /tmp/demo.log");
+      expect(isBlocked(r)).toBe(true);
+    });
+
+    // sed/awk in-place reported an EMPTY target, so the scratchpad exemption above was
+    // never even consulted for them: a reviewer editing its own scratchpad file was
+    // refused three times in one run, for a file no guard is meant to protect.
+    test("reviewer editing its own scratchpad in place → allowed", () => {
+      const r = runHook(
+        "quality-reviewer",
+        `sed -i 's/PASS/FAIL/' ${SCRATCHPAD}/flows.md`,
+      );
+      expect(r.status).toBe(0);
+      expect(isBlocked(r)).toBe(false);
+    });
+
+    test("reviewer editing a source file in place → still blocked", () => {
+      const r = runHook("quality-reviewer", "sed -i 's/a/b/' src/x.ts");
+      expect(isBlocked(r)).toBe(true);
+    });
+
+    // The exemption covers the command it is in, not the command next to it.
+    test("a scratchpad edit chained with a source edit → blocked", () => {
+      const r = runHook(
+        "quality-reviewer",
+        `sed -i 's/a/b/' ${SCRATCHPAD}/notes.md && sed -i 's/a/b/' src/x.ts`,
+      );
       expect(isBlocked(r)).toBe(true);
     });
 

@@ -112,9 +112,21 @@ documented behaviour.
 "$RD/FEATURE-quality-reviewer"` on APPROVED, or `rm -f
 "$RD/FEATURE-quality-reviewer"` on BLOCKED.
 
+### The `RUNTIME_CHECK:` block
+
+A feature-review dispatch whose diff changes UI carries a `RUNTIME_CHECK:` block listing up
+to 3 cross-ticket flows. It is the feature-smoke below, folded into this dispatch: run it
+AFTER the static review, under the smoke's rules (stdout assertions, 2 screenshots for the
+whole check, `NOT EXECUTED` never folded into a PASS), and report one line per flow above
+your contract line. A FAIL is an imperative finding: it belongs in `BLOCKED:` like any other.
+
+No block means no browser is expected of you, and none is demanded: run the static review
+and stop.
+
 OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
 
-- `APPROVED`: no imperative findings. Put any non-blocking notes (nits, cleanliness, ponytail
+- `APPROVED`: no imperative findings, and every requested flow either PASSed or is reported
+  `NOT EXECUTED` with its reason. Put any non-blocking notes (nits, cleanliness, ponytail
   `net: -N lines`) and the Hotspots section ABOVE the line; the orchestrator forwards them to the
   handoff report and does not act on them.
 - `BLOCKED:` followed by a bulleted list of the IMPERATIVE findings ONLY, one per line, each
@@ -122,6 +134,11 @@ OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
   then re-runs you.
 
 ## Feature-smoke mode (single-shot, no team)
+
+Normally you receive this work as the `RUNTIME_CHECK:` block of a feature-review, not as its
+own dispatch: two opus agents judging one diff, one after the other, cost 17.5 minutes of a
+113-minute run. A standalone `MODE: feature-smoke` dispatch remains valid for a re-run after
+an approved review, and the rules below are the ones the block refers to.
 
 When your spawn prompt contains `MODE: feature-smoke`, drive the WHOLE integrated feature in
 demo mode to confirm it actually RUNS before handoff. Start the app as described in "Running

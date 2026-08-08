@@ -8,6 +8,25 @@
 //   - `transcript_path` points at the MAIN SESSION transcript, not the stopping
 //     agent's. A sibling `<transcript>.meta.json` derived from it therefore never
 //     exists, so that is not a way to identify anyone.
+//   - `agent_id` is absent as well. Measured over a full run: 196 of 199 stops fell
+//     through to the newest-dispatch guess below, so the meta file that id would have
+//     named was never once reachable.
+//
+// What the runtime DOES give every hook is `CLAUDE_AGENT_NAME` in the environment,
+// naming the agent whose stop is being handled. validate-on-stop reads it (through
+// ctx.agentName) and was right on every stop of that run, while the hooks resolving
+// identity through the meta alone guessed on all of them. The two disagreed 13ms apart
+// on one stop: validate saw the orchestrator, completion-invariant and
+// record-review-verdict saw a quality-reviewer that had finished minutes earlier.
+//
+// That misattribution is not cosmetic. It is what let a `MODE: feature-review` line,
+// written by the ORCHESTRATOR into its own transcript when it dispatched the reviewer,
+// relaunch the e2e suite on every orchestrator stop for the rest of the session: 14
+// suite runs where 2 were wanted.
+//
+// So the runtime name is consulted FIRST and wins over any guess that contradicts it.
+// It carries the bare role only (`developer`, never `developer-TASK-002`), so a caller
+// that needs the ticket still goes to the meta or the dispatch prompt.
 //
 // The spawn-time meta DOES exist, one directory down from the main transcript:
 //
@@ -17,13 +36,14 @@
 // `agentType` (bare OR namespaced, e.g. `aiharness:orchestrator`, so always compare
 // through `teams.mjs`) and the dispatch `description`.
 //
-// Three strategies, in order of decreasing confidence, and the result says which one
+// Four strategies, in order of decreasing confidence, and the result says which one
 // answered (`source`) so a caller can refuse to act destructively on a guess:
 //
+//   runtime-env     CLAUDE_AGENT_NAME. Authoritative for the ROLE.
 //   agent-id        the payload's agent id names the meta file. Authoritative.
 //   sibling         the payload really did hand us the agent's own transcript.
 //   newest-dispatch a GUESS: newest harness-dispatched subagent transcript in the
-//                   session. Only reached when there is no agent id at all.
+//                   session. Only reached when nothing above answered.
 //
 // When none of them answers, the caller gets null AND the session's hooks.log gets one
 // loud WARN. Unresolvable identity turns every guard behind it into a no-op, and a guard
@@ -42,6 +62,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { sessionDirFromEnv } from "./config.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
+import { bareRole } from "./teams.mjs";
 
 // A path component we are about to build a filesystem path from. Rejects anything
 // with a separator or a `..`, so a hostile session/agent id cannot escape the
@@ -255,7 +276,74 @@ const warnUnresolvable = (payload) => {
   }
 };
 
-// One payload per hook process, and strategy 3 reads every subagent transcript in the
+/**
+ * The role the RUNTIME says just stopped, or "" when it does not say.
+ *
+ * Bare or namespaced, never suffixed with a ticket. This is the same value
+ * `createHookContext` exposes as `ctx.agentName`; it lives here too so that identity
+ * resolution has it without every hook having to build a context first.
+ */
+export const runtimeAgentName = () =>
+  String(process.env.CLAUDE_AGENT_NAME || "").trim();
+
+// The runtime named the agent, so any guess that disagrees is wrong by definition.
+// Three outcomes:
+//   - the guess agrees          keep it whole (description, transcript, ticket).
+//   - nothing was guessed       the role alone, which is enough for every role gate.
+//   - the guess CONTRADICTS it  the role alone, and the guess's transcript is dropped
+//                               rather than trusted: it belongs to another agent, and
+//                               reading a `MODE:` line or a verdict out of it is the
+//                               exact bug this strategy exists to end.
+const withRuntimeName = (guess, payload) => {
+  const name = runtimeAgentName();
+  if (!name) return guess;
+  if (guess && bareRole(guess.agentType) === bareRole(name)) return guess;
+  if (guess) noteContradiction(payload, name, guess);
+  return {
+    agentType: name,
+    description: "",
+    source: "runtime-env",
+    transcriptPath: "",
+    metaPath: "",
+  };
+};
+
+// One line per session when the runtime name and the guess name different roles. The
+// count is what makes the next run's log answer "is the guess still being used, and how
+// often is it wrong" without re-reading a full transcript tree.
+let notedThisProcess = false;
+const noteContradiction = (payload, name, guess) => {
+  if (notedThisProcess) return;
+  notedThisProcess = true;
+  const dir = sessionDirOf(payload);
+  const sentinel = join(dir, "identity-contradicted");
+  let seen = 0;
+  try {
+    seen = parseInt(readFileSync(sentinel, "utf8"), 10) || 0;
+  } catch {
+    seen = 0;
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(sentinel, `${seen + 1}\n`);
+  } catch {
+    // best-effort
+  }
+  if (seen > 0) return;
+  try {
+    appendFileSync(
+      join(dir, "hooks.log"),
+      `[${new Date().toISOString()}] [agent-meta] WARN identity-contradicted ` +
+        `runtime=${name} guessed=${guess.agentType} via=${guess.source}: ` +
+        `the runtime name wins and the guessed transcript is dropped. ` +
+        `Later disagreements this session are counted in ${sentinel}, not logged.\n`,
+    );
+  } catch {
+    // logging must never break a hook
+  }
+};
+
+// One payload per hook process, and strategy 4 reads every subagent transcript in the
 // session, so memoise per payload object.
 const memo = new WeakMap();
 
@@ -267,15 +355,37 @@ const memo = new WeakMap();
  *            transcriptPath: string, metaPath: string } | null}
  *   agentType may be namespaced (`aiharness:developer`): compare it through
  *   `teams.mjs`, never with `===`. null when identity is unresolvable.
+ *
+ *   `source` is "runtime-env" when CLAUDE_AGENT_NAME answered and no meta agreed with
+ *   it: `description` and `transcriptPath` are then EMPTY on purpose, because the only
+ *   candidates on disk belonged to another agent.
  */
 export function readAgentMeta(payload) {
   if (payload && typeof payload === "object" && memo.has(payload))
     return memo.get(payload);
-  const hit =
-    byAgentId(payload) || bySiblingMeta(payload) || byNewestDispatch(payload);
+  const hit = withRuntimeName(
+    byAgentId(payload) || bySiblingMeta(payload) || byNewestDispatch(payload),
+    payload,
+  );
   if (!hit) warnUnresolvable(payload);
   if (payload && typeof payload === "object") memo.set(payload, hit);
   return hit;
+}
+
+/**
+ * The DISPATCH PROMPT the stopping agent was given, or "" when it cannot be resolved.
+ *
+ * The first user event of its own transcript, and nothing else. Callers looking for a
+ * dispatch-contract line (`MODE:`, `ROLE:`, `TASK_ID:`) want exactly this and not the
+ * whole file: an agent's transcript also holds every prompt it WROTE for the agents it
+ * dispatched, so scanning it whole makes a dispatcher answer for its dispatchees.
+ *
+ * @param {Record<string, unknown>} payload  Parsed SubagentStop payload.
+ * @returns {string}
+ */
+export function dispatchPrompt(payload) {
+  const tp = agentTranscriptPath(payload);
+  return tp && existsSync(tp) ? firstUserText(tp) : "";
 }
 
 // The main session transcript is `<dir>/<session-id>.jsonl`; a subagent's own is

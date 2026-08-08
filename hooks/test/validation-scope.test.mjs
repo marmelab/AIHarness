@@ -535,3 +535,59 @@ describe("per-worktree lock", () => {
     expect(g(wt, "status", "--porcelain").stdout.trim()).toBe("");
   });
 });
+
+// A stop is not a finish. The runtime fires SubagentStop on turn breaks too, and one run
+// took 78 chains for about 13 developer dispatches at a ~33s cadence: 21 of them rejected
+// the stop for uncommitted work the developer was still writing, and the format step then
+// committed that work itself. The developer's own contract line is what separates the two.
+describe("gate 3: a turn break is not a finish", () => {
+  const agentWithLastMessage = (agentId, lastText) =>
+    spawnAgent(
+      layout,
+      agentId,
+      { agentType: "developer", description: "Implement TASK-001" },
+      "ROLE: developer\nTASK_ID: TASK-001\n",
+      lastText === null ? [] : ["Reading the ticket now.", lastText],
+    );
+
+  test("mid-implementation prose does not run the chain", () => {
+    addWorktree("TASK-001");
+    agentWithLastMessage(
+      "a00000000000000201",
+      "Added the column to the type. Next I will wire the form input.",
+    );
+    const r = stop("a00000000000000201");
+    expect(r.status).toBe(0);
+    expect(hookLog()).toContain("stopped mid-turn");
+    expect(hookLog()).not.toContain("START");
+  });
+
+  test("the developer's DONE line runs the chain", () => {
+    addWorktree("TASK-001");
+    agentWithLastMessage(
+      "a00000000000000202",
+      "All acceptance criteria are met.\nDONE: branch=sc0pe123/TASK-001 commit=abc1234 files=[TASK-001.ts]",
+    );
+    // The configured unit step is `false`, so a chain that RAN rejects the stop.
+    expect(stop("a00000000000000202").status).toBe(2);
+    expect(hookLog()).toContain("START role=developer");
+  });
+
+  test("a FAILED line runs the chain too", () => {
+    addWorktree("TASK-001");
+    agentWithLastMessage(
+      "a00000000000000203",
+      "FAILED: the ticket needs a schema change that is out of scope",
+    );
+    expect(stop("a00000000000000203").status).toBe(2);
+  });
+
+  // Not being able to read the last message is not evidence of a turn break. Skipping
+  // validation on that doubt would be worse than the storm this gate exists to stop.
+  test("an unreadable last message validates, as before", () => {
+    addWorktree("TASK-001");
+    agentWithLastMessage("a00000000000000204", null);
+    expect(stop("a00000000000000204").status).toBe(2);
+    expect(hookLog()).toContain("START role=developer");
+  });
+});

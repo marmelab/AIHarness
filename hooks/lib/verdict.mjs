@@ -77,6 +77,16 @@ export function lastAssistantText(payload) {
       continue;
     }
     const msg = (event && event.message) || event;
+    // ASSISTANT text only. Without this the first thing scanned is the transcript's
+    // opening user event, whose content is the dispatch prompt, so an agent that has not
+    // spoken yet "says" whatever it was asked to do. Harmless for a verdict, which a
+    // prompt rarely ends on, and decisive for contract-line.mjs, which reads "no contract
+    // line yet" out of the same text to tell a turn break from a finish.
+    const role = msg && msg.role;
+    const isAssistant = role
+      ? role === "assistant"
+      : event.type === "assistant";
+    if (!isAssistant) continue;
     const content = msg && msg.content;
     if (Array.isArray(content)) {
       for (const b of content) {

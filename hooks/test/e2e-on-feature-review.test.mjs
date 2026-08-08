@@ -53,6 +53,19 @@ const transcriptWithMeta = (description) => {
   return tp;
 };
 
+// The dispatch prompt as the runtime records it: the transcript's first user event, in
+// JSONL. Writing the prompt as raw text instead is the kind of friendlier-than-reality
+// fixture that hid the identity bug, and it would pass here against a hook that only
+// ever grepped the file.
+const writeDispatchPrompt = (transcriptPath, prompt) =>
+  writeFileSync(
+    transcriptPath,
+    JSON.stringify({
+      type: "user",
+      message: { role: "user", content: prompt },
+    }) + "\n",
+  );
+
 const run = (transcriptPath) =>
   spawnSync("node", [HOOK], {
     input: JSON.stringify({
@@ -160,10 +173,92 @@ describe("e2e-on-feature-review", () => {
     writeSmoke(SMOKE.record);
     approve();
     const tp = transcriptWithMeta("Feature-review smoke of the same feature");
-    writeFileSync(tp, "ROLE: quality-reviewer (MODE: feature-smoke)\n");
+    writeDispatchPrompt(tp, "ROLE: quality-reviewer\nMODE: feature-smoke\n");
     const r = run(tp);
     expect(r.status).toBe(0);
     expect(existsSync(join(APP_DIR, "ran-with-src"))).toBe(false);
+  });
+
+  // The livelock's second half. The trigger fired correctly here (a real feature-review
+  // stop), but it fired again, and again, for a session branch that had not moved. Each
+  // run replaced a terminal verdict with `running`, which is the state the orchestrator
+  // was waiting to stop seeing: 14 runs, and only the main thread giving up ended it.
+  describe("a session branch that has not moved is not judged twice", () => {
+    // A real repo, so headSha() answers something the guard can compare. Without it
+    // every result carries an empty sessionSha and the guard is inert by design.
+    const repoAtSessionBranch = () => {
+      mkdirSync(APP_DIR, { recursive: true });
+      const g = (...args) =>
+        spawnSync("git", args, { cwd: APP_DIR, encoding: "utf8" });
+      g("init", "-q", "-b", "main");
+      g("config", "user.email", "t@t.t");
+      g("config", "user.name", "t");
+      writeFileSync(join(APP_DIR, "f"), "1");
+      g("add", "-A");
+      g("commit", "-qm", "one");
+      g("branch", "session/e2e");
+      return g("rev-parse", "session/e2e").stdout.trim();
+    };
+
+    const moveSessionBranch = () => {
+      const g = (...args) =>
+        spawnSync("git", args, { cwd: APP_DIR, encoding: "utf8" });
+      writeFileSync(join(APP_DIR, "f"), "2");
+      g("add", "-A");
+      g("commit", "-qm", "two");
+      g("branch", "-f", "session/e2e", "HEAD");
+    };
+
+    test("a second feature-review stop on the same commit does not re-run it", () => {
+      repoAtSessionBranch();
+      writeSmoke(SMOKE.pass);
+      approve();
+      run(transcriptWithMeta("Feature-review: round 1"));
+      expect(result().status).toBe("passed");
+
+      // Same commit, so the answer cannot differ. The recorded pass must survive.
+      writeSmoke(SMOKE.record);
+      const r = run(transcriptWithMeta("Feature-review: round 1 again"));
+      expect(r.status).toBe(0);
+      expect(existsSync(join(APP_DIR, "ran-with-src"))).toBe(false);
+      expect(result().status).toBe("passed");
+    });
+
+    test("a red suite is re-run once the branch moves, and not before", () => {
+      repoAtSessionBranch();
+      writeSmoke(SMOKE.fail);
+      approve();
+      run(transcriptWithMeta("Feature-review: round 1"));
+      expect(result().status).toBe("failed");
+
+      writeSmoke(SMOKE.record);
+      run(transcriptWithMeta("Feature-review: still the same code"));
+      expect(existsSync(join(APP_DIR, "ran-with-src"))).toBe(false);
+
+      moveSessionBranch();
+      run(transcriptWithMeta("Feature-review: after the fix landed"));
+      expect(existsSync(join(APP_DIR, "ran-with-src"))).toBe(true);
+    });
+
+    test("a skip does not overwrite the verdict recorded for the same commit", () => {
+      const sha = repoAtSessionBranch();
+      approve();
+      // Models the race the guard cannot close: this run was already in flight when a
+      // sibling landed a pass for the same commit, and it then found no free stack.
+      writeSmoke(
+        "#!/usr/bin/env bash\n" +
+          `cat > '${join(sessionDir, "e2e-result.json")}' <<'JSON'\n` +
+          JSON.stringify({
+            kind: "e2e-result",
+            status: "passed",
+            sessionSha: sha,
+          }) +
+          "\nJSON\n" +
+          'echo "SKIP: all 5 e2e slots busy; try again later."\nexit 0\n',
+      );
+      run(transcriptWithMeta("Feature-review: x"));
+      expect(result().status).toBe("passed");
+    });
   });
 
   test("skips gracefully when the session worktree is absent", () => {

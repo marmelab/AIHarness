@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { REPO, TMP_ROOT, sanitizePath } from "../lib/paths.mjs";
 import {
   runtimeLayout,
@@ -258,5 +258,117 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     const { readAgentMeta, agentTranscriptPath } = await freshResolver();
     expect(readAgentMeta({})).toBe(null);
     expect(agentTranscriptPath({})).toBe("");
+  });
+});
+
+// CLAUDE_AGENT_NAME, the one identity signal this runtime does provide. validate-on-stop
+// read it and was right on every stop of a full run; the hooks resolving through the meta
+// alone guessed on 196 stops out of 199, and two of them contradicted each other 13ms
+// apart on the same stop. A guess that disagrees with the runtime is wrong by definition.
+describe("readAgentMeta: the runtime's name wins over a guess", () => {
+  const SAVED = process.env.CLAUDE_AGENT_NAME;
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.CLAUDE_AGENT_NAME;
+    else process.env.CLAUDE_AGENT_NAME = SAVED;
+  });
+
+  // The stop that caused the livelock: the orchestrator stops, no agent id is in the
+  // payload, and the only dispatch on disk is the reviewer it spawned.
+  test("a contradicting guess loses its transcript, not just its name", async () => {
+    const sessionId = "dddd1111-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    spawnAgent(
+      layout,
+      "a00000000000000031",
+      { agentType: "quality-reviewer", description: "Feature-review: x" },
+      "ROLE: quality-reviewer\nMODE: feature-review\n",
+    );
+    process.env.CLAUDE_AGENT_NAME = "aiharness:orchestrator";
+    const { readAgentMeta, agentTranscriptPath } = await freshResolver();
+    const payload = stopPayload(layout);
+
+    const hit = readAgentMeta(payload);
+    expect(hit.agentType).toBe("aiharness:orchestrator");
+    expect(hit.source).toBe("runtime-env");
+    // The reviewer's transcript is not this agent's, so nothing may be read out of it.
+    expect(hit.description).toBe("");
+    expect(agentTranscriptPath(payload)).toBe("");
+  });
+
+  test("a guess that agrees keeps its description and transcript", async () => {
+    const sessionId = "dddd2222-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    spawnAgent(
+      layout,
+      "a00000000000000032",
+      { agentType: "developer", description: "Implement TASK-007" },
+      "ROLE: developer\nTASK_ID: TASK-007\n",
+    );
+    process.env.CLAUDE_AGENT_NAME = "developer";
+    const { readAgentMeta, agentTranscriptPath } = await freshResolver();
+    const payload = stopPayload(layout, "a00000000000000032");
+
+    const hit = readAgentMeta(payload);
+    expect(hit.agentType).toBe("developer");
+    expect(hit.description).toContain("TASK-007");
+    expect(agentTranscriptPath(payload)).toBe(
+      join(layout.subagents, "agent-a00000000000000032.jsonl"),
+    );
+  });
+
+  // The bare runtime name and the namespaced meta name the same role, so this is not a
+  // contradiction and the meta must survive it.
+  test("bare and namespaced spellings of the same role agree", async () => {
+    const sessionId = "dddd3333-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    spawnAgent(
+      layout,
+      "a00000000000000033",
+      { agentType: "aiharness:developer", description: "Implement TASK-008" },
+      "ROLE: developer\nTASK_ID: TASK-008\n",
+    );
+    process.env.CLAUDE_AGENT_NAME = "developer";
+    const { readAgentMeta } = await freshResolver();
+    const hit = readAgentMeta(stopPayload(layout, "a00000000000000033"));
+    expect(hit.description).toContain("TASK-008");
+  });
+
+  test("the role still resolves when there is no meta on disk at all", async () => {
+    const sessionId = "dddd4444-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    process.env.CLAUDE_AGENT_NAME = "merger";
+    const { readAgentMeta } = await freshResolver();
+    const hit = readAgentMeta(stopPayload(layout));
+    expect(hit).not.toBe(null);
+    expect(hit.agentType).toBe("merger");
+    expect(hit.source).toBe("runtime-env");
+  });
+
+  test("a contradiction is logged once and counted after that", async () => {
+    const sessionId = "dddd5555-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    spawnAgent(
+      layout,
+      "a00000000000000034",
+      { agentType: "quality-reviewer", description: "Review TASK-001" },
+      "ROLE: quality-reviewer\nTASK_ID: TASK-001\n",
+    );
+    process.env.CLAUDE_AGENT_NAME = "aiharness:orchestrator";
+    for (const _ of [0, 1]) {
+      const { readAgentMeta } = await freshResolver();
+      readAgentMeta(stopPayload(layout));
+    }
+    const warns = readFileSync(join(sessionDir(sessionId), "hooks.log"), "utf8")
+      .split("\n")
+      .filter((l) => l.includes("WARN identity-contradicted"));
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("runtime=aiharness:orchestrator");
+    expect(warns[0]).toContain("guessed=quality-reviewer");
+    expect(
+      readFileSync(
+        join(sessionDir(sessionId), "identity-contradicted"),
+        "utf8",
+      ).trim(),
+    ).toBe("2");
   });
 });

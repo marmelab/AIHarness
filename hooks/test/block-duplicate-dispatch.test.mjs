@@ -417,3 +417,44 @@ describe("block-duplicate-dispatch — agreement with force-foreground", () => {
     expect(run(p, "planner", CALLER, "absent").blocked).toBe(true); // second is caught
   });
 });
+
+// A merger retry after a FAILED is the one dispatch whose prompt is byte-identical to the
+// one before it: a developer retry carries RETRY_FEEDBACK, so it already keys differently.
+// This hook runs BEFORE the dispatch and cannot see that the first one has returned, so
+// the caller says so. One run lost 90 seconds to a transient merge failure retried at
+// age=67s and refused as a duplicate.
+describe("block-duplicate-dispatch: RETRY is the sanctioned way to dispatch again", () => {
+  test("an identical merger prompt marked RETRY is allowed inside the window", () => {
+    const p = `ROLE: merger\nTASK_ID: TASK-500\nBRANCH_NAME: x`;
+    expect(run(p, "merger").blocked).toBe(false);
+    expect(run(p, "merger").blocked).toBe(true);
+    expect(run(`${p}\nRETRY`, "merger").blocked).toBe(false);
+  });
+
+  // No exemption is granted for the token, so the retry is debounced like anything else:
+  // the async ack that duplicates a RETRY dispatch is still a duplicate.
+  test("an echo of the RETRY dispatch is itself debounced", () => {
+    const p = `ROLE: merger\nTASK_ID: TASK-550\nBRANCH_NAME: x\nRETRY`;
+    expect(run(p, "merger").blocked).toBe(false);
+    expect(run(p, "merger").blocked).toBe(true);
+  });
+
+  test("RETRY_FEEDBACK is not the RETRY token, and needs no exemption", () => {
+    // It changes the prompt, so it keys differently and was never debounced. The point
+    // here is that the token match does not fire on it by accident.
+    const p = `ROLE: developer\nTASK_ID: TASK-600\nWORKTREE_PATH: /wt`;
+    expect(run(p, "developer").blocked).toBe(false);
+    expect(run(p, "developer").blocked).toBe(true);
+    expect(
+      run(`${p}\nRETRY_FEEDBACK=fix the select`, "developer").blocked,
+    ).toBe(false);
+  });
+
+  test("RETRY does not disarm the guard for the next identical dispatch", () => {
+    const p = `ROLE: merger\nTASK_ID: TASK-700\nBRANCH_NAME: x`;
+    expect(run(p, "merger").blocked).toBe(false);
+    expect(run(`${p}\nRETRY`, "merger").blocked).toBe(false);
+    // The plain prompt is still debounced: the exemption is per dispatch, not a mode.
+    expect(run(p, "merger").blocked).toBe(true);
+  });
+});
