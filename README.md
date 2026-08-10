@@ -74,6 +74,37 @@ This repo's own [harness.config.json](harness.config.json) is a working referenc
 The harness is **opt-in per request**: nothing routes through it until you ask, with
 `#harness` or "use the agent team".
 
+### One thing to check: the LSP tool
+
+The plugin declares a TypeScript language server (via `npx`, so nothing to install) and
+tells the developer, the reviewer and the planner to resolve symbols through the `LSP`
+tool instead of grepping for them. That matters more than it sounds: a `grep` goes through
+Bash, and in an interactive session Claude Code asks a model to analyse each shell command
+before running it, which costs seconds per call. An `LSP` call does not go through the
+shell at all.
+
+**Only one LSP server can own a file extension.** The runtime registers the first one and
+the others never start; the order is undefined and there is no priority field, so a plugin
+cannot win, yield, or even detect that it lost. If you also have the official
+`typescript-lsp` plugin enabled, it may claim `.ts` first — and it ships no binary, so
+every call answers `Executable not found in $PATH` and the agents silently fall back to
+`grep`. Nothing fails; the run just gets slower and more expensive.
+
+Two things report it, both automatic:
+
+- Every session start prints one line naming the conflicting plugin and the remedy.
+- `npm run check` (in this repo) fails on the same condition.
+
+To fix it, disable the other plugin — `/plugin`, then Manage, then toggle it off — or set
+it to `false` in `enabledPlugins`. Check the **user** scope (`~/.claude/settings.json`),
+not just the project's: a plugin enabled there is invisible to anything the project does,
+which is exactly how this went unnoticed for two full runs. Alternatively, keep the other
+plugin and install the binary it expects (`npm install -g typescript-language-server
+typescript`).
+
+Verify with any TypeScript symbol: an `LSP` `workspaceSymbol` call should return locations
+rather than an error.
+
 ## What you supply, what you get
 
 The split is documented in [HARNESS-SPLIT.md](HARNESS-SPLIT.md), including the
