@@ -149,7 +149,27 @@ function rejectOnceOnRedE2e() {
   } catch {
     return; // unreadable / malformed -> fail-open, same as the rest of this hook
   }
-  if (result?.status !== "failed") return;
+  // `failed` is the obvious one. `skipped` and a stale `running` matter for the same
+  // reason: the feature ships with NO e2e verdict, and the only thing standing between
+  // that and a false "verified" is the orchestrator remembering to say so. One session
+  // ended exactly there, on a `running` record whose process was already dead, after two
+  // skips for a stack that never came up, and nothing objected. A skip is a legitimate
+  // outcome; passing over it in silence is not. Same single-shot budget: this asks the
+  // orchestrator to retry or to state it, once, then gets out of the way.
+  const NO_VERDICT = new Set(["skipped", "running"]);
+  const failed = result?.status === "failed";
+  const unverified = NO_VERDICT.has(result?.status);
+  if (!failed && !unverified) return;
+  // A `running` record whose process is still alive is a suite in flight, not a missing
+  // verdict: the orchestrator is entitled to wait for it.
+  if (result?.status === "running" && result?.pid) {
+    try {
+      process.kill(result.pid, 0);
+      return;
+    } catch (e) {
+      if (e?.code === "EPERM") return;
+    }
+  }
 
   // A session serves several requests. A red verdict from an earlier one describes a
   // commit that later merges have moved past, so it must not reject THIS request's
@@ -168,18 +188,30 @@ function rejectOnceOnRedE2e() {
   const rejects = readE2eRejects();
   if (rejects >= E2E_REJECT_LIMIT) {
     clearE2eRejects();
-    ctx.log(`red e2e persists after ${rejects} reject(s), allowing the stop`);
+    ctx.log(
+      `${failed ? "red" : result.status} e2e persists after ${rejects} reject(s), allowing the stop`,
+    );
     return;
   }
   writeE2eRejects(rejects + 1);
   ctx.fail(
-    `Completion invariant: the end-of-feature e2e suite FAILED and you are stopping without ` +
-      `acting on it. Read <session_dir>/e2e-result.json, then either fix it (ONE developer on ` +
-      `<SESSION_SHORT_ID>/simple with the failing output as CHANGE_REQUEST, a STAGE: a-only ` +
-      `merger, then re-run feature-review, which re-runs the suite) or, if you have already used ` +
-      `the 2 fix rounds, state the failure explicitly in your final report. Do not end your turn ` +
-      `leaving it unmentioned. (attempt ${rejects + 1}/${E2E_REJECT_LIMIT})`,
-    { log: `reject ${rejects + 1}/${E2E_REJECT_LIMIT} red-e2e` },
+    failed
+      ? `Completion invariant: the end-of-feature e2e suite FAILED and you are stopping without ` +
+          `acting on it. Read <session_dir>/e2e-result.json, then either fix it (ONE developer on ` +
+          `<SESSION_SHORT_ID>/simple with the failing output as CHANGE_REQUEST, a STAGE: a-only ` +
+          `merger, then re-run feature-review, which re-runs the suite) or, if you have already used ` +
+          `the 2 fix rounds, state the failure explicitly in your final report. Do not end your turn ` +
+          `leaving it unmentioned. (attempt ${rejects + 1}/${E2E_REJECT_LIMIT})`
+      : `Completion invariant: the end-of-feature e2e suite produced NO verdict (status=${result.status}) ` +
+          `and you are stopping on it. The feature is unverified, which is not the same as verified. ` +
+          `Read <session_dir>/e2e-result.json, including its \`previous\` field, which carries the ` +
+          `reason the round before this one gave. A skip is usually the host declining to boot an ` +
+          `isolated stack, so the honest options are: merge something (which re-triggers the suite ` +
+          `via the merger), or state in your final report, explicitly, that e2e did NOT run and why. ` +
+          `Do not present the feature as e2e-verified. (attempt ${rejects + 1}/${E2E_REJECT_LIMIT})`,
+    {
+      log: `reject ${rejects + 1}/${E2E_REJECT_LIMIT} ${failed ? "red-e2e" : `e2e-${result.status}`}`,
+    },
   );
 }
 

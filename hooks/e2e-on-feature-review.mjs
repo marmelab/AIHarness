@@ -220,6 +220,20 @@ writeResult({
   source: src,
   sessionSha: headSha(),
   startedAt,
+  // What the round before this one concluded, and why. A `skipped` result is not
+  // terminal on purpose (the host simply had no free stack, so the same commit deserves
+  // another attempt), but the retry used to overwrite the record that explained the
+  // skip. One session then ended on a `running` record for a dead process, with the
+  // reason for the skip that preceded it already gone. Carrying it forward costs a few
+  // bytes and is the difference between "e2e did not run" and "e2e did not run BECAUSE".
+  previous: previous
+    ? {
+        status: previous.status,
+        failureSignature: previous.failureSignature || "",
+        finishedAt: previous.finishedAt || "",
+        output: previous.output || "",
+      }
+    : null,
   // Who to ask whether this run is still live. Without it a `running` left by a killed
   // process is indistinguishable from one in flight, and the merger trigger has to treat
   // it as in flight forever (see supersedable).

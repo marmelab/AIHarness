@@ -44,7 +44,22 @@ SLOT_LOCK_DIR="/tmp/harness-e2e-slots"
 CONFIG_SRC="$SRC/supabase/config.e2e.toml"
 mkdir -p "$SLOT_LOCK_DIR"
 
-skip() { echo "SKIP: $*"; exit 0; }   # graceful: not run here, not a failure
+# A skip is graceful (not run here, not a failure), but it must never be MUTE. The logs
+# that would explain it live in $workroot, which the EXIT trap deletes on the way out, so
+# a run that skipped could not be diagnosed afterwards at all: one session reported
+# "isolated stack readiness timeout" and there was nothing left on disk to say which half
+# of the readiness check failed. Dump the tails to stdout first; the caller hook keeps the
+# last 40 lines in e2e-result.json.
+skip() {
+  echo "SKIP: $*"
+  for log in supabase app dbdiff migup; do
+    if [ -n "${workroot:-}" ] && [ -s "${workroot}/${log}.log" ]; then
+      echo "--- ${log}.log (last 25 lines) ---"
+      tail -n 25 "${workroot}/${log}.log"
+    fi
+  done
+  exit 0
+}
 
 # --- memory preflight -------------------------------------------------------
 # Each Supabase stack is ~2-3 GB. Don't attempt a boot the host can't hold; skip

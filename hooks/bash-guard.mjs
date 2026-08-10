@@ -166,12 +166,33 @@ try {
   activeCategories = new Set(Object.keys(CATEGORY_RULES));
 }
 
+// The ARGUMENTS of a read-only command are data, not an invocation. Two ways this bit:
+//
+//   grep -rn "npm run typecheck" src/     the pattern matched the typecheck rule
+//   wc -l scripts/e2e-smoke.sh            the PATH matched the e2e rule
+//
+// The second is the worse one: it made the e2e script unmaintainable through Bash at all,
+// since every `grep`, `awk`, `wc` or `head` naming the file was refused as an attempt to
+// RUN the suite. Reading about a command is not running it.
+//
+// So the whole argument list of a read-only command is masked, not just its quoted parts,
+// and only for commands that cannot execute what they name. `bash -c "npm run typecheck"`,
+// `xargs`, `sh` and friends are deliberately absent: they DO execute their arguments.
+const READONLY_SEGMENT =
+  /\b(?:grep|rg|egrep|fgrep|ag|ack|awk|sed|wc|head|tail|cat|less|nl|cut|sort|uniq|diff|file|stat|ls|find)\b[^|;&]*/g;
+const maskSearchPatterns = (c) =>
+  String(c).replace(READONLY_SEGMENT, (seg) => seg.split(/\s+/)[0]);
+
 // e2e is the one category gated for EVERY caller, not just the two agents below:
 // launching the suite is a hook's job (e2e-on-feature-review.mjs), so an orchestrator
 // or a main-session Bash call must be refused too. Still config-driven — drop "e2e"
 // from validation.extraForbidden and this stops applying, like any other category.
 const checkE2eAnyCaller = (cmd, ctx) => {
-  if (!activeCategories.has("e2e") || !runsE2eTests(cmd)) return;
+  // Masked like the rules below: this one keys on the script's FILE NAME, so without it
+  // every `wc`, `head` or `awk` naming that file was refused as an attempt to launch the
+  // suite, and the script could not be maintained through Bash at all.
+  if (!activeCategories.has("e2e") || !runsE2eTests(maskSearchPatterns(cmd)))
+    return;
   ctx.block({
     reason: `Validation command forbidden: ${CATEGORY_RULES.e2e[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
     log: `any-caller rule=e2e cmd=${cmd.slice(0, 120)}`,
@@ -184,17 +205,6 @@ const checkE2eAnyCaller = (cmd, ctx) => {
 const VALIDATION_RULES = [...activeCategories]
   .filter((c) => CATEGORY_RULES[c])
   .map((c) => [c, ...CATEGORY_RULES[c]]);
-
-// A quoted argument to a SEARCH command is data, not an invocation. `grep -rn "npm run
-// typecheck" src/` runs no typecheck, and blocking it told a reviewer it had run a
-// forbidden command when it had gone looking for one: the rule matched inside the quotes.
-// Masking is confined to the grep-family segment, up to the next `|`, `;` or `&`, so a
-// real `bash -c "npm run typecheck"` keeps its quotes and stays blocked.
-const SEARCH_SEGMENT = /\b(?:grep|rg|egrep|fgrep|ag|ack)\b[^|;&]*/g;
-const maskSearchPatterns = (c) =>
-  String(c).replace(SEARCH_SEGMENT, (seg) =>
-    seg.replace(/'[^']*'|"[^"]*"/g, '""'),
-  );
 
 const checkValidationCommand = (cmd, ctx) => {
   const violation = VALIDATION_RULES.find(([, matches]) =>

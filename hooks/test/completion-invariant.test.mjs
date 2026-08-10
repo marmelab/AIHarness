@@ -33,14 +33,14 @@ const sessionHead = () =>
     encoding: "utf8",
   }).stdout.trim();
 
-const writeE2eResult = (status, sessionSha = undefined) =>
+const writeE2eResult = (status, extra = {}) =>
   writeFileSync(
     join(sessionDir, "e2e-result.json"),
     JSON.stringify({
       kind: "e2e-result",
       status,
       output: "1 failed",
-      ...(sessionSha === undefined ? {} : { sessionSha }),
+      ...extra,
     }),
   );
 
@@ -174,9 +174,27 @@ describe("completion-invariant — red e2e", () => {
     expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
   });
 
-  test("accepts a gracefully skipped suite", () => {
+  // A skip is a legitimate outcome (the host declined to boot a stack), but it means the
+  // feature has NO e2e verdict, and unverified is not verified. One session ended exactly
+  // there, on two skips and a `running` record for a dead process, and nothing objected.
+  // Same single-shot budget as a red suite: ask once, then get out of the way.
+  test("rejects a skipped suite once, then allows the stop", () => {
     writeE2eResult("skipped");
+    const first = run(transcriptWithMeta("orchestrator"));
+    expect(first.status).toBe(2);
+    expect(first.stderr).toContain("NO verdict");
     expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
+  });
+
+  test("a suite still running under a LIVE process is left alone", () => {
+    writeE2eResult("running", { pid: process.pid });
+    expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
+  });
+
+  test("a running record whose process is gone counts as no verdict", () => {
+    // pid 1 is init and always alive, so use an unassigned high pid instead.
+    writeE2eResult("running", { pid: 4194303 });
+    expect(run(transcriptWithMeta("orchestrator")).status).toBe(2);
   });
 
   test("accepts when no suite ran this round", () => {
@@ -189,12 +207,14 @@ describe("completion-invariant — red e2e", () => {
   });
 
   test("rejects a red suite recorded against the current session head", () => {
-    writeE2eResult("failed", sessionHead());
+    writeE2eResult("failed", { sessionSha: sessionHead() });
     expect(run(transcriptWithMeta("orchestrator")).status).toBe(2);
   });
 
   test("ignores a red suite from an earlier request, whose commit has moved on", () => {
-    writeE2eResult("failed", "0000000000000000000000000000000000000000");
+    writeE2eResult("failed", {
+      sessionSha: "0000000000000000000000000000000000000000",
+    });
     expect(run(transcriptWithMeta("orchestrator")).status).toBe(0);
   });
 
