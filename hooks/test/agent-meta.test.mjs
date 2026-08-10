@@ -245,8 +245,8 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     ).toBe("1");
   });
 
-  // Measured on run 8bfcc2b0: while the session waited, a stop arrived every ~32 s with a
-  // fresh agent_id that never got a transcript or a meta. Eleven of them drove the session
+  // While a session waits, a stop arrives every ~32 s with a fresh agent_id that never gets
+  // a transcript or a meta. Measured over one request: eleven of them drove the session
   // counter to 16 and made every guard log that it was degrading, which is precisely how a
   // REAL identity failure would have gone unnoticed. They are the runtime's book-keeping,
   // not our agents, so they must cost nothing.
@@ -263,10 +263,10 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     ).toBe(false);
   });
 
-  // Run f2c1f8a1, with the classification already in: eight of its nine remaining misses
-  // arrived BEFORE the session had spawned anything, so `subagents/` did not exist and the
-  // directory-based check could not run at all. The payload still named the agent's own
-  // transcript, and that name alone answers the question.
+  // With the classification already in, eight of nine remaining misses arrived BEFORE the
+  // session had spawned anything, so `subagents/` did not exist and the directory-based
+  // check could not run at all. The payload still named the agent's own transcript, and
+  // that name alone answers the question.
   test("a phantom is recognised before the subagents directory exists", async () => {
     const sessionId = "cccc6666-1111-2222-3333-444455556666";
     const projectDir = join(TMP, "projects", "-workspaces-early");

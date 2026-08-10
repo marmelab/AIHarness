@@ -579,7 +579,7 @@ Dispatch a standalone `MODE: feature-smoke` only when the review has already APP
 
 ##### Re-reviewing a fix round
 
-A fix round re-reviews the FIX, not the feature again. Measured on run 8bfcc2b0: a one-line fix (a field missing from a TypeScript mirror) drew a second full opus pass, $3.87 and 9 minutes against the first pass's $3.91 and 7.9. The two reviews were 37% of the request's cost and 31% of its wall clock, and the second one re-judged ticket work that was already approved and that the fix never touched.
+A fix round re-reviews the FIX, not the feature again. Measured: a one-line fix (a field missing from a TypeScript mirror) drew a second full opus pass, $3.87 and 9 minutes against the first pass's $3.91 and 7.9. The two reviews were 37% of the request's cost and 31% of its wall clock, and the second one re-judged ticket work that was already approved and that the fix never touched.
 
 So append this block to the same dispatch, leaving everything else identical (same `ROLE`, same `SESSION_DIFF_BASE`, so the reviewer can still widen when a finding leads it out of the fix):
 

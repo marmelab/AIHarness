@@ -5,8 +5,8 @@
 // others never start". The order is not documented and there is no priority field, so a
 // plugin cannot win, yield, or even find out that it lost except through the /plugin UI.
 //
-// That is not a theoretical hazard. Run 8bfcc2b0 had the LSP tool exposed, the rule
-// telling three agents to prefer it, and ZERO calls: the official `typescript-lsp`
+// That is not a theoretical hazard. It has happened here: the LSP tool exposed, the rule
+// telling three agents to prefer it, and ZERO calls, because the official `typescript-lsp`
 // plugin — enabled in the USER's settings, so invisible to anything the project does —
 // claimed `.ts` first with a bare `typescript-language-server`, a binary its own README
 // says to install globally and nobody had. Every call answered `Executable not found in

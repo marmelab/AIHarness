@@ -117,11 +117,11 @@ const subagentsDir = (payload) => {
 /**
  * True when this stop is not one of our agents at all.
  *
- * Run 8bfcc2b0 fired a SubagentStop every ~32 s for eight minutes while the session was
- * WAITING (a planner running, then the plan gate), each carrying a fresh `agent_id`
- * whose transcript and spawn meta were never written and whose `agent_type` was empty.
- * Eleven of them, none during ticket work, while all twenty real agents resolved. So
- * these are the runtime's own book-keeping, not a harness agent.
+ * The runtime fires a SubagentStop every ~32 s while a session is WAITING (a planner
+ * running, then the plan gate), each carrying a fresh `agent_id` whose transcript and
+ * spawn meta are never written and whose `agent_type` is empty. Measured over a full
+ * request: eleven of them, none during ticket work, while all twenty real agents
+ * resolved. They are the runtime's own book-keeping, not a harness agent.
  *
  * Counting them as failed identity is worse than cosmetic: the session sentinel read 16
  * and every guard logged that it was degrading, which is exactly how a REAL identity
@@ -141,8 +141,8 @@ export const isPhantomStop = (payload) => {
   // The payload names the agent's OWN transcript (never the main one, which is a
   // different field). Checked first and on its own, because the phantoms that arrive
   // BEFORE the session has spawned anything leave no `subagents/` directory to resolve,
-  // and the check below could not run for them: eight of run f2c1f8a1's nine were of
-  // that kind, every one during the pre-dispatch conversation.
+  // so the check below cannot run for them at all. Measured: eight of nine remaining
+  // misses were of that kind, every one during the pre-dispatch conversation.
   const own = String((payload && payload.agent_transcript_path) || "");
   if (own)
     return (
