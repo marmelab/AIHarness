@@ -82,6 +82,18 @@ Discipline (keep signal high, noise low):
   cross-ticket over-engineering (duplicated helpers, etc.). Its findings are ALWAYS non-blocking
   (report only), never a fix trigger.
 
+**A `FIX_ROUND:` block narrows the pass to the fix.** When the prompt carries `FIX_ROUND:`,
+`FIX_RANGE:` and `FINDINGS_RAISED:`, you already reviewed this feature and blocked it; a fix
+has since been merged. Judge two things: every raised finding is resolved, and `FIX_RANGE` is
+itself correct and introduces nothing new. Work you approved last round and that `FIX_RANGE`
+does not touch is NOT re-reviewed — re-reading it cost a measured $3.87 and 9 minutes to
+re-judge a one-line fix, and returned nothing the first pass had not already said.
+
+Two things stay true in a fix round. `SESSION_DIFF_BASE` is still yours to read: when a
+finding leads out of `FIX_RANGE` (the fix moved the defect rather than removing it, or its
+call sites live elsewhere), follow it and say so. And the contract line is unchanged — an
+`APPROVED` fix round is an approved feature review, and the e2e trigger reads it that way.
+
 **Hotspots for human review (required section, ABOVE the contract line).** Regardless of the
 verdict, compile a `Hotspots for human review:` section that targets a human's attention where a
 mistake would be most costly. Rules:
