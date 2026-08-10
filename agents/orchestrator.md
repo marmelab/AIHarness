@@ -568,7 +568,7 @@ Rules, and they are the contract, not advice:
 - Report one line per flow: <flow> - PASS|FAIL|NOT EXECUTED - <the stdout line that proves it>.
 ```
 
-Two reasons the block is restated here rather than left to the agent file, where all of it already appears. The budget was measured being ignored: one run took 31 screenshots for 4.9 MB against a documented budget of 1 to 2, and a rule the dispatch prompt does not carry is a rule that competes with everything else in a 60k-token context. And running the check as its own opus dispatch cost 13.4 minutes to re-judge a diff the review had just judged, on top of the review's own 4.1.
+Two reasons the block is restated here rather than left to the agent file, where all of it already appears. The budget was measured being ignored: one run took 31 screenshots for 4.9 MB against a documented budget of 1 to 2, and a rule the dispatch prompt does not carry is a rule that competes with everything else in a 60k-token context. And running the check as its own opus dispatch spends longer re-judging a diff the review has just judged than the review itself took.
 
 Omit the block entirely for a diff that changes no UI. It is what tells `record-smoke-evidence` a browser was expected, so an absent block means no browser is expected and no evidence is demanded.
 
@@ -579,7 +579,7 @@ Dispatch a standalone `MODE: feature-smoke` only when the review has already APP
 
 ##### Re-reviewing a fix round
 
-A fix round re-reviews the FIX, not the feature again. Measured: a one-line fix (a field missing from a TypeScript mirror) drew a second full opus pass, $3.87 and 9 minutes against the first pass's $3.91 and 7.9. The two reviews were 37% of the request's cost and 31% of its wall clock, and the second one re-judged ticket work that was already approved and that the fix never touched.
+A fix round re-reviews the FIX, not the feature again. A one-line fix (a field missing from a TypeScript mirror) has drawn a second full opus pass as long and as expensive as the first, most of it re-judging ticket work that was already approved and that the fix never touched. Two full passes over one integrated feature is the single largest line of a request.
 
 So append this block to the same dispatch, leaving everything else identical (same `ROLE`, same `SESSION_DIFF_BASE`, so the reviewer can still widen when a finding leads it out of the fix):
 

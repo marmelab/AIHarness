@@ -91,8 +91,8 @@ Discipline (keep signal high, noise low):
 `FIX_RANGE:` and `FINDINGS_RAISED:`, you already reviewed this feature and blocked it; a fix
 has since been merged. Judge two things: every raised finding is resolved, and `FIX_RANGE` is
 itself correct and introduces nothing new. Work you approved last round and that `FIX_RANGE`
-does not touch is NOT re-reviewed — re-reading it cost a measured $3.87 and 9 minutes to
-re-judge a one-line fix, and returned nothing the first pass had not already said.
+does not touch is NOT re-reviewed — a second full pass over a one-line fix has taken as
+long as the first and returned nothing the first pass had not already said.
 
 Two things stay true in a fix round. `SESSION_DIFF_BASE` is still yours to read: when a
 finding leads out of `FIX_RANGE` (the fix moved the defect rather than removing it, or its
@@ -153,8 +153,8 @@ OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
 ## Feature-smoke mode (single-shot, no team)
 
 Normally you receive this work as the `RUNTIME_CHECK:` block of a feature-review, not as its
-own dispatch: two opus agents judging one diff, one after the other, cost 17.5 minutes of a
-113-minute run. A standalone `MODE: feature-smoke` dispatch remains valid for a re-run after
+own dispatch: two opus agents judging one diff, one after the other, is a large slice of a
+request's wall clock for a second opinion on work already judged. A standalone `MODE: feature-smoke` dispatch remains valid for a re-run after
 an approved review, and the rules below are the ones the block refers to.
 
 When your spawn prompt contains `MODE: feature-smoke`, drive the WHOLE integrated feature in
