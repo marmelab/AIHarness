@@ -575,7 +575,28 @@ Omit the block entirely for a diff that changes no UI. It is what tells `record-
 Dispatch a standalone `MODE: feature-smoke` only when the review has already APPROVED and you need the runtime check re-run on its own (a fix landed that the review itself did not invalidate).
 
 - `APPROVED` → forward any non-blocking notes (nits, ponytail `net: -N`) to the final report; proceed to promotion. **`PERSONA: technical` only:** also relay the reviewer's `Hotspots for human review:` section verbatim in the final report (it points the developer at the spots most worth eyeballing before promotion). Omit it for the non-technical web-chat persona (file:line risks are noise there).
-- `BLOCKED:` <imperative findings> → fix them on the shared `<SESSION_SHORT_ID>/simple` worktree, which `setup-worktree` forks from the session branch (so the fix lands on top of the merged work). Do NOT invent a `featurefix` branch: `setup-worktree` / `enforce-dev-dispatch` only recognize `TASK-XXX` and `<SESSION_SHORT_ID>/simple`, so a bespoke branch is rejected (fail-closed) and the fix cannot get a worktree. Dispatch ONE `developer` with the SIMPLE template: `CHANGE_REQUEST` = the findings verbatim, `BRANCH_NAME: <SESSION_SHORT_ID>/simple`, `WORKTREE_PATH: <WORKTREE_BASE>/simple`, `run_in_background: false`. Then merge it into `session/<SESSION_SHORT_ID>` with a SIMPLE-mode merger carrying `STAGE: a-only` (Stage A only, no promotion), and re-run feature-review. **Bound to 2 rounds**: if still `BLOCKED` after 2, report the remaining findings in the handoff and proceed anyway (never wedge the pipeline on review). `#technical-harness` runs feature-review before its stop (no promotion after).
+- `BLOCKED:` <imperative findings> → fix them on the shared `<SESSION_SHORT_ID>/simple` worktree, which `setup-worktree` forks from the session branch (so the fix lands on top of the merged work). Do NOT invent a `featurefix` branch: `setup-worktree` / `enforce-dev-dispatch` only recognize `TASK-XXX` and `<SESSION_SHORT_ID>/simple`, so a bespoke branch is rejected (fail-closed) and the fix cannot get a worktree. Dispatch ONE `developer` with the SIMPLE template: `CHANGE_REQUEST` = the findings verbatim, `BRANCH_NAME: <SESSION_SHORT_ID>/simple`, `WORKTREE_PATH: <WORKTREE_BASE>/simple`, `run_in_background: false`. Then merge it into `session/<SESSION_SHORT_ID>` with a SIMPLE-mode merger carrying `STAGE: a-only` (Stage A only, no promotion), and re-review **as a fix round, not from scratch** (below). **Bound to 2 rounds**: if still `BLOCKED` after 2, report the remaining findings in the handoff and proceed anyway (never wedge the pipeline on review). `#technical-harness` runs feature-review before its stop (no promotion after).
+
+##### Re-reviewing a fix round
+
+A fix round re-reviews the FIX, not the feature again. Measured on run 8bfcc2b0: a one-line fix (a field missing from a TypeScript mirror) drew a second full opus pass, $3.87 and 9 minutes against the first pass's $3.91 and 7.9. The two reviews were 37% of the request's cost and 31% of its wall clock, and the second one re-judged ticket work that was already approved and that the fix never touched.
+
+So append this block to the same dispatch, leaving everything else identical (same `ROLE`, same `SESSION_DIFF_BASE`, so the reviewer can still widen when a finding leads it out of the fix):
+
+```
+FIX_ROUND: <n>/2. The feature was reviewed at <sha-reviewed>; a fix has since been merged.
+FIX_RANGE: <sha-reviewed>..session/<SESSION_SHORT_ID>
+FINDINGS_RAISED:
+- <finding 1, verbatim from the BLOCKED verdict>
+- <finding 2, verbatim>
+Judge two things: every finding above is resolved, and FIX_RANGE is itself correct and introduces nothing new. Do NOT re-review work FIX_RANGE does not touch — it was approved and is unchanged. Same contract line as any feature-review.
+```
+
+Two exceptions, and they are why the full pass still exists: run the FULL review (omit the block) when `FIX_RANGE` touches `supabase/`, or when it touches more than 3 files. Past that the fix is a change in its own right and the "unchanged, already approved" premise no longer holds.
+
+Carry the `RUNTIME_CHECK` block into a fix round ONLY when `FIX_RANGE` touches `src/components/`. A fix that changes no UI cannot have broken flows the previous round already drove, and `record-smoke-evidence` reads an absent block as "no browser expected", which is then correct.
+
+An APPROVED fix round IS an approved feature review: the e2e trigger parses the same contract line, so the suite still runs exactly as it otherwise would.
 
 #### Feature-smoke (does it actually run?)
 
