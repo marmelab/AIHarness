@@ -269,6 +269,12 @@ From `files_to_modify`, build a reuse registry:
 
 **Exploration depth — stay scope-bound**: read the files listed in `files_to_modify` plus their direct imports if a specific pattern is unclear. Do not expand to the full dependency graph by default. If you hit an unknown pattern that blocks you, read one additional file to resolve it — then stop. Grep broadly only if `files_to_modify` is missing or clearly incomplete.
 
+**What the earlier tickets already built is HANDED to you — do not go hunting for it.** From wave 2 on, your spawn prompt carries a `PRIOR_WORK:` block listing each merged ticket and the files it changed. That is the answer to "what exists already", and your worktree is forked from the session branch, so all of it is present in the files you are about to read.
+
+If you need the detail behind a line of `PRIOR_WORK`, read the file it names, or run **ONE** `git diff session-base/<SESSION_SHORT_ID>...HEAD -- <path>` for the change set. What you must not do is sweep the codebase for the feature's own name: measured on one run, about a quarter of every search command issued was a later ticket grepping for the feature earlier tickets had already added, at roughly eight seconds a call. The information was already in the prompt.
+
+No `PRIOR_WORK` block means there is nothing merged yet (you are in wave 1), not that you should go looking.
+
 **Use the `LSP` tool for semantic navigation — do not `grep` for symbols.** To find where a TypeScript identifier (type, component, hook, function, exported const) is defined or used in `.ts/.tsx/.js/.jsx`, call `LSP`: `goToDefinition`, `findReferences` (size the blast radius before changing a signature), `hover` (confirm a type), `workspaceSymbol` (locate a symbol), `incomingCalls` (who calls it). Never `grep -rn "<Symbol>" src/` in Bash for this — it misses re-exports and aliased imports and can't tell a definition from a comment. Reserve `grep`/`rg` for text and domain-word sweeps (e.g. deleting all mentions of a resource), database column/view names, and non-TS files (`.sql`, `.md`, `.json`, `.css`). See `.claude/rules/lsp-usage.md`.
 
 ## Plan format
