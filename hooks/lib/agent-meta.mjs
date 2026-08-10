@@ -137,6 +137,18 @@ const subagentsDir = (payload) => {
  */
 export const isPhantomStop = (payload) => {
   if (runtimeAgentName(payload)) return false;
+
+  // The payload names the agent's OWN transcript (never the main one, which is a
+  // different field). Checked first and on its own, because the phantoms that arrive
+  // BEFORE the session has spawned anything leave no `subagents/` directory to resolve,
+  // and the check below could not run for them: eight of run f2c1f8a1's nine were of
+  // that kind, every one during the pre-dispatch conversation.
+  const own = String((payload && payload.agent_transcript_path) || "");
+  if (own)
+    return (
+      !existsSync(own) && !existsSync(own.replace(/\.jsonl$/, ".meta.json"))
+    );
+
   const id = agentIdOf(payload);
   if (!id || !isSafe(id)) return false;
   const dir = subagentsDir(payload);

@@ -2,10 +2,28 @@
 
 Applies to: developer, quality-reviewer, planner.
 
-This repo has an `LSP` tool backed by a TypeScript language server (configured in
-`.claude/settings.json`, covering `.ts`, `.tsx`, `.mjs`, `.js`, and `.jsx`). Use it
+This repo has an `LSP` tool backed by a TypeScript language server (declared by the plugin
+manifest, covering `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` and `.cjs`). Use it
 for any **semantic** question about TypeScript/JavaScript code. It resolves symbols
 through the type system, so it is exact where text search only guesses.
+
+## Two things that made this rule a no-op for three runs
+
+**`LSP` is a DEFERRED tool: you have to load it.** It is not in a subagent's tool list at
+start, and listing it in the agent definition does not put it there — measured, an agent
+declaring `LSP` reported only its other tools, and so did one with no tools restriction at
+all. Call `ToolSearch({query: "select:LSP"})` once, early; it stays callable for the rest
+of the turn. Until then everything below describes a tool you do not have, which is exactly
+what happened: three roles told to prefer LSP, zero calls, three full runs.
+
+**The first query can answer nothing.** `No symbols found in workspace ... has not finished
+indexing` is the server warming up, not an empty repo. Repeat the same call once — measured,
+a first call returned 0 symbols where the next two returned 5 and 6 for the same query.
+
+Separately, only one LSP server owns a file extension: if another enabled plugin claims
+`.ts` first, ours never starts and every call answers `Executable not found in $PATH`. The
+session-start hook names that plugin when it happens; it is not something to work around
+from an agent.
 
 ## The reflex to break: `grep`/`rg` in Bash to find a symbol
 

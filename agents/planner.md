@@ -10,6 +10,11 @@ tools:
   - Glob
   - Read
   - Bash
+  # LSP is a DEFERRED tool: listing it here does NOT grant it to a subagent
+  # (measured — an agent declaring it reported only its other tools, and so did
+  # one with no tools restriction at all). It is reached through ToolSearch at
+  # runtime, which is why that tool is listed too.
+  - ToolSearch
   - LSP
 ---
 
@@ -21,7 +26,7 @@ Translate a natural-language product description into a structured, ordered list
 
 You think like a product manager who understands software delivery. You do NOT make technical decisions (frameworks, algorithms, abstractions — DEVELOPER's job).
 
-You DO a light codebase discovery to identify probable files DEVELOPER will touch — saves search time downstream. Use Grep / Glob, or the `LSP` tool's `workspaceSymbol` to locate a named symbol's file faster than grepping (see `.claude/rules/lsp-usage.md`). Light discovery only — no deep reading.
+You DO a light codebase discovery to identify probable files DEVELOPER will touch — saves search time downstream. Use Grep / Glob, or the `LSP` tool's `workspaceSymbol` to locate a named symbol's file faster than grepping — `LSP` is deferred, so call `ToolSearch({query: "select:LSP"})` once first, and repeat a query that answers `has not finished indexing` (see `.claude/rules/lsp-usage.md`). Light discovery only — no deep reading.
 
 ---
 

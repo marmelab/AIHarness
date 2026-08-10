@@ -263,6 +263,39 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     ).toBe(false);
   });
 
+  // Run f2c1f8a1, with the classification already in: eight of its nine remaining misses
+  // arrived BEFORE the session had spawned anything, so `subagents/` did not exist and the
+  // directory-based check could not run at all. The payload still named the agent's own
+  // transcript, and that name alone answers the question.
+  test("a phantom is recognised before the subagents directory exists", async () => {
+    const sessionId = "cccc6666-1111-2222-3333-444455556666";
+    const projectDir = join(TMP, "projects", "-workspaces-early");
+    mkdirSync(projectDir, { recursive: true });
+    const mainTranscript = join(projectDir, `${sessionId}.jsonl`);
+    writeFileSync(mainTranscript, "");
+    const { readAgentMeta, isPhantomStop } = await freshResolver();
+    const payload = {
+      session_id: sessionId,
+      hook_event_name: "SubagentStop",
+      agent_type: "",
+      agent_id: "aearly00000000001",
+      transcript_path: mainTranscript,
+      // The directory this names is never created: nothing has been dispatched yet.
+      agent_transcript_path: join(
+        projectDir,
+        sessionId,
+        "subagents",
+        "agent-aearly00000000001.jsonl",
+      ),
+    };
+
+    expect(isPhantomStop(payload)).toBe(true);
+    expect(readAgentMeta(payload)).toBe(null);
+    expect(
+      existsSync(join(sessionDir(sessionId), "identity-unresolvable")),
+    ).toBe(false);
+  });
+
   test("a named stop is never phantom, whatever is on disk", async () => {
     const sessionId = "cccc4444-1111-2222-3333-444455556666";
     const layout = runtimeLayout(TMP, sessionId);
