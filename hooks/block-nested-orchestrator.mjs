@@ -18,16 +18,31 @@
 // reads it would re-dispatch an orchestrator.
 
 import { runStandalone } from "./lib/hook-chain.mjs";
-import { isOrchestrator, bareRole } from "./lib/teams.mjs";
+import { configRoleNames, isOrchestrator, bareRole } from "./lib/teams.mjs";
 
-// Rule 1 — orchestrator allowlist.
-const ALLOWED = [
+// Rule 1 — orchestrator allowlist, DERIVED from harness.config.json rather than written
+// out again here. The hardcoded copy had drifted: it omitted `test-writer` and
+// `simple-developer`, both declared roles with agent files. A run planned two tickets
+// with `separate_test_writer: true`, the orchestrator dispatched the test-writer exactly
+// as designed, and this hook refused it as "not allowed". The orchestrator noted the
+// refusal and carried on to review, so the feature had been silently dead for as long as
+// the two lists had disagreed, with nothing failing loudly enough to say so.
+//
+// `orchestrator` is excluded whatever the config declares: refusing a nested orchestrator
+// is rule 2 below, and the reason this file exists. The literal list survives only as the
+// fallback for an unreadable config, where failing open to a too-SMALL list would block
+// legitimate dispatches.
+const FALLBACK = [
   "planner",
   "developer",
+  "simple-developer",
+  "test-writer",
   "quality-reviewer",
   "merger",
   "documentator",
 ];
+const fromConfig = configRoleNames().filter((r) => !isOrchestrator(r));
+const ALLOWED = fromConfig.length ? fromConfig : FALLBACK;
 
 export function check(input, ctx) {
   // Normalised: a dispatch may name the target bare or namespaced (aiharness:orchestrator).

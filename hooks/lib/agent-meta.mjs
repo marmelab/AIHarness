@@ -1,45 +1,43 @@
 // Resolve WHO just stopped, from a SubagentStop payload.
 //
-// Every SubagentStop guard needs this, and the runtime makes it hard:
+// MEASURED, not inferred. Two audits guessed at this file's inputs and both guessed
+// wrong, so scripts/probe-identity.mjs was wired on SubagentStop and four real stops were
+// captured, at spawn depth 1 and 2. Every stop carried ALL of:
 //
-//   - `agent_type` in the payload is EMPTY, so the hooks.json matchers do not filter.
-//     Every SubagentStop hook fires on every stop, and each one has to work out for
-//     itself whether the stop is its business.
-//   - `transcript_path` points at the MAIN SESSION transcript, not the stopping
-//     agent's. A sibling `<transcript>.meta.json` derived from it therefore never
-//     exists, so that is not a way to identify anyone.
-//   - `agent_id` is absent as well. Measured over a full run: 196 of 199 stops fell
-//     through to the newest-dispatch guess below, so the meta file that id would have
-//     named was never once reachable.
+//     agent_id               a4772894a17d69127
+//     agent_type             general-purpose          <- populated, not empty
+//     agent_transcript_path  <...>/subagents/agent-<id>.jsonl   <- the agent's OWN
+//     transcript_path        <...>/<session-id>.jsonl           <- the main session's
+//     last_assistant_message ALPHA                    <- present
 //
-// What the runtime DOES give every hook is `CLAUDE_AGENT_NAME` in the environment,
-// naming the agent whose stop is being handled. validate-on-stop reads it (through
-// ctx.agentName) and was right on every stop of that run, while the hooks resolving
-// identity through the meta alone guessed on all of them. The two disagreed 13ms apart
-// on one stop: validate saw the orchestrator, completion-invariant and
-// record-review-verdict saw a quality-reviewer that had finished minutes earlier.
+// and none of them set CLAUDE_AGENT_NAME. Three comments in this repo said the opposite
+// of three of those lines. They were not merely stale: they are what sent both audits
+// looking for a substitute for a field that was there all along.
 //
-// That misattribution is not cosmetic. It is what let a `MODE: feature-review` line,
-// written by the ORCHESTRATOR into its own transcript when it dispatched the reviewer,
-// relaunch the e2e suite on every orchestrator stop for the rest of the session: 14
-// suite runs where 2 were wanted.
+// So `agent_type` is read FIRST and is authoritative for the ROLE. A guess that
+// contradicts it is wrong by definition, and loses its transcript as well as its name so
+// no hook reads another agent's words out of it. That misattribution is not cosmetic: it
+// is what let a `MODE: feature-review` line, written by the ORCHESTRATOR into its own
+// transcript when it dispatched the reviewer, relaunch the e2e suite on every
+// orchestrator stop of a session, 14 runs where 2 were wanted.
 //
-// So the runtime name is consulted FIRST and wins over any guess that contradicts it.
-// It carries the bare role only (`developer`, never `developer-TASK-002`), so a caller
-// that needs the ticket still goes to the meta or the dispatch prompt.
+// `agent_type` names the role and nothing else (`developer`, never `developer-TASK-002`),
+// so a caller that needs the ticket still goes to the meta or to the dispatch prompt.
 //
-// The spawn-time meta DOES exist, one directory down from the main transcript:
+// The spawn-time meta sits next to the agent's own transcript:
 //
 //     <dirname(main transcript)>/<session-id>/subagents/agent-<agent-id>.meta.json
 //
-// next to that agent's own transcript, `agent-<agent-id>.jsonl`. It carries
-// `agentType` (bare OR namespaced, e.g. `aiharness:orchestrator`, so always compare
-// through `teams.mjs`) and the dispatch `description`.
+// It carries `agentType` (bare OR namespaced, e.g. `aiharness:orchestrator`, so always
+// compare through `teams.mjs`) and the dispatch `description`. Fed the payload shape
+// above, the agent-id strategy below resolves every agent of a real session correctly;
+// it is kept, and kept ahead of the guess, for the runtimes that send less.
 //
-// Four strategies, in order of decreasing confidence, and the result says which one
+// Five strategies, in order of decreasing confidence, and the result says which one
 // answered (`source`) so a caller can refuse to act destructively on a guess:
 //
-//   runtime-env     CLAUDE_AGENT_NAME. Authoritative for the ROLE.
+//   payload-type    the payload's own agent_type. Authoritative for the ROLE.
+//   runtime-env     CLAUDE_AGENT_NAME, when a runtime sets it. Same standing.
 //   agent-id        the payload's agent id names the meta file. Authoritative.
 //   sibling         the payload really did hand us the agent's own transcript.
 //   newest-dispatch a GUESS: newest harness-dispatched subagent transcript in the
@@ -62,7 +60,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { sessionDirFromEnv } from "./config.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
-import { bareRole } from "./teams.mjs";
+import { bareRole, matchesRole } from "./teams.mjs";
 
 // A path component we are about to build a filesystem path from. Rejects anything
 // with a separator or a `..`, so a hostile session/agent id cannot escape the
@@ -279,12 +277,22 @@ const warnUnresolvable = (payload) => {
 /**
  * The role the RUNTIME says just stopped, or "" when it does not say.
  *
- * Bare or namespaced, never suffixed with a ticket. This is the same value
- * `createHookContext` exposes as `ctx.agentName`; it lives here too so that identity
- * resolution has it without every hook having to build a context first.
+ * The payload's own `agent_type` first, which every measured stop carried, then
+ * `CLAUDE_AGENT_NAME` for a runtime that sets that instead (none seen so far, kept
+ * because it costs one `||` and the alternative is another audit spent finding out).
+ *
+ * Bare or namespaced, never suffixed with a ticket. `createHookContext` exposes the same
+ * two as `ctx.agentType` / `ctx.agentName`; they live here too so identity resolution has
+ * them without every hook having to build a context first.
+ *
+ * @param {Record<string, unknown>} [payload]  Parsed SubagentStop payload.
  */
-export const runtimeAgentName = () =>
-  String(process.env.CLAUDE_AGENT_NAME || "").trim();
+export const runtimeAgentName = (payload) =>
+  String(
+    (payload && (payload.agent_type || payload.agent_name)) ||
+      process.env.CLAUDE_AGENT_NAME ||
+      "",
+  ).trim();
 
 // The runtime named the agent, so any guess that disagrees is wrong by definition.
 // Three outcomes:
@@ -294,15 +302,30 @@ export const runtimeAgentName = () =>
 //                               rather than trusted: it belongs to another agent, and
 //                               reading a `MODE:` line or a verdict out of it is the
 //                               exact bug this strategy exists to end.
+// Do two identity strings name the same ROLE? Not string equality: the runtime and the
+// spawn meta disagree on shape all the time, one saying `developer` where the other says
+// `aiharness:developer` or the suffixed `developer-TASK-001`. Comparing them raw made a
+// suffixed name contradict its own meta, which threw away the transcript that carried the
+// ticket. Asked both ways, because either side can be the one carrying the suffix.
+// `simple-developer` and `developer` still do not match: the role regex is anchored.
+const sameRole = (a, b) =>
+  matchesRole(a, new Set([bareRole(b)])) ||
+  matchesRole(b, new Set([bareRole(a)]));
+
 const withRuntimeName = (guess, payload) => {
-  const name = runtimeAgentName();
+  const name = runtimeAgentName(payload);
   if (!name) return guess;
-  if (guess && bareRole(guess.agentType) === bareRole(name)) return guess;
+  if (guess && sameRole(guess.agentType, name)) return guess;
   if (guess) noteContradiction(payload, name, guess);
   return {
     agentType: name,
     description: "",
-    source: "runtime-env",
+    // Which of the two named it, so a log line says whether the payload field is
+    // carrying this runtime or whether it fell back to the environment.
+    source:
+      payload && (payload.agent_type || payload.agent_name)
+        ? "payload-type"
+        : "runtime-env",
     transcriptPath: "",
     metaPath: "",
   };

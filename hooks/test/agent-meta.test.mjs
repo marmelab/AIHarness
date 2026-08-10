@@ -372,3 +372,83 @@ describe("readAgentMeta: the runtime's name wins over a guess", () => {
     ).toBe("2");
   });
 });
+
+// MEASURED against the runtime (scripts/probe-identity.mjs, four stops at spawn depth 1
+// and 2): every SubagentStop payload carries agent_id, agent_type, agent_transcript_path
+// and last_assistant_message, and none of them sets CLAUDE_AGENT_NAME. Two audits had
+// assumed the opposite of three of those and went looking for substitutes.
+describe("readAgentMeta: the payload names the role, and that is authoritative", () => {
+  const SAVED = process.env.CLAUDE_AGENT_NAME;
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.CLAUDE_AGENT_NAME;
+    else process.env.CLAUDE_AGENT_NAME = SAVED;
+  });
+
+  test("agent_type resolves the role with no files on disk at all", async () => {
+    const layout = runtimeLayout(TMP, "eeee1111-1111-2222-3333-444455556666");
+    const { readAgentMeta } = await freshResolver();
+    const hit = readAgentMeta(
+      stopPayload(layout, "", { agent_type: "merger" }),
+    );
+    expect(hit.agentType).toBe("merger");
+    expect(hit.source).toBe("payload-type");
+  });
+
+  // The livelock stop: the orchestrator stops, and the only dispatch on disk is the
+  // reviewer it spawned. The payload settles it.
+  test("agent_type beats a guess that names another agent", async () => {
+    const layout = runtimeLayout(TMP, "eeee2222-1111-2222-3333-444455556666");
+    spawnAgent(
+      layout,
+      "a00000000000000041",
+      { agentType: "quality-reviewer", description: "Feature-review: x" },
+      "ROLE: quality-reviewer\nMODE: feature-review\n",
+    );
+    const { readAgentMeta, agentTranscriptPath } = await freshResolver();
+    const payload = stopPayload(layout, "", {
+      agent_type: "aiharness:orchestrator",
+    });
+    const hit = readAgentMeta(payload);
+    expect(hit.agentType).toBe("aiharness:orchestrator");
+    expect(agentTranscriptPath(payload)).toBe("");
+  });
+
+  // A suffixed runtime name and its bare meta are the SAME role. Comparing them as
+  // strings made every suffixed agent contradict its own meta, which threw away the
+  // transcript carrying its ticket.
+  test("a suffixed name agrees with its own bare meta", async () => {
+    const layout = runtimeLayout(TMP, "eeee3333-1111-2222-3333-444455556666");
+    spawnAgent(
+      layout,
+      "a00000000000000042",
+      { agentType: "developer", description: "Implement TASK-009" },
+      "ROLE: developer\nTASK_ID: TASK-009\n",
+    );
+    const { readAgentMeta } = await freshResolver();
+    const hit = readAgentMeta(
+      stopPayload(layout, "a00000000000000042", {
+        agent_type: "developer-TASK-009",
+      }),
+    );
+    expect(hit.description).toContain("TASK-009");
+    expect(hit.source).toBe("agent-id");
+  });
+
+  test("simple-developer is not developer", async () => {
+    const layout = runtimeLayout(TMP, "eeee4444-1111-2222-3333-444455556666");
+    spawnAgent(
+      layout,
+      "a00000000000000043",
+      { agentType: "developer", description: "Implement TASK-010" },
+      "ROLE: developer\nTASK_ID: TASK-010\n",
+    );
+    const { readAgentMeta } = await freshResolver();
+    const hit = readAgentMeta(
+      stopPayload(layout, "a00000000000000043", {
+        agent_type: "simple-developer",
+      }),
+    );
+    expect(hit.agentType).toBe("simple-developer");
+    expect(hit.description).toBe("");
+  });
+});
