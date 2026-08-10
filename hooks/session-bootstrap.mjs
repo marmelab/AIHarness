@@ -97,11 +97,34 @@ try {
   // detection must never break bootstrap
 }
 
+// The LSP tool degrades silently: when another enabled plugin claims our file extensions
+// first, ours never starts, every call answers "Executable not found in $PATH", and the
+// agents fall back to grepping in Bash without anything reporting it. Said once here,
+// because the losing plugin cannot detect it any other way and the conflicting entry may
+// live in the USER's settings, where no project change can reach it.
+let lspWarning = "";
+try {
+  const { lspConflicts, conflictReport } = await import(
+    "./lib/lsp-conflict.mjs"
+  );
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("../.claude-plugin/plugin.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const conflicts = lspConflicts(manifest.lspServers, REPO);
+  if (conflicts.length)
+    lspWarning = `\n<lsp_conflict>${conflictReport(conflicts)}</lsp_conflict>`;
+} catch {
+  // a missing manifest or an unreadable settings file must never break bootstrap
+}
+
 process.stdout.write(
   JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "SessionStart",
-      additionalContext: `<session_dir>${sessionDir}</session_dir>${resume}`,
+      additionalContext: `<session_dir>${sessionDir}</session_dir>${resume}${lspWarning}`,
     },
   }) + "\n",
 );

@@ -7,6 +7,7 @@
 // actually writes (see fixtures/subagent-stop.mjs), not a friendlier one.
 
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -236,6 +237,55 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     readAgentMeta(payload);
     readAgentMeta(payload);
     agentTranscriptPath(payload);
+    expect(
+      readFileSync(
+        join(sessionDir(sessionId), "identity-unresolvable"),
+        "utf8",
+      ).trim(),
+    ).toBe("1");
+  });
+
+  // Measured on run 8bfcc2b0: while the session waited, a stop arrived every ~32 s with a
+  // fresh agent_id that never got a transcript or a meta. Eleven of them drove the session
+  // counter to 16 and made every guard log that it was degrading, which is precisely how a
+  // REAL identity failure would have gone unnoticed. They are the runtime's book-keeping,
+  // not our agents, so they must cost nothing.
+  test("a stop with no transcript, no meta and no name is not counted", async () => {
+    const sessionId = "cccc3333-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    const { readAgentMeta, isPhantomStop } = await freshResolver();
+    const payload = stopPayload(layout, "aphantom000000001");
+
+    expect(isPhantomStop(payload)).toBe(true);
+    expect(readAgentMeta(payload)).toBe(null);
+    expect(
+      existsSync(join(sessionDir(sessionId), "identity-unresolvable")),
+    ).toBe(false);
+  });
+
+  test("a named stop is never phantom, whatever is on disk", async () => {
+    const sessionId = "cccc4444-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    const { isPhantomStop } = await freshResolver();
+    expect(
+      isPhantomStop(
+        stopPayload(layout, "anamed00000000001", { agent_type: "developer" }),
+      ),
+    ).toBe(false);
+  });
+
+  test("a real agent that left a transcript still warns when unresolvable", async () => {
+    // The discriminator must not silence the case the WARN exists for: files on disk,
+    // but nothing readable resolves the role.
+    const sessionId = "cccc5555-1111-2222-3333-444455556666";
+    const layout = runtimeLayout(TMP, sessionId);
+    const agentId = "areal00000000001a";
+    writeFileSync(join(layout.subagents, `agent-${agentId}.jsonl`), "");
+    const { readAgentMeta, isPhantomStop } = await freshResolver();
+    const payload = stopPayload(layout, agentId);
+
+    expect(isPhantomStop(payload)).toBe(false);
+    expect(readAgentMeta(payload)).toBe(null);
     expect(
       readFileSync(
         join(sessionDir(sessionId), "identity-unresolvable"),

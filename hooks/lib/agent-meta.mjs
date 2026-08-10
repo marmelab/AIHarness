@@ -114,6 +114,40 @@ const subagentsDir = (payload) => {
   return candidates.find((c) => existsSync(c)) || "";
 };
 
+/**
+ * True when this stop is not one of our agents at all.
+ *
+ * Run 8bfcc2b0 fired a SubagentStop every ~32 s for eight minutes while the session was
+ * WAITING (a planner running, then the plan gate), each carrying a fresh `agent_id`
+ * whose transcript and spawn meta were never written and whose `agent_type` was empty.
+ * Eleven of them, none during ticket work, while all twenty real agents resolved. So
+ * these are the runtime's own book-keeping, not a harness agent.
+ *
+ * Counting them as failed identity is worse than cosmetic: the session sentinel read 16
+ * and every guard logged that it was degrading, which is exactly how a REAL identity
+ * failure would have gone unnoticed among them.
+ *
+ * The discriminator is safe in both directions. A real agent has, by the time it stops,
+ * written at least one assistant turn to its own transcript, and the runtime wrote its
+ * meta at spawn; so requiring BOTH files absent cannot silence a real agent. And a stop
+ * the runtime does name is never phantom, whatever is on disk.
+ *
+ * @param {Record<string, unknown>} payload  Parsed SubagentStop payload.
+ * @returns {boolean}
+ */
+export const isPhantomStop = (payload) => {
+  if (runtimeAgentName(payload)) return false;
+  const id = agentIdOf(payload);
+  if (!id || !isSafe(id)) return false;
+  const dir = subagentsDir(payload);
+  if (!dir) return false;
+  const stem = id.startsWith("agent-") ? id : `agent-${id}`;
+  return (
+    !existsSync(join(dir, `${stem}.jsonl`)) &&
+    !existsSync(join(dir, `${stem}.meta.json`))
+  );
+};
+
 const parseMeta = (metaPath) => {
   try {
     const meta = JSON.parse(readFileSync(metaPath, "utf8"));
@@ -404,7 +438,7 @@ export function readAgentMeta(payload) {
     byAgentId(payload) || bySiblingMeta(payload) || byNewestDispatch(payload),
     payload,
   );
-  if (!hit) warnUnresolvable(payload);
+  if (!hit && !isPhantomStop(payload)) warnUnresolvable(payload);
   if (payload && typeof payload === "object") memo.set(payload, hit);
   return hit;
 }

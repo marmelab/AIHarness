@@ -26,7 +26,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
-import { readAgentMeta } from "./lib/agent-meta.mjs";
+import { isPhantomStop, readAgentMeta } from "./lib/agent-meta.mjs";
 import { isOrchestrator } from "./lib/teams.mjs";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { getUnmergedTaskBranches, git } from "./lib/git.mjs";
@@ -61,7 +61,9 @@ try {
     ctx.accept(
       meta
         ? `not orchestrator (${meta.agentType} via ${meta.source})`
-        : "identity unresolvable, invariant not checked",
+        : isPhantomStop(payload)
+          ? "not a harness agent (no transcript, no meta, unnamed)"
+          : "identity unresolvable, invariant not checked",
     );
   }
 

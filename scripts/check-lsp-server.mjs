@@ -18,7 +18,8 @@
 // a human both learn the same thing.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { conflictReport, lspConflicts } from "../hooks/lib/lsp-conflict.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -104,6 +105,17 @@ for (const [name, cfg] of Object.entries(
         `a stale project entry pointing at an uninstalled binary is what disabled the tool.`,
     );
   }
+}
+
+// A green probe above only proves OUR command runs. It does not prove our server is the
+// one the runtime starts: another enabled plugin claiming the same extensions takes them
+// first and the loser never starts, which is what actually held the tool at zero calls.
+// Invisible from this manifest alone, and invisible to the project, since the conflicting
+// plugin was enabled in the USER's settings.
+const conflicts = lspConflicts(servers, process.env.CLAUDE_PROJECT_DIR);
+if (conflicts.length) {
+  console.error(`check-lsp-server: ${conflictReport(conflicts)}`);
+  failed++;
 }
 
 process.exit(failed ? 1 : 0);

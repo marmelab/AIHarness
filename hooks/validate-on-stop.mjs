@@ -31,7 +31,11 @@ import {
   matchesRole,
   validateRoleSet,
 } from "./lib/teams.mjs";
-import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
+import {
+  agentTranscriptPath,
+  isPhantomStop,
+  readAgentMeta,
+} from "./lib/agent-meta.mjs";
 import { turnState } from "./lib/contract-line.mjs";
 import {
   sessionBranch,
@@ -57,7 +61,11 @@ const meta = readAgentMeta(payload);
 const identity =
   [ctx.agentName, ctx.agentType, meta && meta.agentType].find(Boolean) || "";
 if (!identity) {
-  ctx.accept("identity unresolvable, nothing validated");
+  ctx.accept(
+    isPhantomStop(payload)
+      ? "not a harness agent (no transcript, no meta, unnamed), nothing validated"
+      : "identity unresolvable, nothing validated",
+  );
 }
 
 // --- gate 2: is validation this role's business --------------------------------------
