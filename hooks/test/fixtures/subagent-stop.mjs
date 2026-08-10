@@ -3,7 +3,7 @@
 // friendlier shape than the runtime's.
 //
 // Two shapes, and a fixture has to be able to build either. Measured on SDK 0.3.226 with
-// scripts/probe-identity.mjs, every stop carries `agent_type` populated,
+// a probe wired on SubagentStop, every stop carries `agent_type` populated,
 // `agent_transcript_path` naming the agent's own transcript, and `last_assistant_message`.
 // Earlier runtimes sent none of those, which is what the default below models: pass
 // `{ agent_type: "developer" }` through `extra` for the measured shape, and leave it out

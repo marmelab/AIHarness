@@ -1,7 +1,7 @@
 // Resolve WHO just stopped, from a SubagentStop payload.
 //
 // MEASURED, not inferred. Two audits guessed at this file's inputs and both guessed
-// wrong, so scripts/probe-identity.mjs was wired on SubagentStop and four real stops were
+// wrong, so a throwaway probe was wired on SubagentStop and four real stops were
 // captured, at spawn depth 1 and 2. Every stop carried ALL of:
 //
 //     agent_id               a4772894a17d69127
@@ -12,7 +12,9 @@
 //
 // and none of them set CLAUDE_AGENT_NAME. Three comments in this repo said the opposite
 // of three of those lines. They were not merely stale: they are what sent both audits
-// looking for a substitute for a field that was there all along.
+// looking for a substitute for a field that was there all along. The probe is not kept:
+// both WARNs below now log the payload's key NAMES, so the same question answers itself
+// from hooks.log the next time the shape changes.
 //
 // So `agent_type` is read FIRST and is authoritative for the ROLE. A guess that
 // contradicts it is wrong by definition, and loses its transcript as well as its name so
@@ -265,7 +267,8 @@ const warnUnresolvable = (payload) => {
       `[${new Date().toISOString()}] [agent-meta] WARN identity-unresolvable ` +
         `agent_id=${agentIdOf(payload) || "absent"} ` +
         `transcript=${tp || "absent"} tp_exists=${Boolean(tp && existsSync(tp))} ` +
-        `subagents_dir=${subagentsDir(payload) || "unresolved"}: ` +
+        `subagents_dir=${subagentsDir(payload) || "unresolved"} ` +
+        `payload_keys=[${payloadKeys(payload)}]: ` +
         `every SubagentStop guard that gates on identity is degrading on this stop. ` +
         `Later misses this session are counted in ${sentinel}, not logged.\n`,
     );
@@ -273,6 +276,16 @@ const warnUnresolvable = (payload) => {
     // logging must never break a hook
   }
 };
+
+// The field NAMES the runtime sent, never their values. This one string is what two
+// audits lacked: both reasoned about the payload's shape from this file's comments, both
+// were wrong, and settling it took wiring a throwaway probe and running a session. The
+// shape is a runtime contract that has already changed once, so the next time identity
+// breaks the log says which keys actually arrived, and nobody has to guess a third time.
+const payloadKeys = (payload) =>
+  payload && typeof payload === "object"
+    ? Object.keys(payload).sort().join(",")
+    : "";
 
 /**
  * The role the RUNTIME says just stopped, or "" when it does not say.
@@ -357,7 +370,8 @@ const noteContradiction = (payload, name, guess) => {
     appendFileSync(
       join(dir, "hooks.log"),
       `[${new Date().toISOString()}] [agent-meta] WARN identity-contradicted ` +
-        `runtime=${name} guessed=${guess.agentType} via=${guess.source}: ` +
+        `runtime=${name} guessed=${guess.agentType} via=${guess.source} ` +
+        `payload_keys=[${payloadKeys(payload)}]: ` +
         `the runtime name wins and the guessed transcript is dropped. ` +
         `Later disagreements this session are counted in ${sentinel}, not logged.\n`,
     );

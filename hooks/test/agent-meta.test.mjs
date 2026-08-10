@@ -373,7 +373,7 @@ describe("readAgentMeta: the runtime's name wins over a guess", () => {
   });
 });
 
-// MEASURED against the runtime (scripts/probe-identity.mjs, four stops at spawn depth 1
+// MEASURED against the runtime (a probe wired on SubagentStop, four stops at spawn depth 1
 // and 2): every SubagentStop payload carries agent_id, agent_type, agent_transcript_path
 // and last_assistant_message, and none of them sets CLAUDE_AGENT_NAME. Two audits had
 // assumed the opposite of three of those and went looking for substitutes.
