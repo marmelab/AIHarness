@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check-config-sync": "node scripts/check-config-sync.mjs",
-    "check": "node scripts/check-config-sync.mjs && node scripts/check-hooks-wiring.mjs && node scripts/check-core-deps.mjs"
+    "check": "node scripts/check-config-sync.mjs && node scripts/check-hooks-wiring.mjs && node scripts/check-core-deps.mjs && node scripts/check-lsp-server.mjs"
   },
   "devDependencies": {
     "vitest": "^4.1.0"

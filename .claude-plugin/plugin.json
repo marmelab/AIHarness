@@ -7,5 +7,21 @@
     "email": "jerome@marmelab.com"
   },
   "homepage": "https://github.com/marmelab/AIHarness",
-  "license": "MIT"
+  "license": "MIT",
+  "lspServers": {
+    "typescript": {
+      "command": "npx",
+      "args": ["-y", "typescript-language-server", "--stdio"],
+      "extensionToLanguage": {
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript",
+        ".cjs": "javascript"
+      }
+    }
+  }
 }
