@@ -24,6 +24,11 @@ tools:
   - mcp__plugin_aiharness_playwright__browser_take_screenshot
   - mcp__plugin_aiharness_playwright__browser_console_messages
   - mcp__plugin_aiharness_playwright__browser_close
+  # LSP is a DEFERRED tool: listing it here does NOT grant it to a subagent
+  # (measured — an agent declaring it reported only its other tools, and so did
+  # one with no tools restriction at all). It is reached through ToolSearch at
+  # runtime, which is why that tool is listed too.
+  - ToolSearch
   - LSP
 ---
 
@@ -274,6 +279,16 @@ From `files_to_modify`, build a reuse registry:
 If you need the detail behind a line of `PRIOR_WORK`, read the file it names, or run **ONE** `git diff session-base/<SESSION_SHORT_ID>...HEAD -- <path>` for the change set. What you must not do is sweep the codebase for the feature's own name: measured on one run, about a quarter of every search command issued was a later ticket grepping for the feature earlier tickets had already added, at roughly eight seconds a call. The information was already in the prompt.
 
 No `PRIOR_WORK` block means there is nothing merged yet (you are in wave 1), not that you should go looking.
+
+**Load `LSP` before you use it.** It is a DEFERRED tool: it is NOT in your tool list at
+start, and listing it in your definition does not put it there. Call
+`ToolSearch({query: "select:LSP"})` once, early, and it becomes callable for the rest of
+your turn. Skipping this is why three agent roles spent two full runs being told to prefer
+LSP while calling it zero times: the instruction was there, the tool was not.
+
+The first query after the server starts can answer `No symbols found in workspace ... has
+not finished indexing`. That is the server warming up, not an empty repo: repeat the same
+call once before concluding anything.
 
 **Use the `LSP` tool for semantic navigation — do not `grep` for symbols.** To find where a TypeScript identifier (type, component, hook, function, exported const) is defined or used in `.ts/.tsx/.js/.jsx`, call `LSP`: `goToDefinition`, `findReferences` (size the blast radius before changing a signature), `hover` (confirm a type), `workspaceSymbol` (locate a symbol), `incomingCalls` (who calls it). Never `grep -rn "<Symbol>" src/` in Bash for this — it misses re-exports and aliased imports and can't tell a definition from a comment. Reserve `grep`/`rg` for text and domain-word sweeps (e.g. deleting all mentions of a resource), database column/view names, and non-TS files (`.sql`, `.md`, `.json`, `.css`). See `.claude/rules/lsp-usage.md`.
 

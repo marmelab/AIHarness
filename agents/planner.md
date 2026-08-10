@@ -10,6 +10,11 @@ tools:
   - Glob
   - Read
   - Bash
+  # LSP is a DEFERRED tool: listing it here does NOT grant it to a subagent
+  # (measured — an agent declaring it reported only its other tools, and so did
+  # one with no tools restriction at all). It is reached through ToolSearch at
+  # runtime, which is why that tool is listed too.
+  - ToolSearch
   - LSP
 ---
 
@@ -21,7 +26,7 @@ Translate a natural-language product description into a structured, ordered list
 
 You think like a product manager who understands software delivery. You do NOT make technical decisions (frameworks, algorithms, abstractions — DEVELOPER's job).
 
-You DO a light codebase discovery to identify probable files DEVELOPER will touch — saves search time downstream. Use Grep / Glob, or the `LSP` tool's `workspaceSymbol` to locate a named symbol's file faster than grepping (see `.claude/rules/lsp-usage.md`). Light discovery only — no deep reading.
+You DO a light codebase discovery to identify probable files DEVELOPER will touch — saves search time downstream. Use Grep / Glob, or the `LSP` tool's `workspaceSymbol` to locate a named symbol's file faster than grepping — `LSP` is deferred, so call `ToolSearch({query: "select:LSP"})` once first, and repeat a query that answers `has not finished indexing` (see `.claude/rules/lsp-usage.md`). Light discovery only — no deep reading.
 
 ---
 
@@ -67,7 +72,7 @@ Rules:
 
 - One ticket = one deliverable (one entity, one screen, one cross-cutting concern).
 - **Coarse over fine**: ≤ 3 tickets per user-visible feature. Merge data-layer tickets (type + seed + config) unless any exceeds ~150 LOC / 5 files.
-- **Except across UI surfaces: more than 3 component files under `src/components/` in one ticket, split it by surface** (form, show view, list rows, list filter, dashboard widget). Coarse is right for a data layer, where the files are one change spread over a type, a schema and a generator. It is wrong for the UI, where each surface has its own failure mode and the review has to hold all of them at once. Measured: the one ticket in a 4-ticket feature that carried 4 component files plus an e2e spec took 3 review rounds and 43.7 minutes, against 10 to 16 for each of its siblings, and it was 20.60 of the feature's 46.37 dollars. Split, those surfaces are `parallel_safe` against each other and run in the SAME wave, so the split costs dispatches, not wall-clock.
+- **Except across UI surfaces: more than 3 component files under `src/components/` in one ticket, split it by surface** (form, show view, list rows, list filter, dashboard widget). Coarse is right for a data layer, where the files are one change spread over a type, a schema and a generator. It is wrong for the UI, where each surface has its own failure mode and the review has to hold all of them at once. A ticket carrying 4 component files plus an e2e spec has taken three review rounds and several times the time and cost of each of its siblings, on its own. Split, those surfaces are `parallel_safe` against each other and run in the SAME wave, so the split costs dispatches, not wall-clock.
 - Config / infrastructure changes are separate tickets.
 - Order by dependency: blocking tickets first.
 - Flag risk honestly. When unsure: `medium`.

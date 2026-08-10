@@ -245,8 +245,8 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     ).toBe("1");
   });
 
-  // Measured on run 8bfcc2b0: while the session waited, a stop arrived every ~32 s with a
-  // fresh agent_id that never got a transcript or a meta. Eleven of them drove the session
+  // While a session waits, a stop arrives every ~32 s with a fresh agent_id that never gets
+  // a transcript or a meta. Measured over one request: eleven of them drove the session
   // counter to 16 and made every guard log that it was degrading, which is precisely how a
   // REAL identity failure would have gone unnoticed. They are the runtime's book-keeping,
   // not our agents, so they must cost nothing.
@@ -255,6 +255,39 @@ describe("readAgentMeta: unresolvable identity is LOUD", () => {
     const layout = runtimeLayout(TMP, sessionId);
     const { readAgentMeta, isPhantomStop } = await freshResolver();
     const payload = stopPayload(layout, "aphantom000000001");
+
+    expect(isPhantomStop(payload)).toBe(true);
+    expect(readAgentMeta(payload)).toBe(null);
+    expect(
+      existsSync(join(sessionDir(sessionId), "identity-unresolvable")),
+    ).toBe(false);
+  });
+
+  // With the classification already in, eight of nine remaining misses arrived BEFORE the
+  // session had spawned anything, so `subagents/` did not exist and the directory-based
+  // check could not run at all. The payload still named the agent's own transcript, and
+  // that name alone answers the question.
+  test("a phantom is recognised before the subagents directory exists", async () => {
+    const sessionId = "cccc6666-1111-2222-3333-444455556666";
+    const projectDir = join(TMP, "projects", "-workspaces-early");
+    mkdirSync(projectDir, { recursive: true });
+    const mainTranscript = join(projectDir, `${sessionId}.jsonl`);
+    writeFileSync(mainTranscript, "");
+    const { readAgentMeta, isPhantomStop } = await freshResolver();
+    const payload = {
+      session_id: sessionId,
+      hook_event_name: "SubagentStop",
+      agent_type: "",
+      agent_id: "aearly00000000001",
+      transcript_path: mainTranscript,
+      // The directory this names is never created: nothing has been dispatched yet.
+      agent_transcript_path: join(
+        projectDir,
+        sessionId,
+        "subagents",
+        "agent-aearly00000000001.jsonl",
+      ),
+    };
 
     expect(isPhantomStop(payload)).toBe(true);
     expect(readAgentMeta(payload)).toBe(null);

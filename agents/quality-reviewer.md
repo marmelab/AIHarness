@@ -22,6 +22,11 @@ tools:
   - mcp__plugin_aiharness_playwright__browser_take_screenshot
   - mcp__plugin_aiharness_playwright__browser_console_messages
   - mcp__plugin_aiharness_playwright__browser_close
+  # LSP is a DEFERRED tool: listing it here does NOT grant it to a subagent
+  # (measured — an agent declaring it reported only its other tools, and so did
+  # one with no tools restriction at all). It is reached through ToolSearch at
+  # runtime, which is why that tool is listed too.
+  - ToolSearch
   - LSP
 ---
 
@@ -86,8 +91,8 @@ Discipline (keep signal high, noise low):
 `FIX_RANGE:` and `FINDINGS_RAISED:`, you already reviewed this feature and blocked it; a fix
 has since been merged. Judge two things: every raised finding is resolved, and `FIX_RANGE` is
 itself correct and introduces nothing new. Work you approved last round and that `FIX_RANGE`
-does not touch is NOT re-reviewed — re-reading it cost a measured $3.87 and 9 minutes to
-re-judge a one-line fix, and returned nothing the first pass had not already said.
+does not touch is NOT re-reviewed — a second full pass over a one-line fix has taken as
+long as the first and returned nothing the first pass had not already said.
 
 Two things stay true in a fix round. `SESSION_DIFF_BASE` is still yours to read: when a
 finding leads out of `FIX_RANGE` (the fix moved the defect rather than removing it, or its
@@ -148,8 +153,8 @@ OUTPUT CONTRACT (text, no `SendMessage`), last line exactly one of:
 ## Feature-smoke mode (single-shot, no team)
 
 Normally you receive this work as the `RUNTIME_CHECK:` block of a feature-review, not as its
-own dispatch: two opus agents judging one diff, one after the other, cost 17.5 minutes of a
-113-minute run. A standalone `MODE: feature-smoke` dispatch remains valid for a re-run after
+own dispatch: two opus agents judging one diff, one after the other, is a large slice of a
+request's wall clock for a second opinion on work already judged. A standalone `MODE: feature-smoke` dispatch remains valid for a re-run after
 an approved review, and the rules below are the ones the block refers to.
 
 When your spawn prompt contains `MODE: feature-smoke`, drive the WHOLE integrated feature in
@@ -242,7 +247,9 @@ Read the ticket spec at `TICKET_FILE`, read the diff in `WORKTREE_PATH`. Apply y
    git -C <WORKTREE_PATH> diff "session-base/$SHORT"..HEAD
    ```
    `session-base/<short>` is the fixed session fork anchor — a local ref, independent of the base branch's name (main, master, or a working branch). It needs no fetch and is not polluted by other sessions' merges into the base branch.
-2. **Apply the rubric** below (Parts A and B). Also apply `coding-style.md` and `security-triggers.md` rules. Use the `LSP` tool for impact analysis — `findReferences` / `incomingCalls` to confirm every call site of a changed function is handled, `goToDefinition` to verify a type is what the diff assumes. See `.claude/rules/lsp-usage.md` (it is read-only intelligence, not a forbidden validation command).
+2. **Apply the rubric** below (Parts A and B). Also apply `coding-style.md` and `security-triggers.md` rules. First call `ToolSearch({query: "select:LSP"})`: `LSP` is a deferred tool, absent from your
+   tool list until you load it, and a first query answering `has not finished indexing` means
+   the server is warming up — repeat it once. Then use the `LSP` tool for impact analysis — `findReferences` / `incomingCalls` to confirm every call site of a changed function is handled, `goToDefinition` to verify a type is what the diff assumes. See `.claude/rules/lsp-usage.md` (it is read-only intelligence, not a forbidden validation command).
 3. **Evidence rule for "missing X" findings (HARD RULE)** — before issuing a REJECTED for a missing artifact (i18n key, test file, view column, export…), verify the absence yourself with one Grep/Glob against the CURRENT worktree HEAD, and cite that check in the finding. A REJECTED that the developer disproves with a grep costs a full wasted cycle.
 4. **Do NOT write a verdict flag.** The merger is gated on a per-ticket verdict flag, and the `record-review-verdict` hook writes it from your contract line on your stop. Your job is to emit that line correctly; the flag is bookkeeping you never touch. Same for the end-of-feature pass (see Feature-review mode).
    > **Fallback, only when your spawn prompt says `WRITE_VERDICT_FLAG: yes`.** Some runtimes expose neither the last assistant message nor a flushed transcript when a hook runs, so the hook cannot read your contract line. Only then, and only if asked, write it BEFORE the contract line: `RD="$(dirname "${TICKET_FILE}")/reviews" && mkdir -p "$RD" && touch "$RD/${TASK_ID}-quality-reviewer"` on APPROVED, `rm -f "$RD/${TASK_ID}-quality-reviewer"` on REJECTED, substituting the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt.

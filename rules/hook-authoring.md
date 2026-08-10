@@ -42,7 +42,7 @@ the happy shape cannot see this class of break, which is exactly how it stayed h
 
 An agent that cannot satisfy a guard must still be able to finish. The validation chain
 refused a stop for as long as a step failed, with no budget and no way for the agent to give
-up: 35 cycles over 52 minutes on one ticket.
+up: dozens of cycles over most of an hour on one ticket.
 
 Bound the refusals, then degrade in a way that keeps the invariant somewhere else:
 
