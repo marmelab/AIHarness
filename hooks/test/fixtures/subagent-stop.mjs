@@ -1,9 +1,15 @@
-// The SubagentStop payload and transcript layout AS MEASURED against Claude Code
-// v2.1.223, in one place, because the suite's inability to see the identity bug came
-// down to every fixture inventing a friendlier shape than the runtime's.
+// The SubagentStop payload and transcript layout AS MEASURED, in one place, because the
+// suite's inability to see the identity bug came down to every fixture inventing a
+// friendlier shape than the runtime's.
 //
-// What the runtime actually does:
-//   - `agent_type` in the payload is EMPTY (so hooks.json matchers do not filter).
+// Two shapes, and a fixture has to be able to build either. Measured on SDK 0.3.226 with
+// a probe wired on SubagentStop, every stop carries `agent_type` populated,
+// `agent_transcript_path` naming the agent's own transcript, and `last_assistant_message`.
+// Earlier runtimes sent none of those, which is what the default below models: pass
+// `{ agent_type: "developer" }` through `extra` for the measured shape, and leave it out
+// to exercise the fallbacks that still carry those older runtimes.
+//
+// What the runtime does in BOTH shapes:
 //   - `transcript_path` names the MAIN SESSION transcript, not the stopping agent's.
 //   - `agent_id` names the stopping agent, and its spawn meta plus its own transcript
 //     live one directory down:

@@ -121,9 +121,17 @@ describe("cleanup-worktree removal semantics", () => {
     expect(existsSync(join(WB, "TASK-001"))).toBe(true);
   });
 
+  // The sweep is the MERGER's post-merge step: cleanup-worktree exits early on any stop
+  // it can identify as another role. This case used to dispatch a developer and pass only
+  // because identity was unresolvable on the synthetic payload, so it exercised the
+  // fall-through rather than the rule. The payload now carries agent_type, as the runtime
+  // really sends it, and a developer stop correctly sweeps nothing.
   test("merged clean worktree is removed, branch deleted, fresh sibling kept", () => {
     unlinkSync(join(WB, "TASK-001", "uncommitted.txt"));
     expect(dispatch(CLEANUP, "developer-TASK-001").status).toBe(0);
+    expect(existsSync(join(WB, "TASK-001"))).toBe(true); // not the merger: untouched
+
+    expect(dispatch(CLEANUP, "merger").status).toBe(0);
     expect(existsSync(join(WB, "TASK-001"))).toBe(false);
     expect(g("branch", "--list", `${SS}/TASK-001`).stdout.trim()).toBe("");
     expect(existsSync(join(WB, "TASK-002"))).toBe(true);

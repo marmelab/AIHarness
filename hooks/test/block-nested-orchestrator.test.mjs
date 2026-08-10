@@ -88,3 +88,20 @@ describe("block-nested-orchestrator — Rule 2 (no nested orchestrator)", () => 
     expect(run("developer", "general-purpose", "dev-1").blocked).toBe(false);
   });
 });
+
+// The allowlist is derived from harness.config.json, not written out twice. The
+// hardcoded copy had dropped test-writer and simple-developer, which made
+// `separate_test_writer: true` unreachable: a run dispatched the test-writer exactly as
+// designed and this hook refused it.
+describe("block-nested-orchestrator: the allowlist follows the declared roles", () => {
+  test.each(["test-writer", "simple-developer"])(
+    "an orchestrator may dispatch %s",
+    (role) => {
+      expect(run("orchestrator", role).blocked).toBe(false);
+    },
+  );
+
+  test("a nested orchestrator is still refused, config or not", () => {
+    expect(run("orchestrator", "orchestrator").blocked).toBe(true);
+  });
+});

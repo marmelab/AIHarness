@@ -417,11 +417,25 @@ In ONE assistant message, dispatch a foreground developer for every ticket in th
 Agent({
   subagent_type: "developer",
   description: "Implement TASK-XXX",
-  prompt: "ROLE: developer\nTASK_ID: TASK-XXX\nTICKET_FILE: <TICKETS_DIR>/TASK-XXX.json\nWORKTREE_PATH: <WORKTREE_BASE>/TASK-XXX\nBRANCH_NAME: <SESSION_SHORT_ID>/TASK-XXX"
+  prompt: "ROLE: developer\nTASK_ID: TASK-XXX\nTICKET_FILE: <TICKETS_DIR>/TASK-XXX.json\nWORKTREE_PATH: <WORKTREE_BASE>/TASK-XXX\nBRANCH_NAME: <SESSION_SHORT_ID>/TASK-XXX\n<the PRIOR_WORK block below, from wave 2 onwards>"
 })
 ```
 
 (No `run_in_background`, no `isolation`, no `name`.)
+
+**`PRIOR_WORK`: tell each ticket what the earlier ones actually built.** From wave 2 onwards, append this block, one line per ticket already merged into the session branch:
+
+```
+PRIOR_WORK: already merged into session/<SESSION_SHORT_ID>, do not re-derive it
+- TASK-001 (<its title>): <files=[...] from its DONE line>
+- TASK-002 (<its title>): <files=[...] from its DONE line>
+```
+
+Build it from the `DONE: … files=[…]` lines you already parsed into `dev_output`. It costs you nothing to write and no extra dispatch: you are the only participant who has seen every ticket's result.
+
+The planner cannot supply this. It writes the plan BEFORE any code exists, so it can say which files a ticket should touch but never what its predecessors actually wrote. Without the block, every ticket after the first opens by hunting the feature across the codebase: measured on one run, about a quarter of all search commands were later tickets grepping for the feature's own name to find what earlier tickets had already added. A ticket that is handed the answer does not go looking for it.
+
+Omit the block in wave 1, where there is nothing to hand over. Keep it on a retry: the re-develop dispatch reuses the Stage 1 prompt verbatim, and a retry is a FRESH agent with no memory of the first attempt, so it needs the handover exactly as much.
 
 Substitute the actual ticket id and the concrete `<TICKETS_DIR>` / `<WORKTREE_BASE>` / `<SESSION_SHORT_ID>`. `BRANCH_NAME` is always exactly `<SESSION_SHORT_ID>/TASK-XXX` — slug-free. `setup-worktree` derives the branch it creates solely from `TASK_ID` (`<SESSION_SHORT_ID>/TASK-XXX`) and ignores any descriptive suffix; carrying a slug (or a planner `feature/...`/`fix/...` prefix) only makes the merger's `BRANCH_NAME` disagree with the branch that actually exists, so don't add one. **The `WORKTREE_PATH` and `BRANCH_NAME` lines are required and must follow the template verbatim**: `setup-worktree` runs on THIS dispatch (PreToolUse/Agent), reads `WORKTREE_PATH`/`BRANCH_NAME`/`TASK_ID`, and creates the worktree (forked from `session/<SESSION_SHORT_ID>`, node_modules provisioned) before the developer starts. `enforce-dev-dispatch` blocks the dispatch if `WORKTREE_PATH` is missing or if you add `isolation: "worktree"`.
 

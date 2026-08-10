@@ -44,7 +44,22 @@ SLOT_LOCK_DIR="/tmp/harness-e2e-slots"
 CONFIG_SRC="$SRC/supabase/config.e2e.toml"
 mkdir -p "$SLOT_LOCK_DIR"
 
-skip() { echo "SKIP: $*"; exit 0; }   # graceful: not run here, not a failure
+# A skip is graceful (not run here, not a failure), but it must never be MUTE. The logs
+# that would explain it live in $workroot, which the EXIT trap deletes on the way out, so
+# a run that skipped could not be diagnosed afterwards at all: one session reported
+# "isolated stack readiness timeout" and there was nothing left on disk to say which half
+# of the readiness check failed. Dump the tails to stdout first; the caller hook keeps the
+# last 40 lines in e2e-result.json.
+skip() {
+  echo "SKIP: $*"
+  for log in supabase app dbdiff migup; do
+    if [ -n "${workroot:-}" ] && [ -s "${workroot}/${log}.log" ]; then
+      echo "--- ${log}.log (last 25 lines) ---"
+      tail -n 25 "${workroot}/${log}.log"
+    fi
+  done
+  exit 0
+}
 
 # --- memory preflight -------------------------------------------------------
 # Each Supabase stack is ~2-3 GB. Don't attempt a boot the host can't hold; skip
@@ -72,10 +87,32 @@ workdir="$workroot/e2e"          # supabase --workdir
 mkdir -p "$workdir/supabase"
 
 # --- guaranteed teardown ----------------------------------------------------
+# APP_PID has to BE the dev server, which is why the server is exec'd below.
+#
+# `( ... npx vite ... ) &` gave $! the subshell; npx then spawned node as its child, and
+# `kill $APP_PID` reaped neither. Measured on the failing run's own worktree: after the
+# kill the port still answered 200 and the vite process had been reparented to init. So
+# every run leaked a server holding its slot's app port, and the NEXT run on that slot met
+# `--strictPort` refusing to bind, an app that never became ready, and a 120s wait-on
+# timeout reported as "isolated stack did not become ready in time". A session that ran
+# the suite 14 times left 14 of them, which is why the failure surfaced one session after
+# its cause, on a slot that had worked the day before.
+#
+# setsid was tried first and is NOT the fix: `$!` names the setsid parent, not the leader
+# of the new group, so `kill -- -$!` signals a group the server is not in. Verified: the
+# port still answered 200.
 APP_PID=""
 cleanup() {
   local code=$?
-  [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null || true
+  # TERM so vite closes its sockets, KILL for whatever ignored it.
+  if [ -n "$APP_PID" ]; then
+    kill -TERM "$APP_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6; do
+      kill -0 "$APP_PID" 2>/dev/null || break
+      sleep 0.3
+    done
+    kill -KILL "$APP_PID" 2>/dev/null || true
+  fi
   [ "$DRY" != "1" ] && npx supabase stop --workdir "$workdir" --no-backup >/dev/null 2>&1 || true
   [ -n "$SLOT_FD" ] && flock -u "$SLOT_FD" 2>/dev/null || true
   rm -rf "$workroot" 2>/dev/null || true
@@ -157,11 +194,35 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
   fi
 fi
 
+# --- reap a stale server on this slot's app port ----------------------------
+# Symmetric with the docker reap above, and for the same reason: a previous run killed
+# before its trap completed leaves a dev server bound here, and `--strictPort` then makes
+# vite exit instead of picking another port. Without this the slot stays poisoned for
+# every later run, which is the failure this whole section exists to prevent.
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k -TERM "$app_port/tcp" >/dev/null 2>&1 && sleep 1 || true
+elif command -v lsof >/dev/null 2>&1; then
+  lsof -ti "tcp:$app_port" 2>/dev/null | xargs -r kill -TERM 2>/dev/null && sleep 1 || true
+fi
+
 # --- serve the app (dev server reads env at start, so no per-slot build) ----
-( cd "$SRC" && VITE_SUPABASE_URL="$VITE_SUPABASE_URL" npx vite --port "$app_port" --strictPort --mode e2e >"$workroot/app.log" 2>&1 ) &
+# `exec` the LOCAL binary, so the backgrounded process IS vite: no subshell above it and
+# no npx beside it, which is what makes $! a pid the teardown can actually kill. Verified
+# on the failing run's worktree: the port goes from 200 to closed on a plain `kill $!`.
+# npx remains the fallback for a tree without a provisioned node_modules, where the leak
+# is the lesser problem.
+if [ -x "$SRC/node_modules/.bin/vite" ]; then
+  ( cd "$SRC" && VITE_SUPABASE_URL="$VITE_SUPABASE_URL" \
+      exec node node_modules/.bin/vite --port "$app_port" --strictPort --mode e2e \
+      >"$workroot/app.log" 2>&1 ) &
+else
+  ( cd "$SRC" && VITE_SUPABASE_URL="$VITE_SUPABASE_URL" \
+      exec npx vite --port "$app_port" --strictPort --mode e2e \
+      >"$workroot/app.log" 2>&1 ) &
+fi
 APP_PID=$!
 npx wait-on -t 120000 "http-get://127.0.0.1:$api_port/auth/v1/health" "http-get://127.0.0.1:$app_port" >/dev/null 2>&1 \
-  || skip "isolated stack did not become ready in time."
+  || skip "isolated stack did not become ready in time (api :$api_port, app :$app_port)."
 
 # --- run the suite ----------------------------------------------------------
 # Changed specs first. A failure here is THE answer: report it and stop, rather than

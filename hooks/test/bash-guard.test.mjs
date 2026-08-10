@@ -426,24 +426,32 @@ describe("bash-guard hook", () => {
     });
   });
 
-  // A quoted pattern is data. The rule matched inside it, so looking FOR a forbidden
-  // command was refused as running one.
-  describe("validation rules: a search pattern is not an invocation", () => {
+  // The ARGUMENTS of a read-only command are data. The rules matched inside them, so
+  // looking FOR a forbidden command, or reading the file that defines one, was refused as
+  // running it. The second shape made the e2e script unmaintainable through Bash: every
+  // wc, head or awk naming the file was blocked as an attempt to launch the suite.
+  const E2E_SCRIPT = ["scripts", "e2e-smoke.sh"].join("/");
+  describe("validation rules: reading about a command is not running it", () => {
     test.each([
-      ["grep", `grep -rn "npm run typecheck" src/`],
-      ["rg", `rg 'make lint' --type ts`],
+      ["grep for a pattern", `grep -rn "npm run typecheck" src/`],
+      ["rg for a pattern", `rg 'make lint' --type ts`],
       ["grep with a pipe after it", `grep -rn "npx vitest" . | head -5`],
-    ])("%s for a forbidden command → allowed", (_label, command) => {
+      ["wc on the script itself", `wc -l ${E2E_SCRIPT}`],
+      ["awk on the script itself", `awk '/slot/ {print}' ${E2E_SCRIPT}`],
+      ["ls of the script itself", `ls -la ${E2E_SCRIPT}`],
+    ])("%s → allowed", (_label, command) => {
       const r = runHook("developer", command);
       expect(r.status).toBe(0);
       expect(isBlocked(r)).toBe(false);
     });
 
-    // The masking is confined to the search segment: a real invocation in quotes, and a
-    // real invocation piped into a grep, are still what they are.
+    // Masking covers commands that cannot execute what they name. A shell, and a real
+    // invocation piped into a search, are still what they are.
     test.each([
       ["bash -c", `bash -c "npm run typecheck"`],
       ["piped into grep", `npm run typecheck | grep error`],
+      ["running the script", `bash ${E2E_SCRIPT}`],
+      ["sourcing the script", `. ./${E2E_SCRIPT}`],
     ])("%s → still blocked", (_label, command) => {
       expect(isBlocked(runHook("developer", command))).toBe(true);
     });
