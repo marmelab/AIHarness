@@ -7,14 +7,22 @@ manifest, covering `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` and `.cj
 for any **semantic** question about TypeScript/JavaScript code. It resolves symbols
 through the type system, so it is exact where text search only guesses.
 
-## Two things that made this rule a no-op for three runs
+## Read this before the rest: you may not have the tool at all
 
-**`LSP` is a DEFERRED tool: you have to load it.** It is not in a subagent's tool list at
-start, and listing it in the agent definition does not put it there — measured, an agent
-declaring `LSP` reported only its other tools, and so did one with no tools restriction at
-all. Call `ToolSearch({query: "select:LSP"})` once, early; it stays callable for the rest
-of the turn. Until then everything below describes a tool you do not have, which is exactly
-what happened: three roles told to prefer LSP, zero calls, three full runs.
+**`LSP` is DEFERRED, and on some surfaces it is not granted to subagents.** It is never in
+a subagent's tool list at start, and listing it in the agent definition does not put it
+there. Load it with `ToolSearch({query: "select:LSP"})` once, early.
+
+**Two answers to that call, and both are normal.** A schema comes back and LSP is yours for
+the turn. Or `No matching deferred tools found` comes back, and the tool does not exist in
+this session: measured, subagents get LSP in a non-interactive run and do NOT get it in an
+interactive one, where the runtime answers `LSP is disabled for this session, in subagents
+as well`. Nothing in the plugin, the project settings or your prompt changes that.
+
+**When it is absent, `grep` is the CORRECT answer, not a fallback you owe an excuse for.**
+Ask once, take the answer, move on. Do not retry the load, do not hunt for a workaround, do
+not report it as a blocker: three agent roles work this way every run on that surface. The
+rest of this file describes what to do when the tool IS there.
 
 **The first query can answer nothing.** `No symbols found in workspace ... has not finished
 indexing` is the server warming up, not an empty repo. Repeat the same call once — measured,
@@ -34,11 +42,12 @@ definition from a comment, a type from a same-named variable, or one `handleSubm
 from another, and it silently misses re-exports and aliased imports. The `LSP` tool
 resolves the actual symbol.
 
-**Hard rule:** to find where a TypeScript identifier (a PascalCase type/component,
-a camelCase function/hook, an exported const) is **defined** or **used** in
-`.ts/.tsx/.js/.jsx`, call `LSP` — never `grep -rn "<Symbol>" src/` in Bash and never
-the `Grep` tool. Reach for LSP first whenever the question is "where / what / who",
-not "which files contain this string".
+**Rule, when the tool loaded:** to find where a TypeScript identifier (a PascalCase
+type/component, a camelCase function/hook, an exported const) is **defined** or **used** in
+`.ts/.tsx/.js/.jsx`, call `LSP` rather than `grep -rn "<Symbol>" src/` in Bash. Reach for
+LSP first whenever the question is "where / what / who", not "which files contain this
+string". **When the tool did not load, that same question is a `grep` question** and the
+table below is a description of what you are missing, not a rule you are breaking.
 
 | Instead of this bash-grep…                                        | …use this LSP call                     |
 | ----------------------------------------------------------------- | -------------------------------------- |
@@ -66,8 +75,8 @@ and editors.
 
 - **developer** — before editing a symbol's signature,
   `findReferences` to size the blast radius; `hover` to confirm a type;
-  `goToDefinition` to reach the source. Do not `grep -rn "<Symbol>" src/` in Bash
-  to answer these — that is the exact reflex this rule replaces.
+  `goToDefinition` to reach the source. Prefer these over `grep -rn "<Symbol>" src/`
+  in Bash whenever the tool loaded.
 - **quality-reviewer** — `findReferences` / `incomingCalls` to check that every
   call site of a changed function is handled; `goToDefinition` to confirm a type
   is what the diff assumes; `findReferences` / `workspaceSymbol` to confirm a new
@@ -96,5 +105,5 @@ does not replace the hook-run typecheck.
 
 Pass **absolute paths inside your own worktree** (`<WORKTREE_PATH>/src/...`), per
 `worktree-scope.md` — never the base-branch checkout under `$CLAUDE_PROJECT_DIR`.
-Fall back to `grep` / `Read` only when LSP returns an actual error or empty result
-for a worktree file — not as the default. Do not block on it.
+When LSP is unavailable, or returns an error or an empty result for a worktree file after
+the one indexing retry, use `grep` / `Read` and carry on. Never block on it.

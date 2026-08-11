@@ -283,8 +283,10 @@ No `PRIOR_WORK` block means there is nothing merged yet (you are in wave 1), not
 **Load `LSP` before you use it.** It is a DEFERRED tool: it is NOT in your tool list at
 start, and listing it in your definition does not put it there. Call
 `ToolSearch({query: "select:LSP"})` once, early, and it becomes callable for the rest of
-your turn. Skipping this is why three agent roles spent two full runs being told to prefer
-LSP while calling it zero times: the instruction was there, the tool was not.
+your turn. If it answers `No matching deferred tools found`, the tool does not exist in this session
+(measured: subagents get it in a non-interactive run, not in an interactive one) — `grep` is
+then the CORRECT answer, not a fallback you owe an excuse for. Ask once, take the answer,
+move on: do not retry, do not hunt for a workaround, do not report it as a blocker.
 
 The first query after the server starts can answer `No symbols found in workspace ... has
 not finished indexing`. That is the server warming up, not an empty repo: repeat the same
