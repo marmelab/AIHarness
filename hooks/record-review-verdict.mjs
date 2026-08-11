@@ -38,7 +38,7 @@ import { getFirstTaskId, isQualityReviewer } from "./lib/teams.mjs";
 import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag, reviewsDir } from "./lib/reviews.mjs";
-import { reviewerVerdict } from "./lib/verdict.mjs";
+import { reviewerVerdict, verdictSource } from "./lib/verdict.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "record-review-verdict");
@@ -128,7 +128,7 @@ if (role || verdict) {
     `role=${role || "UNKNOWN"} task=${task || "UNKNOWN"} verdict=${verdict || "UNKNOWN"}` +
       (role && task && verdict
         ? ""
-        : ` | DIAG identity=${meta ? meta.source : "unresolved"} agent_transcript=${transcript ? "resolved" : "unresolved"} last_msg=${input.last_assistant_message ? "present" : "absent"}`),
+        : ` | DIAG identity=${meta ? meta.source : "unresolved"} agent_id=${input.agent_id ? "present" : "absent"} agent_transcript=${transcript ? "resolved" : "unresolved"} read_from=${verdictSource(input).source} tail=${JSON.stringify(verdictSource(input).tail)}`),
   );
 }
 

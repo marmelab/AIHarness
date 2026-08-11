@@ -115,3 +115,32 @@ export function lastAssistantText(payload) {
  */
 export const reviewerVerdict = (payload) =>
   parseVerdict(lastAssistantText(payload));
+
+/**
+ * What the verdict was actually parsed FROM, for a diagnostic line.
+ *
+ * A whole run once logged 173 stops with an unrecognised verdict while twelve of its
+ * fifteen reviewers ended on a clean `APPROVED` — the parser replays those transcripts
+ * correctly, so the text the hook was handed at runtime was not the text the reviewer
+ * finished on. Nothing in the log could tell the two apart: the diagnostic said only that
+ * a last message was "present". Which source answered, and how that text ends, is the one
+ * fact that settles it, and it costs a substring.
+ *
+ * The tail only, and stripped of newlines: this goes in a log line, and the interesting
+ * part of a contract is always its end.
+ *
+ * @param {Record<string, unknown>} payload  Parsed SubagentStop payload.
+ * @returns {{ source: "payload" | "transcript" | "none", tail: string }}
+ */
+export function verdictSource(payload) {
+  const direct = payload && payload.last_assistant_message;
+  const fromPayload = typeof direct === "string" && direct.trim();
+  const text = fromPayload ? direct : lastAssistantText(payload);
+  return {
+    source: fromPayload ? "payload" : text ? "transcript" : "none",
+    tail: String(text || "")
+      .trim()
+      .slice(-70)
+      .replace(/\s+/g, " "),
+  };
+}
