@@ -458,3 +458,61 @@ describe("block-duplicate-dispatch: RETRY is the sanctioned way to dispatch agai
     expect(run(p, "merger").blocked).toBe(true);
   });
 });
+
+// The runtime can refuse a dispatch outright: where the harness runs as a plugin and the
+// project vendors no `.claude/agents/`, the bare role names do not resolve and the answer
+// is "Agent type 'planner' not found. Available agents: aiharness:planner, ...". This hook
+// runs BEFORE the call, so it had already written a marker for an agent that never came
+// into existence, and then refused the corrected re-dispatch as a duplicate of it. The
+// orchestrator believed the message, waited for a task-notification that could not arrive,
+// and stopped: a whole run spent, no agent ever launched.
+describe("block-duplicate-dispatch: a rejected dispatch is not a launched agent", () => {
+  test("the corrected planner name passes the marker the rejected one left", () => {
+    const p = `TICKETS_DIR=${join(TMP, "tickets-ns")}`;
+    const C = "ns-orch";
+    expect(run(p, "planner", C).blocked).toBe(false); // rejected by the runtime, unseen here
+    // 15s later, the same role under the name the error named. Without the fix this is
+    // "A planner was dispatched 15s ago ... It is STILL RUNNING. Wait for it."
+    expect(run(p, "aiharness:planner", C).blocked).toBe(false);
+  });
+
+  test("the same correction works for a debounced role", () => {
+    const p = `ROLE: developer\nTASK_ID: TASK-800\nWORKTREE_PATH: /wt`;
+    const C = "ns-orch-dev";
+    expect(run(p, "developer", C).blocked).toBe(false);
+    expect(run(p, "aiharness:developer", C).blocked).toBe(false);
+  });
+
+  // The escape hatch is a changed SPELLING, so it must not become an escape hatch for the
+  // duplicate this guard exists to catch: an async-ack echo repeats the dispatch verbatim.
+  test("a verbatim re-dispatch of the corrected name is still a duplicate", () => {
+    const p = `TICKETS_DIR=${join(TMP, "tickets-ns2")}`;
+    const C = "ns-orch-2";
+    expect(run(p, "aiharness:planner", C).blocked).toBe(false);
+    expect(run(p, "aiharness:planner", C).blocked).toBe(true);
+  });
+
+  test("correcting the name does not license a second real planner afterwards", () => {
+    const dir = join(TMP, "tickets-ns3");
+    const p = `TICKETS_DIR=${dir}`;
+    const C = "ns-orch-3";
+    run(p, "planner", C); // rejected
+    expect(run(p, "aiharness:planner", C).blocked).toBe(false); // the one that runs
+    seedPlan(dir);
+    expect(run(p, "aiharness:planner", C).blocked).toBe(true);
+  });
+
+  test("a marker written before the raw name was recorded still blocks", () => {
+    // Upgrade path: an in-flight marker from the previous version has no `raw=` line, and
+    // an unknown previous spelling must read as "not a correction" rather than waving the
+    // next dispatch through.
+    const p = `TICKETS_DIR=${join(TMP, "tickets-ns4")}`;
+    const C = "ns-orch-4";
+    run(p, "planner", C);
+    // Strip the `raw=` line back out, leaving the marker exactly as the old version wrote it.
+    for (const f of readdirSync(breakerDir))
+      if (/^planner-/.test(f))
+        writeFileSync(join(breakerDir, f), `${C} /old/tickets\n`);
+    expect(run(p, "aiharness:planner", C).blocked).toBe(true);
+  });
+});
