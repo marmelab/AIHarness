@@ -35,13 +35,24 @@ import {
 } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
 import { getFirstTaskId, isQualityReviewer } from "./lib/teams.mjs";
-import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
+import {
+  agentTranscriptPath,
+  isPhantomStop,
+  readAgentMeta,
+} from "./lib/agent-meta.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag, reviewsDir } from "./lib/reviews.mjs";
 import { reviewerVerdict, verdictSource } from "./lib/verdict.mjs";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "record-review-verdict");
+
+// The runtime fires a stop of its own every ~32 s while an agent runs. It names no agent,
+// so identity falls to the newest-transcript guess, which lands on whichever reviewer is
+// CURRENTLY running: the recovered role and task belong to that agent and its text is a
+// mid-turn snapshot with no contract line yet. One request logged 173 such lines, every
+// one of them `verdict=UNKNOWN`, drowning whatever the real stops said.
+if (isPhantomStop(input)) process.exit(0);
 
 // The STOPPING AGENT'S OWN transcript, not the payload's transcript_path: in this
 // runtime that field names the MAIN session transcript, which holds every dispatch

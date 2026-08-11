@@ -189,3 +189,66 @@ describe("record-smoke-evidence: the runtime check folded into a feature-review"
     expect(existsSync(resultFile())).toBe(false);
   });
 });
+
+describe("record-smoke-evidence: the runtime's own stops leave the record alone", () => {
+  // Measured over one feature review: a stop of the runtime's own arrives every ~32 s
+  // while an agent runs. It names no agent, so identity falls to the newest-transcript
+  // guess and lands on the reviewer CURRENTLY running — mid-turn, browser evidence already
+  // present, contract line not yet written. This file is rewritten whole each time, so 27
+  // overwrites later it says `unknown` and the finished reviewer's verdict is gone.
+  //
+  // Reproducing that needs BOTH halves: a finished record to clobber, and a running
+  // reviewer for the guess to land on. A phantom next to a finished transcript writes the
+  // same answer and proves nothing — the first version of this test did exactly that and
+  // passed with the guard removed.
+  const runningReviewer = () => {
+    const t = spawnAgent(
+      layout,
+      "arunn1ng000000001",
+      {
+        agentType: "quality-reviewer",
+        description: "feature review in flight",
+      },
+      "ROLE: quality-reviewer (MODE: feature-smoke)\nSESSION_SHORT_ID: 5m0ke1d0\n",
+      ["Checked the list view, now opening the form."], // no contract line yet
+    );
+    appendFileSync(
+      t,
+      toolUse("mcp__plugin_aiharness_playwright__browser_navigate", {
+        url: "http://localhost:5399/",
+      }),
+    );
+    return t;
+  };
+
+  const firePhantom = () =>
+    spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        ...stopPayload(layout, "aphant0m000000001"),
+        agent_transcript_path: join(
+          layout.subagents,
+          "agent-aphant0m000000001.jsonl",
+        ),
+      }),
+      env,
+      encoding: "utf8",
+    });
+
+  test("a phantom does not clobber a finished verdict with a mid-turn one", () => {
+    runStop({ mode: "feature-smoke", verdict: "APPROVED", drove: "mcp" });
+    expect(result().status).toBe("approved");
+
+    runningReviewer(); // newest on disk, so the guess lands here
+    expect(firePhantom().status).toBe(0);
+
+    // Without the guard this reads `unknown`: same file, rewritten from a turn that has
+    // not finished, and the last writer wins.
+    expect(result().status).toBe("approved");
+  });
+
+  test("a phantom beside a running reviewer writes no record at all", () => {
+    runningReviewer();
+    expect(firePhantom().status).toBe(0);
+    expect(existsSync(resultFile())).toBe(false);
+  });
+});
