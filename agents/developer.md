@@ -288,6 +288,8 @@ your turn. If it answers `No matching deferred tools found`, the tool does not e
 then the CORRECT answer, not a fallback you owe an excuse for. Ask once, take the answer,
 move on: do not retry, do not hunt for a workaround, do not report it as a blocker.
 
+When that load answers `No matching deferred tools found` — the normal case on this pipeline — use `node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs|def|sym` from your worktree for the same answers through the TypeScript program. See `.claude/rules/lsp-usage.md`.
+
 The first query after the server starts can answer `No symbols found in workspace ... has
 not finished indexing`. That is the server warming up, not an empty repo: repeat the same
 call once before concluding anything.

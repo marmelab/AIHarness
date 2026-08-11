@@ -105,6 +105,9 @@ const STDERR_ONLY = /2>>?\s*(?!&)\S+/g;
 // are not file writes, and the progress-log append is handled before this is consulted.
 const WRITES_A_FILE = />>?\s*(?!&)/;
 
+// The plugin's symbol lookup, wherever it is invoked from.
+const TS_SYMBOLS = /(?:^|[/\s"'])ts-symbols\.mjs\b/;
+
 /**
  * Blank out the CONTENT of quoted spans, keeping the quotes and the length.
  *
@@ -200,6 +203,20 @@ export function isFreeCommand(raw) {
   if (!command.trim()) return true;
   // On the RAW text: the progress log is recognised by its path, which masking would blank.
   if (PROGRESS_APPEND.test(command)) return true;
+
+  // Same reason for the plugin's symbol lookup: its path is normally quoted, because
+  // ${CLAUDE_PLUGIN_ROOT} expands late, and masking blanks what is inside the quotes.
+  // `node` is work by default and rightly so, but this one reads the TypeScript program
+  // and prints. It replaces a grep that costs the same, so charging it would leave the
+  // cheaper, less correct tool as the free one. Still work when it writes to a file: what
+  // happens to the output is not this script's business.
+  if (
+    TS_SYMBOLS.test(command) &&
+    !WRITES_A_FILE.test(
+      command.replace(DISCARDED_OUTPUT, "").replace(STDERR_ONLY, ""),
+    )
+  )
+    return true;
 
   // Everything past this point reads punctuation, so it reads the masked text with the
   // redirects that decide nothing already removed.

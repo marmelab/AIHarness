@@ -85,6 +85,33 @@ and editors.
 - **planner** — `workspaceSymbol` to locate probable `files_to_modify` faster than
   grep. Still light discovery — no deep reading.
 
+## When LSP is unavailable: `ts-symbols.mjs`
+
+Every harness agent is dispatched by the orchestrator, which is itself a subagent and is
+not given `run_in_background` to set, so they all run in the background — and a background
+subagent has the `LSP` tool pruned from its set. Four open runtime reports, no fix, and the
+one confirmed workaround (a foreground dispatch) is exactly what a nested subagent cannot
+ask for. So on this pipeline `ToolSearch({query: "select:LSP"})` answering `No matching
+deferred tools found` is the normal case, not an incident.
+
+Bash is reachable from every agent regardless. The same questions are answered by the
+plugin's script, through the project's own TypeScript program:
+
+```bash
+cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" sym  <name>
+cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" def  <file> <line> <col>
+cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs <file> <line> <col>
+```
+
+Positions are 1-based, exactly as `Read` shows them. It costs nothing against the Bash work
+budget.
+
+**Use it for the questions where being wrong is expensive**, not as a blanket `grep`
+replacement: a call costs about what the grep it replaces costs, so the reason is
+correctness. `refs` before changing a signature — text search misses re-exports and aliased
+imports, and answers for every same-named symbol at once. Keep `grep` for domain-word
+sweeps, SQL and non-TS files, and for "which files mention this string".
+
 ## When `grep`/`rg` IS the right tool
 
 LSP is for TS/JS symbols. Keep using `grep`/`rg` (in Bash) — and do not try LSP — for:

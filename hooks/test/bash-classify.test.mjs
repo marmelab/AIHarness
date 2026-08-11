@@ -152,3 +152,29 @@ describe("stripPrefixes", () => {
     expect(isFreeCommand(null)).toBe(true);
   });
 });
+
+describe("the plugin's symbol lookup is free", () => {
+  // It is the sanctioned replacement for a grep that costs the same, on a pipeline where
+  // the LSP tool is unreachable. Charging it against the work budget would make the
+  // cheaper, less correct tool the free one.
+  test("node ts-symbols.mjs is free, with or without a cd prefix", () => {
+    expect(
+      isFreeCommand(
+        'node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs src/a.tsx 28 17',
+      ),
+    ).toBe(true);
+    expect(
+      isFreeCommand("cd /tmp/wt && node /p/scripts/ts-symbols.mjs sym Foo"),
+    ).toBe(true);
+  });
+
+  test("any other node script is still work", () => {
+    expect(isFreeCommand("node scripts/build.mjs")).toBe(false);
+  });
+
+  test("redirecting its output into a file makes it work again", () => {
+    expect(
+      isFreeCommand("node /p/scripts/ts-symbols.mjs sym Foo > out.txt"),
+    ).toBe(false);
+  });
+});
