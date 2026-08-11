@@ -11,6 +11,15 @@ tools:
   - Grep
   - Glob
   - Bash
+  # Not for your own use: you never read code. You are the whole chain between the session
+  # and every agent that DOES need LSP, and on the surface where the harness actually runs
+  # those agents' `ToolSearch({query: "select:LSP"})` answers "No matching deferred tools
+  # found" whatever their own definitions declare. Whether a deferred tool has to be carried
+  # by the parent is NOT established — it makes no difference on the surface that can be
+  # scripted, and the surface that fails cannot be. Declared here because it costs two
+  # names and is the only lever left if the chain turns out to be what withholds it.
+  - ToolSearch
+  - LSP
 ---
 
 # ORCHESTRATOR

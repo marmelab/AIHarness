@@ -26,7 +26,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
-import { agentTranscriptPath, dispatchPrompt } from "./lib/agent-meta.mjs";
+import {
+  agentTranscriptPath,
+  dispatchPrompt,
+  isPhantomStop,
+} from "./lib/agent-meta.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
 import { browserEvidence } from "./lib/smoke-evidence.mjs";
 import { reviewerVerdict } from "./lib/verdict.mjs";
@@ -36,6 +40,14 @@ try {
   const raw = readFileSync(0, "utf8");
   ctx = createHookContext(raw, "record-smoke-evidence");
   const payload = JSON.parse(raw);
+
+  // A stop the runtime fires for its own book-keeping, every ~32 s while an agent runs.
+  // It names no agent, so identity falls to the newest-transcript guess, which lands on
+  // whichever reviewer is CURRENTLY running — and this file is rewritten whole each time.
+  // Over one feature review that is 27 overwrites from mid-turn snapshots, each with the
+  // browser evidence present and no contract line yet, so the last writer always leaves
+  // `unknown`. The real stop's record never survives.
+  if (isPhantomStop(payload)) process.exit(0);
 
   // Every SubagentStop hook fires on every stop (the matchers do not filter and
   // agent_type is empty), so the MODE line in the agent's own dispatch prompt is what

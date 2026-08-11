@@ -33,15 +33,49 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { getFirstTaskId, isQualityReviewer } from "./lib/teams.mjs";
-import { agentTranscriptPath, readAgentMeta } from "./lib/agent-meta.mjs";
+import {
+  agentTranscriptPath,
+  isPhantomStop,
+  readAgentMeta,
+} from "./lib/agent-meta.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag, reviewsDir } from "./lib/reviews.mjs";
-import { reviewerVerdict } from "./lib/verdict.mjs";
+import { reviewerVerdict, verdictSource } from "./lib/verdict.mjs";
+
+// One integer per session, next to the other sentinels: `<session_dir>/phantom-stops`.
+const bumpPhantomCount = (context) => {
+  try {
+    const file = join(context.sessionDir, "phantom-stops");
+    let seen = 0;
+    try {
+      seen = parseInt(readFileSync(file, "utf8"), 10) || 0;
+    } catch {
+      seen = 0;
+    }
+    mkdirSync(context.sessionDir, { recursive: true });
+    writeFileSync(file, `${seen + 1}\n`);
+  } catch {
+    // best-effort: a counter must never wedge a stop
+  }
+};
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "record-review-verdict");
+
+// The runtime fires a stop of its own every ~32 s while an agent runs. It names no agent,
+// so identity falls to the newest-transcript guess, which lands on whichever reviewer is
+// CURRENTLY running: the recovered role and task belong to that agent and its text is a
+// mid-turn snapshot with no contract line yet. One request logged 173 such lines, every
+// one of them `verdict=UNKNOWN`, drowning whatever the real stops said.
+if (isPhantomStop(input)) {
+  // Counted, not logged: one line every ~32 s would bury the stops that matter, and the
+  // total is the number that says whether the filter is carrying the load it is meant to.
+  bumpPhantomCount(ctx);
+  process.exit(0);
+}
 
 // The STOPPING AGENT'S OWN transcript, not the payload's transcript_path: in this
 // runtime that field names the MAIN session transcript, which holds every dispatch
@@ -118,6 +152,21 @@ const verdict = reviewerVerdict(input);
 // only: a developer or merger stop must never be able to write a review verdict.
 if (role && !task && reviewMode(input) === "feature-review") task = FEATURE_KEY;
 
+// A stop that resolved NEITHER a role nor a verdict used to be silent, because the
+// runtime's own stops made that case pure noise. They are filtered above now, so what
+// reaches here is a real agent the hook could say nothing about — the state a review
+// that never got its flag would sit in, and the one thing the log has to be able to show.
+if (!role && !verdict) {
+  const meta = readAgentMeta(input);
+  const src = verdictSource(input);
+  ctx.log(
+    `no role, no verdict | DIAG identity=${meta ? meta.source : "unresolved"} ` +
+      `agent_id=${input.agent_id ? "present" : "absent"} ` +
+      `agent_transcript=${transcript ? "resolved" : "unresolved"} ` +
+      `read_from=${src.source} tail=${JSON.stringify(src.tail)}`,
+  );
+}
+
 // Only log for reviewer stops. This hook fires on EVERY subagent stop (the
 // SubagentStop matcher doesn't filter and agent_type is empty in this runtime),
 // so logging non-reviewer stops (developer/merger/planner/…) is pure noise.
@@ -128,7 +177,7 @@ if (role || verdict) {
     `role=${role || "UNKNOWN"} task=${task || "UNKNOWN"} verdict=${verdict || "UNKNOWN"}` +
       (role && task && verdict
         ? ""
-        : ` | DIAG identity=${meta ? meta.source : "unresolved"} agent_transcript=${transcript ? "resolved" : "unresolved"} last_msg=${input.last_assistant_message ? "present" : "absent"}`),
+        : ` | DIAG identity=${meta ? meta.source : "unresolved"} agent_id=${input.agent_id ? "present" : "absent"} agent_transcript=${transcript ? "resolved" : "unresolved"} read_from=${verdictSource(input).source} tail=${JSON.stringify(verdictSource(input).tail)}`),
   );
 }
 

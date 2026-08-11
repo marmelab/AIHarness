@@ -13,7 +13,7 @@
 //   - anything unparseable stays unparseable. "" is not "approved by default".
 
 import { describe, expect, test } from "vitest";
-import { parseVerdict } from "../lib/verdict.mjs";
+import { parseVerdict, verdictSource } from "../lib/verdict.mjs";
 
 describe("parseVerdict: the clean markers", () => {
   test.each([
@@ -108,5 +108,30 @@ describe("parseVerdict: no verdict means no verdict", () => {
   test("null and undefined are unparseable, never a crash", () => {
     expect(parseVerdict(undefined)).toBe("");
     expect(parseVerdict(null)).toBe("");
+  });
+});
+
+describe("verdictSource: which text the verdict was read from", () => {
+  // A whole run logged an unrecognised verdict on every stop while its reviewers ended on a
+  // clean APPROVED, and the diagnostic could not say whether the hook had read the payload's
+  // message or fallen back to a transcript. Naming the source, and showing how the text
+  // ends, is what tells "the reviewer said nothing yet" from "we read the wrong agent".
+  test("names the payload and shows the tail when the runtime supplies the message", () => {
+    const r = verdictSource({
+      last_assistant_message: "Findings:\n- one\n\nAPPROVED",
+    });
+    expect(r.source).toBe("payload");
+    expect(r.tail.endsWith("APPROVED")).toBe(true);
+  });
+
+  test("reports none, not an empty payload read, when there is nothing to parse", () => {
+    const r = verdictSource({});
+    expect(r.source).toBe("none");
+    expect(r.tail).toBe("");
+  });
+
+  test("collapses newlines so the tail stays one log line", () => {
+    const r = verdictSource({ last_assistant_message: "a\n\nb\nAPPROVED" });
+    expect(r.tail).not.toContain("\n");
   });
 });
