@@ -81,6 +81,10 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-typescript-shortcuts.mjs"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-view-column-order.mjs"
           }
         ]
       }
