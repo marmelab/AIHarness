@@ -175,6 +175,17 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/remind-harness-persona.mjs",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
