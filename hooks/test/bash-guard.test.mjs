@@ -598,8 +598,49 @@ describe("bash-guard hook", () => {
       );
     });
 
-    test("a plain read command with no redirect → allowed", () => {
-      expect(isBlocked(runHook("developer", "cat src/x.ts"))).toBe(false);
+    test("a read with no redirect is not a WRITE violation", () => {
+      // It is refused, but by the file-read rule below and for a different reason: the
+      // write rule must not be what fires, or its message would send the agent looking
+      // for a redirect it never wrote.
+      const out = runHook("developer", "cat src/x.ts").stdout;
+      expect(out).toContain("Read tool");
+      expect(out).not.toContain("redirect it into");
+    });
+  });
+
+  // A Bash call whose whole job is to read a file pays the per-call toll for something the
+  // file tools answer in milliseconds. One request spent 44 of its 489 Bash calls this way.
+  describe("reading a file through Bash is redirected to the Read tool", () => {
+    test.each([
+      ["cat src/x.ts", "src/x.ts"],
+      ["sed -n '10,40p' src/x.ts", "src/x.ts"],
+      ["sed -n 10,40p src/x.ts", "src/x.ts"],
+      ["head -40 src/x.ts", "src/x.ts"],
+      ["tail -n 20 src/x.ts", "src/x.ts"],
+      ["cd /tmp/wt && cat src/x.ts", "src/x.ts"],
+    ])("%s → blocked, naming the file", (command, file) => {
+      const r = runHook("developer", command);
+      expect(isBlocked(r)).toBe(true);
+      expect(r.stdout).toContain(file);
+      expect(r.stdout).toContain("offset");
+    });
+
+    test.each([
+      // Every one of these does something no file tool can, so none is this rule's business.
+      "cat src/x.ts | grep foo",
+      "cat > src/x.ts",
+      "sed -i 's/a/b/' src/x.ts",
+      "sed -n '1,5p' src/x.ts > /tmp/out",
+      "cat src/*.ts",
+      "grep -n foo src/x.ts",
+    ])("%s → untouched", (command) => {
+      expect(runHook("developer", command).stdout).not.toContain("Read tool");
+    });
+
+    test("the reviewer is held to it too, since it makes most of the calls", () => {
+      expect(
+        isBlocked(runHook("quality-reviewer", "sed -n '1,80p' src/x.ts")),
+      ).toBe(true);
     });
   });
 

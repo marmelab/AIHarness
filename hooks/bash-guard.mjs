@@ -349,6 +349,51 @@ const checkFileWrite = (cmd, ctx, isReviewer) => {
   });
 };
 
+// A Bash call whose whole job is to READ a file. `Read` does the same thing for a fraction
+// of the cost: a Bash call carries a per-call toll that dwarfs the command itself, where
+// the file tools answer in milliseconds. Measured over one request, agents spent 44 of
+// their 489 Bash calls on `sed -n '10,40p' file` and `cat file`, which is the toll paid ~44
+// times for nothing. `Read` also takes `offset` / `limit`, so the range form has an exact
+// equivalent — this asks for the same information through the cheaper door.
+//
+// Only the pure form is refused. A pipeline, a redirect, an in-place edit or a heredoc all
+// do something a file tool cannot, and are none of this rule's business.
+const READS_A_FILE = [
+  // sed -n '10,40p' file   /   sed -n 10,40p file
+  /^sed\s+-n\s+'?\d+\s*,\s*\d+\s*p'?\s+(\S+)$/,
+  // cat file
+  /^cat\s+(\S+)$/,
+  // head -40 file  /  tail -n 40 file
+  /^(?:head|tail)\s+(?:-n\s*\d+|-\d+)?\s*(\S+)$/,
+];
+
+const checkFileRead = (cmd, ctx) => {
+  // One command, no shell machinery: anything composed is doing more than reading.
+  const bare = cmd
+    .trim()
+    .replace(/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*/, "")
+    .trim();
+  if (/[|;>&`]|\$\(/.test(bare)) return;
+
+  for (const re of READS_A_FILE) {
+    const m = bare.match(re);
+    if (!m) continue;
+    const target = unquote(m[1] || "");
+    // A flag, a glob or a directory is not the single-file read this rule is about.
+    if (!target || target.startsWith("-") || /[*?]/.test(target)) return;
+    ctx.block({
+      reason:
+        `Reading a file through Bash: \`${bare.slice(0, 80)}\`.\n` +
+        `Use the Read tool on \`${target}\` instead — it takes \`offset\` and \`limit\` for a ` +
+        `line range, and answers in milliseconds where a Bash call pays a per-call toll ` +
+        `that is orders of magnitude larger.\n` +
+        `Bash stays right for anything a file tool cannot do: pipelines, in-place edits, ` +
+        `redirects, or reading a file outside the repo.`,
+    });
+    return;
+  }
+};
+
 // The rules in the order they are applied. Each one either refuses (terminal) or
 // returns; the last two are gated on the caller being a code-writing subagent.
 export function check(input, ctx) {
@@ -369,6 +414,7 @@ export function check(input, ctx) {
   if (!isDeveloper(who) && !isReviewer) return;
 
   checkValidationCommand(cmd, ctx);
+  checkFileRead(cmd, ctx);
   checkFileWrite(cmd, ctx, isReviewer);
 }
 
