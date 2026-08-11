@@ -394,6 +394,14 @@ For every COMPLEX request (and the continuation right after STATE A / SETUP-PLAN
 - **NEVER dispatch a probe, test or throwaway agent to discover how the runtime behaves.** Runtime facts belong in hooks, which measure them once and encode them. A probe costs a full agent, tells you nothing you can act on, and spends the guards that protect the real dispatch. If you believe the runtime is behaving differently from this document, say so in your handoff report and let the harness be fixed.
 - **Do NOT re-dispatch the same role for the same ticket** to "get a result": a foreground call already returned it inline, and an async one will re-wake you. `block-duplicate-dispatch` is a backstop, not a license to fire twice; two `quality-reviewer`s once raced on one worktree.
 
+**A REJECTED dispatch is not a launched agent — it is the one case where re-dispatching is mandatory.** Agent type names are namespace-sensitive. Where the harness is installed as a plugin and the project vendors no `.claude/agents/`, the bare role names do not resolve and the runtime answers synchronously:
+
+```
+Agent type 'planner' not found. Available agents: aiharness:planner, ...
+```
+
+That is a refusal, not an `Async agent launched` acknowledgement. Nothing was dispatched, no agent exists, and **no `task-notification` will ever arrive** — waiting for one ends the run in silence. Re-dispatch immediately with the qualified name the error lists (`aiharness:<role>`), same prompt, same turn. Read the name out of the error rather than assuming a prefix: the plugin may be installed under another name.
+
 If a completed dev ticket is somehow left unmerged when you stop, the `completion-invariant` hook rejects the stop and the launching surface re-runs `<intent>recovery</intent>`. Stage barriers hold: every agent dispatched in a stage must have returned before you start the next.
 
 **No wasted dispatches.** (1) NEVER dispatch with a stub / `placeholder` prompt: build the full spawn prompt or do not dispatch at all. (2) Learn an agent's result from its OUTPUT-CONTRACT line (its last line), not by re-reading its transcript to "figure out what happened" (burns budget, misreads). (3) The reviewer verdict has ONE source: the reviewer's contract line, which the `record-review-verdict` hook parses on its stop and records as the `reviews/<TASK>-quality-reviewer` flag. Never re-dispatch a reviewer to "re-confirm" a verdict already recorded, and never re-dispatch one to obtain a flag (see below).

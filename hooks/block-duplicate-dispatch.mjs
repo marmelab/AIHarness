@@ -42,9 +42,55 @@ const PLANNER_INFLIGHT_MS = 10 * 60 * 1000;
 
 const sha = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
 
+// A marker says a dispatch was ATTEMPTED. This hook runs before the call, so it cannot
+// see the runtime refuse one, and a refused dispatch leaves a marker behind for an agent
+// that never existed. The observed case: `planner` is not a registered type where the
+// harness is installed as a plugin and the project vendors no `.claude/agents/`, so the
+// runtime answers "Agent type 'planner' not found. Available agents: aiharness:planner,
+// ..."; the corrected re-dispatch 15s later was then refused as a duplicate of the one
+// that never ran, and the orchestrator settled in to wait for a notification that could
+// not come. The run stopped there with no agent ever launched.
+//
+// A name correction is distinguishable from the duplicate this guard exists to catch: an
+// async-ack echo repeats the dispatch verbatim, so a CHANGED `subagent_type` for the same
+// bare role is evidence the previous attempt was never accepted. Recording the raw
+// spelling is what makes that visible.
+const RAW_LINE = /^raw=(.*)$/m;
+
+/** The raw `subagent_type` a marker recorded, or "" if absent/unreadable. */
+const recordedRawType = (marker) => {
+  try {
+    return (readFileSync(marker, "utf8").match(RAW_LINE) || [])[1] || "";
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * The previous spelling when this dispatch corrects a rejected one, else "".
+ * Empty when either side is unknown: a marker written before this field existed must not
+ * read as a correction, or the guard would wave through every second dispatch.
+ */
+const correctsRejectedName = (marker, raw) => {
+  const prev = recordedRawType(marker);
+  return prev && raw && prev !== raw ? prev : "";
+};
+
+const writeMarker = (marker, body, raw) => {
+  try {
+    writeFileSync(marker, `${body}\nraw=${raw}\n`);
+  } catch {
+    // best effort: failing to record a marker only costs this guard its memory
+  }
+};
+
 export function check(input, ctx) {
   const d = parseDispatch(input);
   const prompt = String(input.tool_input?.prompt ?? "");
+  // parseDispatch normalises through bareRole, which is right for role identity and wrong
+  // for this one question: `planner` and `aiharness:planner` are the same ROLE but not the
+  // same dispatch, and only the raw string tells them apart.
+  const rawType = String(input.tool_input?.subagent_type ?? "");
 
   // Without a caller agent_id we can't scope a marker safely: allow rather than
   // risk over-blocking the only dispatch.
@@ -76,13 +122,13 @@ export function check(input, ctx) {
   if (childRole && isExplicitlyBackgrounded(input)) return;
 
   if (d.subagentType === "planner")
-    return checkPlanner(ctx, d, { prompt, caller, markerDir });
+    return checkPlanner(ctx, d, { prompt, caller, markerDir, rawType });
   if (DEBOUNCE_ROLES.has(d.subagentType))
-    return checkDebounce(ctx, d, { prompt, caller, markerDir });
+    return checkDebounce(ctx, d, { prompt, caller, markerDir, rawType });
 }
 
 // ---- Concern 1: at most one planner per request -------------------------------
-function checkPlanner(ctx, d, { prompt, caller, markerDir }) {
+function checkPlanner(ctx, d, { prompt, caller, markerDir, rawType }) {
   // The STATE A planner template writes `TICKETS_DIR=<path>` (equals);
   // parseDispatch only captures the `TICKETS_DIR:` (colon) form, so accept both.
   // Kept for the log line and for the plan lookup, NOT for the key.
@@ -113,6 +159,18 @@ function checkPlanner(ctx, d, { prompt, caller, markerDir }) {
       if (age > PLANNER_STALE_MS || age < 0) unlinkSync(marker);
     } catch {
       // ignore — fall through to the existence check
+    }
+  }
+
+  // Ahead of every block below: a rejected dispatch cannot have produced a plan, so this
+  // is never a re-plan and never overwrites anything.
+  if (existsSync(marker)) {
+    const prev = correctsRejectedName(marker, rawType);
+    if (prev) {
+      writeMarker(marker, `${caller} ${ticketsDir}`, rawType);
+      return ctx.allow(
+        `planner name-correction allowed: previous dispatch spelled '${prev}', this one '${rawType}' — the runtime rejected the first, so no planner was ever launched (caller=${caller})`,
+      );
     }
   }
   // A marker records that a planner was DISPATCHED, which is not the same as "a plan
@@ -161,11 +219,7 @@ function checkPlanner(ctx, d, { prompt, caller, markerDir }) {
     }
     // Genuinely dead (or a clock that went backwards): refresh the marker so the retry is
     // itself recorded, then let it through.
-    try {
-      writeFileSync(marker, `${caller} ${ticketsDir}\n`);
-    } catch {
-      /* best effort */
-    }
+    writeMarker(marker, `${caller} ${ticketsDir}`, rawType);
     return ctx.allow(
       `planner retry allowed: marker ${Math.round(age / 1000)}s old and no plan was produced (ticketsDir=${ticketsDir || "(session default)"})`,
     );
@@ -183,18 +237,14 @@ function checkPlanner(ctx, d, { prompt, caller, markerDir }) {
       log: `BLOCK 2nd planner caller=${caller} ticketsDir=${ticketsDir || "(default)"} marker=${marker}`,
     });
   }
-  try {
-    writeFileSync(marker, `${caller} ${ticketsDir}\n`);
-  } catch {
-    // if we can't record the marker, still allow this (first) planner through
-  }
+  writeMarker(marker, `${caller} ${ticketsDir}`, rawType);
   ctx.log(
     `ALLOW ${isReplan ? "REPLAN" : "1st"} planner caller=${caller} ticketsDir=${ticketsDir || "(default)"} marker=${marker}`,
   );
 }
 
 // ---- Concern 2: debounce duplicate developer/reviewer/merger dispatches -------
-function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
+function checkDebounce(ctx, d, { prompt, caller, markerDir, rawType }) {
   // Key on the ticket identity AND the prompt content. The async-ack duplicate
   // re-issues the IDENTICAL dispatch prompt, so an identical (caller, role,
   // ticket, prompt) inside the window collides and is blocked. A genuine retry
@@ -223,6 +273,16 @@ function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
   const isRetry = /(^|\s)RETRY(\s|:|$)/m.test(prompt);
 
   if (existsSync(marker)) {
+    // Same reasoning as the planner's: the marker of a dispatch the runtime refused would
+    // otherwise swallow the corrected one. Cheaper here (the window is 90s, not the run),
+    // but the guard belongs on both paths or the next role to hit it pays the same way.
+    const prev = correctsRejectedName(marker, rawType);
+    if (prev) {
+      writeMarker(marker, `${caller} ${d.subagentType} ${idPart}`, rawType);
+      return ctx.allow(
+        `${d.subagentType} name-correction allowed: previous dispatch spelled '${prev}', this one '${rawType}' — the runtime rejected the first, so nothing was launched (key=${idPart})`,
+      );
+    }
     let ageMs = Infinity;
     try {
       ageMs = Date.now() - statSync(marker).mtimeMs;
@@ -241,11 +301,7 @@ function checkDebounce(ctx, d, { prompt, caller, markerDir }) {
       });
     }
   }
-  try {
-    writeFileSync(marker, `${caller} ${d.subagentType} ${idPart}\n`);
-  } catch {
-    // can't record → allow this dispatch through
-  }
+  writeMarker(marker, `${caller} ${d.subagentType} ${idPart}`, rawType);
   ctx.log(
     `ALLOW ${isRetry ? "RETRY " : ""}${d.subagentType} dispatch key=${idPart} caller=${caller}`,
   );
