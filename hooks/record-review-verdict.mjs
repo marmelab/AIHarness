@@ -9,9 +9,10 @@
 // runtime where no hook can read the verdict at all.
 //
 // The cost of being the only writer: at SubagentStop the reviewer's final contract
-// line is sometimes not yet flushed to the transcript (and last_assistant_message is
-// absent in this runtime), so recovery here returns UNKNOWN and the flag is left
-// untouched on an APPROVED review. That reads downstream as "not approved", so the
+// line is sometimes not yet flushed to the transcript, so recovery here returns
+// UNKNOWN and the flag is left untouched on an APPROVED review. Measured, the payload
+// does carry `last_assistant_message` and it holds the contract line, so that is the
+// primary source and the transcript is the fallback. That reads downstream as "not approved", so the
 // log line below has to say which of verdict, ticket or identity was missing:
 // orchestrator.md turns that line into the WRITE_VERDICT_FLAG re-dispatch.
 // SubagentStop cannot block, it only records.
@@ -97,45 +98,57 @@ for (const n of ids) {
   }
 }
 
-// Most reliable source at SubagentStop: the sibling <agent>.meta.json. It is
-// written at spawn (so it exists even when the big transcript JSONL hasn't been
-// flushed yet — a real race here) and carries agentType + the dispatch
-// description. In this runtime the payload's `agent_type` is empty and
-// `transcript_path` can point at a not-yet-written file, so prefer the meta.
-if (!role || !task) {
+// The ROLE is only ever taken from IDENTITY (payload agent_type, or the spawn meta),
+// never recovered by scanning a transcript. Every SubagentStop hook now runs on every
+// stop, so the orchestrator's own stop reaches this hook too — and its transcript holds
+// the reviewer dispatch prompts IT wrote, `ROLE: quality-reviewer` and `TASK_ID:`
+// included. Scanning for those made a summary that merely mentions APPROVED able to
+// write the flag that gates the merge, which is the one thing this hook must never do
+// on anything but a reviewer's own words.
+const metaType = (() => {
+  const meta = readAgentMeta(input);
+  return meta ? meta.agentType : "";
+})();
+const identity = [ctx.agentName, ctx.agentType, metaType].find(Boolean) || "";
+if (!identity) {
+  const src = verdictSource(input);
+  ctx.log(
+    `identity unresolved, nothing recorded | DIAG agent_id=${input.agent_id ? "present" : "absent"} ` +
+      `agent_transcript=${transcript ? "resolved" : "unresolved"} ` +
+      `read_from=${src.source} tail=${JSON.stringify(src.tail)}`,
+  );
+  process.exit(0);
+}
+if (!isQualityReviewer(identity)) process.exit(0);
+role = "quality-reviewer";
+
+// The ticket, from the spawn meta's dispatch description ("Review TASK-001"). Written at
+// spawn, so it is there even when the transcript JSONL has not been flushed yet.
+if (!task) {
   const meta = readAgentMeta(input);
   if (meta) {
-    if (!role && isQualityReviewer(meta.agentType)) role = "quality-reviewer";
-    if (!task) {
-      const m = meta.description.match(/TASK-\d+/);
-      if (m) task = m[0];
-    }
+    const m = meta.description.match(/TASK-\d+/);
+    if (m) task = m[0];
   }
 }
 
-// No suffixed agent name in this harness → recover task/role from the dispatch
-// prompt in the transcript. Done unconditionally: lastAssistantText() returns
-// early on last_assistant_message, bypassing its own recovery (→ task=UNKNOWN).
-if (!role || !task) {
-  if (transcript && existsSync(transcript)) {
-    let body = "";
-    try {
-      body = readFileSync(transcript, "utf8");
-    } catch {
-      body = "";
-    }
-    for (const line of body.split("\n")) {
-      if (!role) {
-        const m = line.match(/(?:^|\\n|")ROLE:\s*(quality-reviewer)/);
-        if (m) role = m[1];
-      }
-      if (!task) {
-        const m =
-          line.match(/TASK_ID[:=\s]+(TASK-\d+)/) ||
-          line.match(/TICKET_FILE[=:\s]+\S*(TASK-\d+)/);
-        if (m) task = m[1];
-      }
-      if (role && task) break;
+// Still no ticket: the reviewer's own dispatch prompt names it. Safe to scan now that
+// the role came from identity — this reads the ticket out of a transcript already known
+// to be a reviewer's.
+if (!task && transcript && existsSync(transcript)) {
+  let body = "";
+  try {
+    body = readFileSync(transcript, "utf8");
+  } catch {
+    body = "";
+  }
+  for (const line of body.split("\n")) {
+    const m =
+      line.match(/TASK_ID[:=\s]+(TASK-\d+)/) ||
+      line.match(/TICKET_FILE[=:\s]+\S*(TASK-\d+)/);
+    if (m) {
+      task = m[1];
+      break;
     }
   }
 }
@@ -148,40 +161,22 @@ const verdict = reviewerVerdict(input);
 
 // The end-of-feature review has NO ticket, so every TASK-id recovery above comes back
 // empty and the flag could not be keyed at all. A reviewer whose dispatch carried
-// `MODE: feature-review` is keyed on the shared FEATURE sentinel instead. Reviewer role
-// only: a developer or merger stop must never be able to write a review verdict.
-if (role && !task && reviewMode(input) === "feature-review") task = FEATURE_KEY;
+// `MODE: feature-review` is keyed on the shared FEATURE sentinel instead.
+if (!task && reviewMode(input) === "feature-review") task = FEATURE_KEY;
 
-// A stop that resolved NEITHER a role nor a verdict used to be silent, because the
-// runtime's own stops made that case pure noise. They are filtered above now, so what
-// reaches here is a real agent the hook could say nothing about — the state a review
-// that never got its flag would sit in, and the one thing the log has to be able to show.
-if (!role && !verdict) {
-  const meta = readAgentMeta(input);
-  const src = verdictSource(input);
-  ctx.log(
-    `no role, no verdict | DIAG identity=${meta ? meta.source : "unresolved"} ` +
-      `agent_id=${input.agent_id ? "present" : "absent"} ` +
-      `agent_transcript=${transcript ? "resolved" : "unresolved"} ` +
-      `read_from=${src.source} tail=${JSON.stringify(src.tail)}`,
-  );
-}
-
-// Only log for reviewer stops. This hook fires on EVERY subagent stop (the
-// SubagentStop matcher doesn't filter and agent_type is empty in this runtime),
-// so logging non-reviewer stops (developer/merger/planner/…) is pure noise.
-// `role` found OR a verdict in the final message ⇒ this was a reviewer.
-if (role || verdict) {
+// Every stop that got this far IS a reviewer's, so every one of them is logged: what the
+// verdict was, or which of ticket / verdict could not be recovered.
+{
   const meta = readAgentMeta(input);
   ctx.log(
-    `role=${role || "UNKNOWN"} task=${task || "UNKNOWN"} verdict=${verdict || "UNKNOWN"}` +
-      (role && task && verdict
+    `role=${role} task=${task || "UNKNOWN"} verdict=${verdict || "UNKNOWN"}` +
+      (task && verdict
         ? ""
         : ` | DIAG identity=${meta ? meta.source : "unresolved"} agent_id=${input.agent_id ? "present" : "absent"} agent_transcript=${transcript ? "resolved" : "unresolved"} read_from=${verdictSource(input).source} tail=${JSON.stringify(verdictSource(input).tail)}`),
   );
 }
 
-if (!role || !task) process.exit(0); // can't key the flag — leave state untouched
+if (!task) process.exit(0); // can't key the flag — leave state untouched
 
 const flag = reviewFlag(ctx, task, role);
 if (verdict === "APPROVED") {

@@ -249,3 +249,92 @@ describe("record-review-verdict on a real runtime stop", () => {
     expect(existsSync(flag("TASK-030-quality-reviewer"))).toBe(false);
   });
 });
+
+// The defect that killed every plugin-only run: the reviewer's agent_type arrives
+// NAMESPACED, no bare `quality-reviewer` matcher could ever select it, and this hook was
+// therefore never spawned on a real reviewer stop. Every merge was then refused with
+// `missing=quality-reviewer`. The matcher is `.*` now, so the hook runs and has to
+// recognise the namespaced identity on its own.
+describe("record-review-verdict on a plugin-namespaced stop", () => {
+  test("an APPROVED aiharness:quality-reviewer writes the per-ticket flag", () => {
+    runtimeStop(
+      "a00000000000000040",
+      {
+        agentType: "aiharness:quality-reviewer",
+        description: "Review TASK-040",
+      },
+      "ROLE: quality-reviewer\nTASK_ID: TASK-040\n",
+      "APPROVED",
+    );
+    expect(existsSync(flag("TASK-040-quality-reviewer"))).toBe(true);
+  });
+
+  test("the payload's own namespaced agent_type is enough, with no meta at all", () => {
+    run({
+      agent_type: "aiharness:quality-reviewer-TASK-041",
+      last_assistant_message: "APPROVED",
+    });
+    expect(existsSync(flag("TASK-041-quality-reviewer"))).toBe(true);
+  });
+
+  test("a REJECTED aiharness:quality-reviewer clears the flag", () => {
+    mkdirSync(reviewsDir, { recursive: true });
+    writeFileSync(flag("TASK-042-quality-reviewer"), "");
+    runtimeStop(
+      "a00000000000000042",
+      {
+        agentType: "aiharness:quality-reviewer",
+        description: "Review TASK-042",
+      },
+      "ROLE: quality-reviewer\nTASK_ID: TASK-042\n",
+      "REJECTED:\n- the filter is missing",
+    );
+    expect(existsSync(flag("TASK-042-quality-reviewer"))).toBe(false);
+  });
+});
+
+// Running on every stop is what the `.*` matcher buys, and it is also what makes this
+// hook reachable by agents that are not reviewers. The orchestrator is the dangerous one:
+// its own transcript holds the reviewer dispatch prompts IT wrote, `ROLE: quality-reviewer`
+// and `TASK_ID:` included, so recovering the role by scanning a transcript let a summary
+// that merely mentions APPROVED write the flag that gates the merge.
+describe("only the reviewer's own words can move the flag", () => {
+  test("an orchestrator quoting its own review dispatch cannot approve", () => {
+    runtimeStop(
+      "a00000000000000050",
+      {
+        agentType: "aiharness:orchestrator",
+        description: "Dispatch harness orchestrator",
+      },
+      "ROLE: quality-reviewer\nTASK_ID: TASK-050\nMODE: feature-review\n",
+      "APPROVED",
+    );
+    expect(existsSync(flag("TASK-050-quality-reviewer"))).toBe(false);
+    expect(existsSync(flag("FEATURE-quality-reviewer"))).toBe(false);
+  });
+
+  test("an orchestrator cannot clear a reviewer's existing approval", () => {
+    mkdirSync(reviewsDir, { recursive: true });
+    writeFileSync(flag("TASK-051-quality-reviewer"), "");
+    runtimeStop(
+      "a00000000000000051",
+      {
+        agentType: "aiharness:orchestrator",
+        description: "Re-dispatch orchestrator",
+      },
+      "ROLE: quality-reviewer\nTASK_ID: TASK-051\n",
+      "REJECTED: the reviewer asked for changes",
+    );
+    expect(existsSync(flag("TASK-051-quality-reviewer"))).toBe(true);
+  });
+
+  test("a namespaced developer stop cannot write a review verdict", () => {
+    runtimeStop(
+      "a00000000000000052",
+      { agentType: "aiharness:developer", description: "Implement TASK-052" },
+      "ROLE: developer\nTASK_ID: TASK-052\n",
+      "APPROVED",
+    );
+    expect(existsSync(flag("TASK-052-quality-reviewer"))).toBe(false);
+  });
+});
