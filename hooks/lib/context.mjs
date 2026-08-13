@@ -4,7 +4,14 @@
 // accept/block/fail add the `ACCEPT|BLOCK|FAIL` verb on top — so call sites pass
 // only the detail and never repeat the name.
 
-import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { decisionBlock } from "./io.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
@@ -215,6 +222,44 @@ export function createHookContext(input, name = "hook") {
      */
     allow(detail) {
       verdict("ACCEPT", detail);
+    },
+
+    /**
+     * Record an allow for a decision this hook will reach on EVERY stop, and END THE
+     * PROCESS. Logs the first occurrence of `key` in the session, then counts the rest in
+     * `<sessionDir>/skips/<key>` instead of repeating the line.
+     *
+     * Every SubagentStop hook runs on every stop (the matcher is `.*`, because a role token
+     * cannot match a plugin's namespaced agent_type), so "not my role" is reached tens of
+     * times per session by each of them, and repeating the line buries the ones that matter.
+     *
+     * The observability rule still holds (rules/hook-authoring.md: absence of a line must
+     * mean absence of a run). The FIRST line per key still proves the hook ran and says what
+     * it saw, and the counter keeps the total recoverable for an audit. Same shape as the
+     * `phantom-stops` and `identity-unresolvable` sentinels.
+     * @param {string} key  Stable, filename-safe decision key, e.g. `not-orchestrator:developer`.
+     * @param {string} [detail]
+     * @returns {never}
+     */
+    acceptOnce(key, detail) {
+      const safe = String(key).replace(/[^\w.-]+/g, "_");
+      let seen = 0;
+      let file = "";
+      try {
+        const dir = join(sessionDirOf(), "skips");
+        mkdirSync(dir, { recursive: true });
+        file = join(dir, safe);
+        try {
+          seen = parseInt(readFileSync(file, "utf8"), 10) || 0;
+        } catch {
+          seen = 0;
+        }
+        writeFileSync(file, `${seen + 1}\n`);
+      } catch {
+        seen = 0; // no session state to count in: fall back to logging every time
+      }
+      if (seen === 0) verdict("ACCEPT", detail);
+      process.exit(0);
     },
 
     /**

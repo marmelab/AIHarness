@@ -269,4 +269,31 @@ describe("e2e-on-feature-review", () => {
     expect(r.status).toBe(0);
     expect(existsSync(join(APP_DIR, "ran-with-src"))).toBe(false);
   });
+
+  // The runtime's own book-keeping stop, every ~32 s while an agent runs. It names no agent,
+  // so identity fell to the newest-transcript guess — the reviewer still WORKING — and this
+  // hook read that mid-turn snapshot as a verdict, one `verdict=UNPARSEABLE` line every ~32 s.
+  // Those lines were once recorded as "verdict parsing fails on every reviewer dispatch". It
+  // never did: the reviewer's own stop parsed APPROVED and launched the suite.
+  test("a phantom stop is not read as a reviewer's verdict", () => {
+    writeSmoke(SMOKE.record);
+    approve();
+    // Names an agent transcript that was never written: the phantom discriminator.
+    const r = spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        session_id: SESSION_ID,
+        hook_event_name: "SubagentStop",
+        transcript_path: join(TMP, "main.jsonl"),
+        agent_id: "aphantom000000001",
+        agent_type: "",
+        agent_transcript_path: join(TMP, "subagents", "agent-aphantom000000001.jsonl"),
+      }),
+      env,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(existsSync(join(APP_DIR, "ran-with-src"))).toBe(false);
+    expect(result()).toBe(null);
+    expect(r.stdout + r.stderr).not.toContain("UNPARSEABLE");
+  });
 });

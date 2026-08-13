@@ -95,11 +95,11 @@ list, and a matcher containing a regex metacharacter is an UNANCHORED `RegExp`.
 
 **A bare role token therefore cannot match a plugin install's `agent_type`**, which arrives
 NAMESPACED (`aiharness:quality-reviewer`). That one line cost three audits and every
-plugin-only run the harness has ever made: with matchers reading `quality-reviewer`,
+plugin-only run the harness had made: with matchers reading `quality-reviewer`,
 `developer|…`, `merger`, `orchestrator`, not one SubagentStop hook was spawned on any real
 stop. No review verdict was recorded, so `block-merger-without-review` refused every merge;
-no validation ran, so typecheck, lint and the unit suite executed zero times in a 39-minute
-session; `cleanup-worktree` never swept; `completion-invariant` never saw the orchestrator.
+no validation ran, so typecheck, lint and the unit suite never executed at all;
+`cleanup-worktree` never swept; `completion-invariant` never saw the orchestrator.
 
 Nothing failed loudly, and the reason it stayed hidden for so long is worth naming: the
 runtime ALSO fires a book-keeping stop every ~32 s that carries no `agent_type` at all.

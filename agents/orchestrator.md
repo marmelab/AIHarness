@@ -511,7 +511,17 @@ Store the verdict in `reviews.quality` and resolve each:
 
 **Re-develop** = one foreground developer dispatch reusing the **exact Stage 1 prompt including the `TASK_ID`/`WORKTREE_PATH`/`BRANCH_NAME` identity lines verbatim** (the retry is a fresh PreToolUse/Agent event; `setup-worktree` re-reads them and SKIPs harmlessly), PLUS a trailing line: `RETRY_FEEDBACK=<the reviewer's REJECTED verdict body, verbatim>`.
 
-After re-developing, **re-review** it. **Loop Stage 2 until every still-live ticket is `MERGE` or `FAILED`** — bounded because `retries` can only climb to `MAX_RETRIES`.
+After re-developing, **re-review** it, and **narrow that pass to the fix**: reuse the Stage 2 prompt plus
+
+```
+FIX_ROUND: <retries>
+FIX_RANGE: <the developer's pre-retry HEAD>..<its new DONE commit>
+FINDINGS_RAISED: <the previous REJECTED verdict body, verbatim>
+```
+
+The reviewer then judges whether each raised finding is resolved and whether `FIX_RANGE` itself is sound, instead of re-reading the whole ticket. Without these lines a re-review is a second full pass, costing as much as the original to re-report what it already said. Same narrowing the end-of-feature pass already uses — see `quality-reviewer.md` "A `FIX_ROUND:` block narrows the pass to the fix".
+
+**Loop Stage 2 until every still-live ticket is `MERGE` or `FAILED`** — bounded because `retries` can only climb to `MAX_RETRIES`.
 
 #### Stage 3 — MERGE (sequential — do NOT batch)
 

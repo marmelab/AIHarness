@@ -19,6 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
+import { appendProgress } from "./lib/progress-log.mjs";
 
 export function check(input, ctx) {
   const d = parseDispatch(input);
@@ -47,6 +48,12 @@ export function check(input, ctx) {
     );
     ctx.log(
       `RECORD promote=${promote} taskId=${d.taskId || "-"} mode=${d.mode || "-"} stage=${d.stage || "-"}`,
+    );
+    // Milestone for the technical run's live feed, appended by the hook that observes it
+    // rather than by the orchestrator remembering to echo it. Inert on a non-technical run.
+    appendProgress(
+      ctx.sessionDir,
+      `[merge:${d.taskId || d.mode || "session"}] dispatched (${promote ? "promote" : "stage A"})`,
     );
   } catch {
     // Best-effort: the Bash guard fails CLOSED when the marker is missing/unreadable,

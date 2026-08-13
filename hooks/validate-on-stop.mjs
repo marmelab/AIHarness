@@ -69,9 +69,13 @@ if (!identity) {
 }
 
 // --- gate 2: is validation this role's business --------------------------------------
+// Once per role, then counted in <sessionDir>/skips/: with the `.*` matcher this hook runs on
+// every stop of every agent, so repeating this line spends most of the log saying validation
+// was not the stopping role's business.
 const validateRoles = validateRoleSet();
 if (!matchesRole(identity, validateRoles)) {
-  ctx.accept(
+  ctx.acceptOnce(
+    `validate-skip-role:${bareRole(identity)}`,
     `skip: ${identity} stop (validation runs on ${[...validateRoles].join("/")})`,
   );
 }
@@ -90,7 +94,8 @@ if (!matchesRole(identity, validateRoles)) {
 // outcome worse than running it too often.
 const state = turnState(payload, identity);
 if (state === "mid-turn") {
-  ctx.accept(
+  ctx.acceptOnce(
+    `validate-skip-midturn:${bareRole(identity)}`,
     `skip: ${identity} stopped mid-turn (no ${bareRole(identity)} contract line in its last message), nothing validated`,
   );
 }

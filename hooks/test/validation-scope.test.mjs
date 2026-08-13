@@ -483,7 +483,25 @@ describe("a full session's stop sequence", () => {
 
     // 36 stops in total. Only the 12 developer stops get past the three gates at all...
     expect(count("START role=")).toBe(devStops * 2);
-    expect(count("skip:")).toBe(24); // reviewer / merger / planner / orchestrator stops
+    // The other 24 are skipped, and each ROLE says so ONCE. With the `.*` matcher this hook
+    // runs on every stop of every agent, so logging each skip spends most of the log on them.
+    // One line per role still proves the hook ran and says what it saw; the totals move to the
+    // counters asserted below.
+    expect(count("skip:")).toBe(4); // quality-reviewer / merger / orchestrator / planner
+    for (const role of ["quality-reviewer", "merger", "orchestrator", "planner"])
+      expect(count(`skip: aiharness:${role} stop`)).toBe(1);
+    // ...and the count of what was NOT logged is still recoverable, per role.
+    const skipCount = (role) =>
+      Number(
+        readFileSync(
+          join(SESSION_DIR, "skips", `validate-skip-role_${role}`),
+          "utf8",
+        ).trim(),
+      );
+    expect(skipCount("quality-reviewer")).toBe(6);
+    expect(skipCount("merger")).toBe(6);
+    expect(skipCount("orchestrator")).toBe(6);
+    expect(skipCount("planner")).toBe(6);
     // ...and of those, only the 6 with a new state actually run a chain. The repeat stops
     // hit the green cache instead.
     expect(count("OK wt=")).toBe(devStops);

@@ -120,6 +120,60 @@ describe("completion-invariant — orphaned work", () => {
   });
 });
 
+// A merger DISPATCHED for the ticket and still in flight is work in progress, not an orphan.
+// Rejecting the stop a few seconds into that merge makes the orchestrator read it as "you still
+// have unmerged work" and re-dispatch the same merger, which block-duplicate-dispatch then
+// refuses: one rejected stop, one refused dispatch and two wasted turns per ticket, to reach
+// the state the first merger was already reaching.
+describe("completion-invariant — a merge in flight is not an orphan", () => {
+  const recordMergerDispatch = (taskId, at = new Date().toISOString()) =>
+    writeFileSync(
+      join(sessionDir, "merger-stage.json"),
+      JSON.stringify({ promote: false, taskId, mode: "", stage: "a-only", at }),
+    );
+
+  test("accepts the stop while a merger for that ticket is in flight", () => {
+    unmergedTaskBranch("TASK-010");
+    approveTask("TASK-010");
+    recordMergerDispatch("TASK-010");
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(sessionDir, "hooks.log"), "utf8")).toContain(
+      "merge in flight for TASK-010",
+    );
+  });
+
+  test("a STALE merger record still leaves the ticket orphaned", () => {
+    unmergedTaskBranch("TASK-011");
+    approveTask("TASK-011");
+    recordMergerDispatch(
+      "TASK-011",
+      new Date(Date.now() - 60 * 60_000).toISOString(),
+    );
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("TASK-011");
+  });
+
+  test("a merger in flight for ANOTHER ticket does not excuse this one", () => {
+    unmergedTaskBranch("TASK-012");
+    approveTask("TASK-012");
+    recordMergerDispatch("TASK-013");
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("TASK-012");
+  });
+
+  test("an unreadable merger record does not silence the invariant", () => {
+    unmergedTaskBranch("TASK-014");
+    approveTask("TASK-014");
+    writeFileSync(join(sessionDir, "merger-stage.json"), "{ not json");
+    const r = run(transcriptWithMeta("orchestrator"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("TASK-014");
+  });
+});
+
 // The marker is a claim about NOW. It was write-only: one run wrote it at 13:20:19 for a
 // branch whose merger was mid-flight, the merge landed two minutes later, and the file was
 // still there at the end of the session. The main thread reads it before relaying and

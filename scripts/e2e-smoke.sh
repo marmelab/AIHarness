@@ -52,13 +52,38 @@ mkdir -p "$SLOT_LOCK_DIR"
 # last 40 lines in e2e-result.json.
 skip() {
   echo "SKIP: $*"
-  for log in supabase app dbdiff migup; do
+  for log in supabase app dbdiff migup grants; do
     if [ -n "${workroot:-}" ] && [ -s "${workroot}/${log}.log" ]; then
       echo "--- ${log}.log (last 25 lines) ---"
       tail -n 25 "${workroot}/${log}.log"
     fi
   done
   exit 0
+}
+
+# What the APP was doing when a spec failed, not just what Playwright was waiting for. The
+# caller keeps only the tail of this stdout in e2e-result.json, so printing it here is what
+# puts the app's own state in front of whoever reads the result.
+#
+# Without it, a red suite is read through Playwright's eyes alone — "click intercepted",
+# "element detached" — which describes a broken spec even when the app was refusing every
+# query. Rounds get spent on waits and locators that were never wrong.
+report_app_state() {
+  local f t
+  # The request table FIRST, because it is the one that diagnoses. A status >= 400 on one
+  # relation while others answer 200 on the same token is a stack that refused the app, and
+  # neither the Playwright tail nor the page snapshot below can show that.
+  for t in "$SRC"/test-results/*/trace.zip; do
+    [ -f "$t" ] || continue
+    unzip -p "$t" '*.network' 2>/dev/null \
+      | node "$(dirname "$0")/trace-requests.mjs" 2>/dev/null && break
+  done
+  for f in "$SRC"/test-results/*/error-context.md; do
+    [ -f "$f" ] || continue
+    echo "--- what the app was showing when a spec failed ($(basename "$(dirname "$f")")) ---"
+    awk '/^# Page snapshot/{flag=1} flag{print} /^```$/{if(flag&&++fence==2)exit}' "$f" | head -n 25
+    return 0
+  done
 }
 
 # --- memory preflight -------------------------------------------------------
@@ -181,12 +206,69 @@ case "$branch" in
     fi
     ;;
 esac
+# Of the relations the project's own grant file DECLARES readable by `authenticated`, which
+# ones actually are not. Empty on any error, so a failure to measure never becomes a skip.
+#
+# The declaration is the source of truth, and the two obvious alternatives are both wrong.
+# "Every public relation must be readable" is a policy a project enumerating its grants one
+# relation at a time does not hold, so it would skip every run forever. "Nothing may become
+# less readable than before the delta" is a regression check, and it misses a relation that
+# arrives ALREADY missing its grant — unreadable before and after, no regression, suite runs
+# anyway, same false red. Asking whether the declaration is satisfied catches both and
+# invents nothing.
+#
+# The marker prefix is what makes this parseable: the CLI decorates query output, and grepping
+# for a column header or a row separator would break the day that decoration changes.
+declared_unreadable() {
+  local grants="$1" rels
+  rels="$(sed -nE 's/^[[:space:]]*grant[[:space:]]+.*[[:space:]]on[[:space:]]+table[[:space:]]+(public\.)?"?([a-z0-9_]+)"?[[:space:]]+to[[:space:]]+"?authenticated"?.*/\2/Ip' \
+    "$grants" | sort -u | paste -sd, -)"
+  [ -z "$rels" ] && return 0
+  npx supabase db query --workdir "$workdir" --local \
+    "select 'HARNESS_UNREADABLE:' || coalesce(string_agg(r, ',' order by r), '')
+       from unnest(string_to_array('$rels', ',')) as r
+      where to_regclass('public.' || r) is not null
+        and not has_table_privilege('authenticated', 'public.' || r, 'SELECT');" 2>/dev/null \
+    | sed -n 's/.*HARNESS_UNREADABLE:\([^"|]*\).*/\1/p' | tr -d ' "' | head -1
+}
+
 if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
   echo "e2e-smoke: session changed supabase/schemas/, materializing a throwaway migration..."
   if npx supabase db diff --workdir "$workdir" --local -f _e2e_throwaway >"$workroot/dbdiff.log" 2>&1; then
     if ls "$workdir"/supabase/migrations/*_e2e_throwaway.sql >/dev/null 2>&1; then
       npx supabase migration up --workdir "$workdir" --local >"$workroot/migup.log" 2>&1 \
         || { cat "$workroot/migup.log" >&2; skip "schema pending migration round (throwaway apply failed); deferring the Supabase e2e leg to the deploy-time migration."; }
+      # Grants live in their own declarative file, which a generated delta has no reason to
+      # replay, and several paths can leave a relation the app reads without them — a delta
+      # that rebuilds a view rather than replacing it, or committed migrations that recreate
+      # one with no accompanying grant. PostgREST then answers 403, ra-core reads that as an
+      # invalid session and logs out, and every spec fails on a login page. Replay the
+      # declaration so that cannot be what a red suite means.
+      for g in "$workdir"/supabase/schemas/*grant*.sql; do
+        [ -f "$g" ] || continue
+        echo "e2e-smoke: re-applying declarative grants ($(basename "$g")) after the throwaway migration"
+        npx supabase db query --workdir "$workdir" --local --file "$g" >>"$workroot/grants.log" 2>&1 \
+          || { cat "$workroot/grants.log" >&2; skip "could not re-apply $(basename "$g") after the throwaway migration; the stack would answer 403 on rebuilt views, which is not the feature's fault."; }
+      done
+
+      # Then VERIFY the declaration holds, rather than trusting the replay above to have been
+      # the right remedy. A stack that refuses one relation to a properly authenticated caller
+      # cannot serve the app, and the suite would spend its whole runtime proving only that the
+      # specs cannot click a link.
+      for g in "$workdir"/supabase/schemas/*grant*.sql; do
+        [ -f "$g" ] || continue
+        missing="$(declared_unreadable "$g")"
+        if [ -n "${missing:-}" ]; then
+          skip "the isolated stack does not satisfy $(basename "$g"): 'authenticated' cannot SELECT $missing. Every app query against those answers 403 and the app falls back to the login page, so a red suite here would be the STACK's failure, not the feature's."
+        fi
+      done
+    else
+      # `db diff` succeeded and produced NOTHING. The old code fell through this branch in
+      # silence and ran the suite against a database that cannot serve the feature, so a
+      # structural miss was reported as the feature failing. A skip is exit 0, "not verified
+      # here", which is the honest answer.
+      cat "$workroot/dbdiff.log" >&2
+      skip "session changed supabase/schemas/ but the throwaway diff produced no migration (declarative schema_paths not configured?); refusing to run the suite against a database that lacks the new schema."
     fi
   else
     cat "$workroot/dbdiff.log" >&2
@@ -240,6 +322,7 @@ if [ -n "$SPECS" ]; then
     changed_result=$?
     if [ "$changed_result" -ne 0 ]; then
       echo "e2e-smoke: changed specs FAILED (exit=$changed_result), skipping the rest of the suite"
+      report_app_state
       echo "e2e-smoke: suite exit=$changed_result (slot $slot)"
       exit $changed_result
     fi
@@ -250,5 +333,6 @@ fi
 echo "e2e-smoke: running Playwright against the isolated stack..."
 ( cd "$SRC" && CI=true PLAYWRIGHT_BASE_URL="http://127.0.0.1:$app_port" npx playwright test )
 result=$?
+[ "$result" -ne 0 ] && report_app_state
 echo "e2e-smoke: suite exit=$result (slot $slot)"
 exit $result

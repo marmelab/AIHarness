@@ -42,6 +42,7 @@ import {
   isPhantomStop,
   readAgentMeta,
 } from "./lib/agent-meta.mjs";
+import { appendProgress } from "./lib/progress-log.mjs";
 import { reviewMode } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag, reviewsDir } from "./lib/reviews.mjs";
 import { reviewerVerdict, verdictSource } from "./lib/verdict.mjs";
@@ -167,6 +168,14 @@ if (!task && reviewMode(input) === "feature-review") task = FEATURE_KEY;
 // Every stop that got this far IS a reviewer's, so every one of them is logged: what the
 // verdict was, or which of ticket / verdict could not be recovered.
 {
+  // The reviewer verdict is one of the milestones orchestrator.md tells the orchestrator to
+  // put in the technical run's live feed. This hook has just resolved it from the reviewer's
+  // own words, so it appends it itself: a milestone the harness can observe should not depend
+  // on an agent remembering to echo it. Inert when the log is absent (non-technical run).
+  appendProgress(
+    ctx.sessionDir,
+    `[review:${task || "?"}] ${verdict || "UNKNOWN"}`,
+  );
   const meta = readAgentMeta(input);
   ctx.log(
     `role=${role} task=${task || "UNKNOWN"} verdict=${verdict || "UNKNOWN"}` +

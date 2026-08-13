@@ -33,7 +33,7 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
-import { readAgentMeta } from "./lib/agent-meta.mjs";
+import { isPhantomStop, readAgentMeta } from "./lib/agent-meta.mjs";
 import { harnessFile } from "./lib/paths.mjs";
 import { appendProgress } from "./lib/progress-log.mjs";
 import { bash } from "./lib/process.mjs";
@@ -72,6 +72,18 @@ const classify = (r, output) => {
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const ctx = createHookContext(input, "e2e-on-feature-review");
+
+// The runtime's own book-keeping stop, every ~32 s while an agent runs. It names no agent,
+// so identity falls to the newest-transcript GUESS, which lands on whichever reviewer is
+// currently running — and this hook then reads that reviewer's mid-turn snapshot, where no
+// contract line exists yet, as its verdict — one `verdict=UNPARSEABLE` line every ~32 s for
+// as long as the reviewer works.
+//
+// Those lines are why "verdict parsing fails on every reviewer dispatch" was once recorded as
+// an open defect. It was never real: no reviewer's own stop ever failed to parse. Same filter
+// as record-review-verdict and record-smoke-evidence, and for the same reason — a phantom
+// decides what to LOG, never what to DO.
+if (isPhantomStop(input)) process.exit(0);
 
 const sessionRef = sessionBranch(ctx);
 const headSha = () => git(["rev-parse", sessionRef]).stdout.trim();
