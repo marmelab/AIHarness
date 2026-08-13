@@ -36,8 +36,9 @@ import { sessionDirFromEnv } from "./lib/config.mjs";
 const raw = readFileSync(0, "utf8");
 const ctx = createHookContext(raw, "cleanup-worktree");
 
-// SubagentStop fires this on EVERY subagent stop here (the matcher doesn't filter
-// and agent_type is empty in the payload). cleanup is the MERGER's post-merge step,
+// SubagentStop fires this on EVERY subagent stop (the matcher is `.*` on purpose — a
+// role token cannot match a plugin's namespaced agent_type, see
+// rules/hook-authoring.md). cleanup is the MERGER's post-merge step,
 // so skip the worktree sweep when the resolved agent meta shows the stopping agent is
 // clearly NOT a merger (developer / reviewer / planner / ...). The sweep is
 // idempotent either way; this just avoids running it on every stop. Meta

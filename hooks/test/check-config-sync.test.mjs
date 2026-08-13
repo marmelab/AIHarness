@@ -80,9 +80,10 @@ describe("check-config-sync", () => {
     expect(r.status).toBe(0);
   });
 
-  // The plugin's matchers are validated too, so a project that forgets a role the
-  // plugin names is caught rather than silently running with a dangling matcher.
-  test("a project omitting a role the plugin's matchers name → exit 1", () => {
+  // The plugin's own hooks.json is read alongside the project's settings.json, and it
+  // now names no role at all, so it imposes no role on a consuming project: a repo
+  // declaring one role and no matchers of its own is in sync.
+  test("the plugin's own matchers impose no role on a project", () => {
     const repo = mkdtempSync(join(tmpdir(), "config-sync-"));
     tmpRepos.push(repo);
     writeFileSync(
@@ -93,8 +94,7 @@ describe("check-config-sync", () => {
       }),
     );
     const r = spawnSync("node", [SCRIPT, "--app", repo], { encoding: "utf8" });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("merger");
+    expect(r.status).toBe(0);
   });
 
   test("the committed repo is in sync → exit 0", () => {
@@ -105,16 +105,14 @@ describe("check-config-sync", () => {
   });
 });
 
-// The SubagentStop matchers select nothing today (agent_type is empty on that event), so
-// a token naming no agent is harmless AND undetectable by any other means. The day the
-// runtime honours matchers it becomes a matcher that silently selects nothing, which is
-// exactly the class of failure this repo cannot afford to rediscover by accident. Report
-// it now, on the repo's own wiring, so the re-audit list is generated rather than
-// remembered. See rules/hook-authoring.md.
+// A matcher IS honoured, so a token naming no agent selects nothing and the hooks behind
+// it never run — the class of failure this repo cannot afford to rediscover by accident.
+// Reported, not failed. See rules/hook-authoring.md.
 describe("matcher tokens that name no agent", () => {
   test("are reported as a NOTE, without failing the check", () => {
-    const r = spawnSync("node", [SCRIPT, "--app", REPO_ROOT], {
-      encoding: "utf8",
+    const r = runAgainst({
+      roles: [],
+      matchers: ["developer|simple-developer", "merger"],
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("name no agent on disk");
@@ -123,8 +121,9 @@ describe("matcher tokens that name no agent", () => {
   });
 
   test("and the roles that DO have an agent are not reported", () => {
-    const r = spawnSync("node", [SCRIPT, "--app", REPO_ROOT], {
-      encoding: "utf8",
+    const r = runAgainst({
+      roles: [],
+      matchers: ["developer|simple-developer", "merger", "planner"],
     });
     const note = r.stdout
       .split("\n")
@@ -133,5 +132,36 @@ describe("matcher tokens that name no agent", () => {
       expect(note).not.toContain(` ${role},`);
       expect(note.endsWith(` ${role}.`)).toBe(false);
     }
+  });
+});
+
+// A bare role token cannot match the namespaced `agent_type` a plugin install reports,
+// which is how every SubagentStop hook came to be skipped on every real stop of every
+// plugin-only run. Reported rather than failed, because a project that vendored the
+// harness with its own bare-named agents does match on them.
+describe("SubagentStop matchers that filter by role", () => {
+  test("are reported as a NOTE naming the plugin hazard", () => {
+    const r = runAgainst({
+      roles: [],
+      matchers: ["quality-reviewer|merger", "orchestrator"],
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("filter by role");
+    expect(r.stdout).toContain("quality-reviewer|merger");
+    expect(r.stdout).toContain("aiharness:developer");
+  });
+
+  test("a role-agnostic matcher is not reported", () => {
+    const r = runAgainst({ roles: [], matchers: [".*", ".*"] });
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain("filter by role");
+  });
+
+  test("this repo's own wiring is role-agnostic", () => {
+    const r = spawnSync("node", [SCRIPT, "--app", REPO_ROOT], {
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain("filter by role");
   });
 });

@@ -79,33 +79,53 @@ itself off. Shared predicates live in `lib/` (`isExplicitlyBackgrounded`, `bareR
 - every `SubagentStop` matcher must name a declared role.
 - the core imports only node builtins and relative paths.
 
-## The SubagentStop matchers do not filter, and one day they will
+## The SubagentStop matchers are honoured, so they must never name a role
 
-Every `SubagentStop` matcher in `hooks.json` currently selects nothing. The runtime sends
-an EMPTY `agent_type` on that event, so the matcher has nothing to compare and every
-registered SubagentStop hook fires on every stop, whatever role it names. That is why each
-of those hooks re-derives identity itself, through `lib/agent-meta.mjs` and the predicates
-in `lib/teams.mjs`, and treats "not my role" as "not my business".
+A `SubagentStop` matcher is compared against the payload's `agent_type`, and it decides
+whether the hook process is spawned at all. MEASURED under Claude Code 2.1.227, with one
+probe hook group per matcher shape:
 
-So the matchers are not load-bearing today. They are DOCUMENTATION that happens to sit in a
-field the runtime will start honouring. When it does, every one of them has to be re-audited
-before it is trusted, because two of the ways they are written today would go from harmless
-to silently wrong:
+| `agent_type` | `"planner"` | `"developer\|planner"` | `".*"` | `"*"` | omitted | `"(x:)?planner"` |
+|---|---|---|---|---|---|---|
+| `planner` | fires | fires | fires | fires | fires | fires |
+| `xplanner` | — | — | fires | fires | fires | fires |
 
-- **Namespaced roles.** A plugin-provided agent reports `aiharness:developer`, not
-  `developer`. Every matcher token is bare. This is the same bug that made a whole family of
-  guards inert once the harness shipped as a plugin (see `bareRole` in `lib/teams.mjs`); a
-  matcher has no `bareRole` to go through.
-- **Tokens that are not agents.** `simple-developer` is a declared role in
-  `harness.config.json` and appears in the `validate-on-stop` matcher, but no agent is ever
-  dispatched under that name: the SIMPLE flow dispatches `developer`. `check-config-sync`
-  reports it, and the token will match nothing the day matching starts working.
+So a matcher of plain alphanumerics + `|,-_` is an EXACT match against the `|`-separated
+list, and a matcher containing a regex metacharacter is an UNANCHORED `RegExp`.
 
-Concretely, when a runtime upgrade makes `agent_type` non-empty at SubagentStop: check every
-matcher against BOTH spellings of every role, drop the tokens no agent answers to, and only
-then consider removing a hook's own identity check. Until then, never write a hook that
-depends on its matcher having selected it: `hooks.json` says who a hook is FOR, the hook
-itself decides whether the stop is its business.
+**A bare role token therefore cannot match a plugin install's `agent_type`**, which arrives
+NAMESPACED (`aiharness:quality-reviewer`). That one line cost three audits and every
+plugin-only run the harness has ever made: with matchers reading `quality-reviewer`,
+`developer|…`, `merger`, `orchestrator`, not one SubagentStop hook was spawned on any real
+stop. No review verdict was recorded, so `block-merger-without-review` refused every merge;
+no validation ran, so typecheck, lint and the unit suite executed zero times in a 39-minute
+session; `cleanup-worktree` never swept; `completion-invariant` never saw the orchestrator.
+
+Nothing failed loudly, and the reason it stayed hidden for so long is worth naming: the
+runtime ALSO fires a book-keeping stop every ~32 s that carries no `agent_type` at all.
+An absent value defeats no matcher, so every hook DID run on those — and they were the only
+stops the hooks ever saw. `hooks.log` was therefore full of `not a harness agent (unnamed)`
+lines and empty of real ones, which reads exactly like "the runtime never sends a real stop"
+and was written up as such twice.
+
+The rule, then:
+
+- **A SubagentStop matcher must be `".*"`.** It selects every agent whatever its namespace
+  or suffix, and the hook decides for itself whether the stop is its business — through
+  `lib/agent-meta.mjs` and the `bareRole`-based predicates in `lib/teams.mjs`, which already
+  handle `developer`, `aiharness:developer` and `developer-TASK-001` alike. `hooks.json`
+  cannot do that comparison; only the hook can.
+- **A hook that runs on every stop must be safe on every stop.** Not merely quiet: a stop it
+  does not own must not be able to make it act. `record-review-verdict` takes the ROLE from
+  identity alone for exactly this reason — it used to recover the role by scanning the
+  stopping agent's transcript for `ROLE: quality-reviewer`, and the ORCHESTRATOR's transcript
+  contains the reviewer dispatch prompts it wrote, so a summary mentioning APPROVED could
+  have written the flag that gates the merge.
+- `check-config-sync` reports any SubagentStop matcher that filters by role, and
+  `hooks/test/subagent-stop-matchers.test.mjs` fails if one reappears in this repo's wiring.
+- A project that VENDORED the harness under `.claude/` with its own bare-named agents does
+  match on bare tokens, which is why the report is a NOTE and not an error. It still breaks
+  the day that project enables the plugin.
 
 ## Log the identity you resolved
 

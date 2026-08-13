@@ -113,7 +113,7 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "merger",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -124,7 +124,7 @@
         ]
       },
       {
-        "matcher": "quality-reviewer|merger",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -145,7 +145,7 @@
         ]
       },
       {
-        "matcher": "developer|simple-developer|test-writer",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -156,7 +156,7 @@
         ]
       },
       {
-        "matcher": "orchestrator",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -166,7 +166,7 @@
         ]
       },
       {
-        "matcher": "developer|simple-developer|test-writer|quality-reviewer|merger|planner|orchestrator",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",

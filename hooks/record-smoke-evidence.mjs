@@ -49,9 +49,9 @@ try {
   // `unknown`. The real stop's record never survives.
   if (isPhantomStop(payload)) process.exit(0);
 
-  // Every SubagentStop hook fires on every stop (the matchers do not filter and
-  // agent_type is empty), so the MODE line in the agent's own dispatch prompt is what
-  // makes this stop ours.
+  // Every SubagentStop hook fires on every stop (the matcher is `.*` on purpose — a role
+  // token cannot match a plugin's namespaced agent_type, see rules/hook-authoring.md), so
+  // the MODE line in the agent's OWN dispatch prompt is what makes this stop ours.
   const mode = reviewMode(payload);
   const asksForRuntimeCheck =
     mode === "feature-smoke" ||

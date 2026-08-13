@@ -25,6 +25,13 @@ function resolveRepo(argv) {
   return process.env.APP_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
 
+// Claude Code compares a matcher of plain alphanumerics + `|,-_` as an EXACT match
+// against the `|`-separated list, and routes anything containing a regex metacharacter
+// through an unanchored RegExp. So only the first shape carries role tokens, and only
+// the second can select every agent whatever its namespace.
+const isRoleTokenList = (matcher) => /^[\w|,-]+$/.test(matcher);
+const selectsEveryAgent = (matcher) => /^(\.\*|\*|\.\+)$/.test(matcher);
+
 // SubagentStop matchers are role tokens (possibly `a|b`); PreToolUse/PostToolUse
 // matchers are tool names (Bash, Agent, Write|Edit) and are NOT roles, so only
 // SubagentStop is checked here.
@@ -34,6 +41,7 @@ function settingsRoleTokens(settings) {
   for (const entry of entries) {
     const matcher = entry.matcher;
     if (!matcher || typeof matcher !== "string") continue;
+    if (!isRoleTokenList(matcher)) continue;
     for (const t of matcher
       .split("|")
       .map((s) => s.trim())
@@ -42,6 +50,23 @@ function settingsRoleTokens(settings) {
     }
   }
   return [...tokens];
+}
+
+// SubagentStop matchers that filter by ROLE. Reported, not failed: a project that
+// vendored the harness under .claude/ with its own bare-named agents does match on
+// them. It is reported because a bare role token cannot match the NAMESPACED
+// `agent_type` a plugin install reports (`aiharness:developer`), so the day such a
+// project enables the plugin every hook behind that matcher stops running, in silence.
+function roleFilteringMatchers(settings) {
+  return (settings.hooks?.SubagentStop ?? [])
+    .map((e) => e.matcher)
+    .filter(
+      (m) =>
+        typeof m === "string" &&
+        m &&
+        !selectsEveryAgent(m) &&
+        isRoleTokenList(m),
+    );
 }
 
 // Every place SubagentStop matchers can be declared, in the order they are searched.
@@ -96,16 +121,15 @@ export function checkConfigSync(repo) {
     tokens,
     roles: [...roles],
     agentless: agentlessTokens(tokens),
+    roleFiltering: roleFilteringMatchers(settings),
   };
 }
 
 // Matcher tokens that name a declared role NO agent is dispatched under. Reported, not
 // failed: a role can legitimately exist in the config without its own agent file
 // (simple-developer is the SIMPLE flow's validate/debounce identity, dispatched as
-// `developer`). It matters because the matcher is inert TODAY for a different reason
-// (agent_type is empty at SubagentStop, so nothing is filtered at all), and the day the
-// runtime starts honouring matchers this token will select nothing while looking correct.
-// See rules/hook-authoring.md.
+// `developer`). It matters because such a token selects nothing at all — matchers ARE
+// honoured — so the hooks behind it never run. See rules/hook-authoring.md.
 function agentlessTokens(tokens) {
   let agents;
   try {
@@ -139,8 +163,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (r.agentless.length) {
     process.stdout.write(
       `check-config-sync: NOTE ${r.agentless.length} matcher token(s) name no agent on disk: ${r.agentless.join(", ")}.\n` +
-        `  Harmless while SubagentStop matchers filter nothing (agent_type is empty), and inert the day they do.\n` +
-        `  See rules/hook-authoring.md "The SubagentStop matchers do not filter".\n`,
+        `  A SubagentStop matcher IS honoured, so a token no agent answers to selects nothing.\n` +
+        `  See rules/hook-authoring.md "The SubagentStop matchers are honoured".\n`,
+    );
+  }
+  if (r.roleFiltering.length) {
+    process.stdout.write(
+      `check-config-sync: NOTE ${r.roleFiltering.length} SubagentStop matcher(s) filter by role: ${r.roleFiltering.join(", ")}.\n` +
+        `  A bare role token cannot match the namespaced agent_type a PLUGIN install reports\n` +
+        `  (aiharness:developer), so those hooks would stop running the day this project\n` +
+        `  consumes the harness as a plugin. Use ".*" and let the hook gate on its own role.\n`,
     );
   }
   process.stdout.write(

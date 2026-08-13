@@ -48,9 +48,10 @@ try {
   ctx = createHookContext(raw, "completion-invariant");
   const payload = JSON.parse(raw);
 
-  // Only the orchestrator's stop is our concern. SubagentStop matchers do not reliably
-  // filter (see cleanup-worktree) and agent_type in the payload is empty, so identify
-  // via the agent meta. Any doubt -> accept (never block a non-orchestrator stop).
+  // Only the orchestrator's stop is our concern. The matcher is `.*` on purpose (a role
+  // token cannot match a plugin's namespaced agent_type — rules/hook-authoring.md), so
+  // this hook runs on every stop and identifies the role itself. Any doubt -> accept
+  // (never block a non-orchestrator stop).
   //
   // The log says which STRATEGY answered, because a bare "unknown" covers two different
   // states: a resolved non-orchestrator, which is this guard working, and an identity
