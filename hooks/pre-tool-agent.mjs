@@ -14,6 +14,7 @@
 //     past the merger gates above it, so a refused merger leaves no marker behind.
 
 import { runChain } from "./lib/hook-chain.mjs";
+import { check as openProgressLog } from "./open-progress-log.mjs";
 import { check as blockNestedOrchestrator } from "./block-nested-orchestrator.mjs";
 import { check as blockDuplicateDispatch } from "./block-duplicate-dispatch.mjs";
 import { check as blockMergerWithoutReview } from "./block-merger-without-review.mjs";
@@ -24,6 +25,7 @@ import { check as forceForeground } from "./force-foreground-orchestrator-dispat
 import { check as setupWorktree } from "./setup-worktree.mjs";
 
 runChain([
+  ["open-progress-log", openProgressLog],
   ["block-nested-orchestrator", blockNestedOrchestrator],
   ["block-duplicate-dispatch", blockDuplicateDispatch],
   ["block-merger-without-review", blockMergerWithoutReview],

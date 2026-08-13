@@ -88,11 +88,15 @@ Discipline (keep signal high, noise low):
   (report only), never a fix trigger.
 
 **A `FIX_ROUND:` block narrows the pass to the fix.** When the prompt carries `FIX_ROUND:`,
-`FIX_RANGE:` and `FINDINGS_RAISED:`, you already reviewed this feature and blocked it; a fix
-has since been merged. Judge two things: every raised finding is resolved, and `FIX_RANGE` is
+`FIX_RANGE:` and `FINDINGS_RAISED:`, you already reviewed this work and blocked it; a fix
+has since landed. Judge two things: every raised finding is resolved, and `FIX_RANGE` is
 itself correct and introduces nothing new. Work you approved last round and that `FIX_RANGE`
 does not touch is NOT re-reviewed — a second full pass over a one-line fix has taken as
 long as the first and returned nothing the first pass had not already said.
+
+This applies to a **per-ticket re-review after a `REJECTED:` too**, not only to the
+end-of-feature pass: the orchestrator sends the same three lines when it re-reviews a ticket
+whose developer has just addressed your feedback.
 
 Two things stay true in a fix round. `SESSION_DIFF_BASE` is still yours to read: when a
 finding leads out of `FIX_RANGE` (the fix moved the defect rather than removing it, or its

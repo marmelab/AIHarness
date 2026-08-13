@@ -127,9 +127,11 @@ Normal feature tickets (type / component / config prop) → `parallel_safe: true
 
 **`schema_sensitive`** (default `false`): set `true` when getting the ticket wrong could put data in the database that the schema forbids, or read data in a shape the schema does not guarantee. It selects the stronger review model, so it is about the CONSEQUENCE of a mistake, not about which files the ticket edits.
 
-Set it `true` for: any ticket touching `supabase/` (schema, view, trigger, RLS, function); a form, import, or default-value change that writes a column carrying a `CHECK` constraint, an enum, a `NOT NULL`, or a foreign key; a merge / dedup / bulk-update path that writes existing rows; anything that backfills.
+Set it `true` for: any ticket touching `supabase/` (schema, view, trigger, RLS, function); a ticket that INTRODUCES a constraint (a new `CHECK`, enum, `NOT NULL`, or foreign key); a merge / dedup / bulk-update path that writes existing rows; anything that backfills.
 
-The case this exists for is a ticket with NO SQL in it at all. A select input on a constrained column, left clearable, submits an empty string and violates the column's `CHECK` on save. The diff is pure TSX, so a rule keyed on "touches `supabase/`" would call it ordinary; the mistake is still a write the database rejects. If a ticket's fields map onto a constrained column, it is `schema_sensitive` whatever its file list says.
+The case this exists for is a ticket with NO SQL in it at all. A select input on a constrained column, left clearable, submits an empty string and violates the column's `CHECK` on save. The diff is pure TSX, so a rule keyed on "touches `supabase/`" would call it ordinary; the mistake is still a write the database rejects.
+
+**But do not set it on every ticket that merely WRITES an already-constrained column.** One constraint is one risk, and it is carried by the ticket that introduces it — not again by each consumer. Measured on a five-ticket feature adding one constrained column: four tickets came back `schema_sensitive: true` (the data layer, the form, the CSV/JSON import, the merge paths), three of them touching no `supabase/` file at all, which put 7 of 8 reviewers on the expensive model and made review 47% of a $103 run. The rule was applied correctly; the rule was too wide. When an earlier ticket in the same plan already introduces and reviews the constraint, and this one writes the same column through the same validated helper, leave it `false` and let the dependency carry the risk.
 
 Leave `false` for genuinely presentational work: layout, labels, icons, styling, a list column that only reads.
 

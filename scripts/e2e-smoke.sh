@@ -52,13 +52,33 @@ mkdir -p "$SLOT_LOCK_DIR"
 # last 40 lines in e2e-result.json.
 skip() {
   echo "SKIP: $*"
-  for log in supabase app dbdiff migup; do
+  for log in supabase app dbdiff migup grants; do
     if [ -n "${workroot:-}" ] && [ -s "${workroot}/${log}.log" ]; then
       echo "--- ${log}.log (last 25 lines) ---"
       tail -n 25 "${workroot}/${log}.log"
     fi
   done
   exit 0
+}
+
+# What the APP was showing when a spec failed, not just what Playwright was waiting for.
+# Playwright writes a `# Page snapshot` per failed test; the caller keeps only the tail of
+# this stdout in e2e-result.json, so printing it here is what puts the app's own state in
+# front of whoever reads the result.
+#
+# Run eee7a672 is the case for it: every failure read as "click intercepted / element
+# detached", the developer diagnosed a navigation race and added a wait, and nothing
+# changed — because the snapshot said the app was on the SIGN IN page, bounced there by a
+# 403 the result never mentioned. Two rounds went into fixing tests that were never wrong.
+# One snapshot in the result answers "is the app even working" before anyone edits a spec.
+report_app_state() {
+  local f
+  for f in "$SRC"/test-results/*/error-context.md; do
+    [ -f "$f" ] || continue
+    echo "--- what the app was showing when a spec failed ($(basename "$(dirname "$f")")) ---"
+    awk '/^# Page snapshot/{flag=1} flag{print} /^```$/{if(flag&&++fence==2)exit}' "$f" | head -n 25
+    return 0
+  done
 }
 
 # --- memory preflight -------------------------------------------------------
@@ -187,6 +207,27 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
     if ls "$workdir"/supabase/migrations/*_e2e_throwaway.sql >/dev/null 2>&1; then
       npx supabase migration up --workdir "$workdir" --local >"$workroot/migup.log" 2>&1 \
         || { cat "$workroot/migup.log" >&2; skip "schema pending migration round (throwaway apply failed); deferring the Supabase e2e leg to the deploy-time migration."; }
+      # A generated delta rebuilds a changed VIEW with DROP + CREATE, and Postgres drops its
+      # GRANTs with it. They are declared in their own declarative file, which the delta has
+      # no reason to touch, so the rebuilt relation comes back readable by nobody: measured on
+      # run eee7a672, `GET /rest/v1/contacts_summary` answered 403, ra-core raised an error
+      # toast, the app fell back to the sign-in page, and the toast then intercepted the click
+      # in the shared `goToContacts` fixture. 7 specs failed, the suite was reported as the
+      # FEATURE's failure, and two developer rounds were spent "fixing" tests that were
+      # never wrong. Re-apply the grants so a rebuilt view keeps its access.
+      for g in "$workdir"/supabase/schemas/*grant*.sql; do
+        [ -f "$g" ] || continue
+        echo "e2e-smoke: re-applying declarative grants ($(basename "$g")) after the throwaway migration"
+        npx supabase db query --workdir "$workdir" --local --file "$g" >>"$workroot/grants.log" 2>&1 \
+          || { cat "$workroot/grants.log" >&2; skip "could not re-apply $(basename "$g") after the throwaway migration; the stack would answer 403 on rebuilt views, which is not the feature's fault."; }
+      done
+    else
+      # `db diff` succeeded and produced NOTHING. The old code fell through this branch in
+      # silence and ran the suite against a database that cannot serve the feature, so a
+      # structural miss was reported as the feature failing. A skip is exit 0, "not verified
+      # here", which is the honest answer.
+      cat "$workroot/dbdiff.log" >&2
+      skip "session changed supabase/schemas/ but the throwaway diff produced no migration (declarative schema_paths not configured?); refusing to run the suite against a database that lacks the new schema."
     fi
   else
     cat "$workroot/dbdiff.log" >&2
@@ -240,6 +281,7 @@ if [ -n "$SPECS" ]; then
     changed_result=$?
     if [ "$changed_result" -ne 0 ]; then
       echo "e2e-smoke: changed specs FAILED (exit=$changed_result), skipping the rest of the suite"
+      report_app_state
       echo "e2e-smoke: suite exit=$changed_result (slot $slot)"
       exit $changed_result
     fi
@@ -250,5 +292,6 @@ fi
 echo "e2e-smoke: running Playwright against the isolated stack..."
 ( cd "$SRC" && CI=true PLAYWRIGHT_BASE_URL="http://127.0.0.1:$app_port" npx playwright test )
 result=$?
+[ "$result" -ne 0 ] && report_app_state
 echo "e2e-smoke: suite exit=$result (slot $slot)"
 exit $result

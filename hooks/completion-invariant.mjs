@@ -27,7 +27,7 @@ import {
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { isPhantomStop, readAgentMeta } from "./lib/agent-meta.mjs";
-import { isOrchestrator } from "./lib/teams.mjs";
+import { bareRole, isOrchestrator } from "./lib/teams.mjs";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { getUnmergedTaskBranches, git } from "./lib/git.mjs";
 import { reviewFlag } from "./lib/reviews.mjs";
@@ -41,6 +41,31 @@ const REJECT_LIMIT = 2; // reject at most twice, then allow + mark for recovery
 const E2E_REJECT_LIMIT = 1;
 // A smoke that approved without driving anything: same single-shot budget, same reason.
 const SMOKE_REJECT_LIMIT = 1;
+// How long a recorded merger dispatch counts as in flight. A Stage-A merge is seconds to a
+// couple of minutes; past this the record is stale (a merger that died) and the ticket IS
+// orphaned, which is the case this invariant exists to catch.
+const MERGE_INFLIGHT_MS = 5 * 60 * 1000;
+
+/**
+ * The TASK id of the merger dispatch currently in flight, or "" when none is.
+ * Fail-open on any doubt: an unreadable record must not silence the invariant.
+ * @param {object} context
+ * @returns {string}
+ */
+const inFlightMergeTask = (context) => {
+  try {
+    const record = JSON.parse(
+      readFileSync(join(context.sessionDir, "merger-stage.json"), "utf8"),
+    );
+    const taskId = String(record.taskId || "");
+    if (!/^TASK-\d+$/.test(taskId)) return "";
+    const age = Date.now() - new Date(record.at).getTime();
+    if (!Number.isFinite(age) || age < 0 || age > MERGE_INFLIGHT_MS) return "";
+    return taskId;
+  } catch {
+    return "";
+  }
+};
 
 let ctx;
 try {
@@ -59,12 +84,18 @@ try {
   // the line has to tell them apart.
   const meta = readAgentMeta(payload);
   if (!meta || !isOrchestrator(meta.agentType)) {
-    ctx.accept(
+    // Once per distinct role, then counted: this branch is reached on every stop of every
+    // agent in the session. `identity unresolvable` stays a full line every time — that one
+    // means the guard is OFF, which is never routine.
+    if (!meta && !isPhantomStop(payload)) {
+      ctx.accept("identity unresolvable, invariant not checked");
+    }
+    const seen = meta ? bareRole(meta.agentType) : "unnamed";
+    ctx.acceptOnce(
+      `not-orchestrator:${seen}`,
       meta
         ? `not orchestrator (${meta.agentType} via ${meta.source})`
-        : isPhantomStop(payload)
-          ? "not a harness agent (no transcript, no meta, unnamed)"
-          : "identity unresolvable, invariant not checked",
+        : "not a harness agent (no transcript, no meta, unnamed)",
     );
   }
 
@@ -92,10 +123,24 @@ try {
   // <session_dir>/reviews/. Hand-rolling it from ctx.ticketsDir looked in
   // <session_dir>/tickets/reviews/ (nothing sets TICKETS_DIR in a hook's env), a
   // directory that never exists, so this invariant silently never fired.
+  // A merger DISPATCHED for this ticket and still in flight is not an orphan, it is work
+  // in progress. record-merger-stage writes merger-stage.json at dispatch time (single
+  // slot: never more than one merger at a time), so its taskId + `at` are exactly the
+  // "someone is merging this right now" signal.
+  //
+  // Measured on run eee7a672: reviewer APPROVED TASK-001 at 08:03:25, the merger was
+  // dispatched at 08:03:35, this invariant rejected the stop at 08:03:41 — 6 s into a merge
+  // that completed fine at 08:04:02. The orchestrator read the rejection as "you still have
+  // unmerged work", re-dispatched the same merger, and block-duplicate-dispatch refused it
+  // 23 s later. That happened on all five tickets: 9 rejected stops, 5 refused dispatches
+  // and as many extra turns on the most expensive agent in the run, to reach the state the
+  // first merger was already reaching.
+  const merging = inFlightMergeTask(ctx);
   const orphaned = unmerged
     .map((u) => u.branch)
     .filter((br) => {
       const taskId = br.split("/").pop(); // <short>/TASK-XXX -> TASK-XXX
+      if (taskId === merging) return false;
       return existsSync(reviewFlag(ctx, taskId, "quality-reviewer"));
     });
 
@@ -110,7 +155,11 @@ try {
     clearRecoveryMarker();
     rejectOnceOnRedE2e();
     rejectOnceOnUnevidencedSmoke();
-    ctx.accept("no approved-but-unmerged work");
+    ctx.accept(
+      merging
+        ? `no approved-but-unmerged work (merge in flight for ${merging})`
+        : "no approved-but-unmerged work",
+    );
   }
 
   const list = orphaned.join(", ");
