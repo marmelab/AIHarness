@@ -221,6 +221,25 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
         npx supabase db query --workdir "$workdir" --local --file "$g" >>"$workroot/grants.log" 2>&1 \
           || { cat "$workroot/grants.log" >&2; skip "could not re-apply $(basename "$g") after the throwaway migration; the stack would answer 403 on rebuilt views, which is not the feature's fault."; }
       done
+
+      # Then MEASURE it, rather than trusting the re-apply above to have been the right
+      # remedy. Run eee7a672 could not be diagnosed past this point: the suite went red with
+      # a 403 on contacts_summary and the app on the sign-in page, and by the time anyone
+      # looked, this workdir was deleted — so "the delta dropped the view's grants" and "login
+      # failed and the request went as anon" were both consistent with the evidence and
+      # neither could be confirmed. This check makes the next run answer that question
+      # instead of leaving it to inference: a relation the app reads that `authenticated`
+      # cannot SELECT is a stack that CANNOT serve the app, whatever put it in that state.
+      unreadable="$(npx supabase db query --workdir "$workdir" --local \
+        "select string_agg(c.relname, ', ' order by c.relname)
+           from pg_class c join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relkind in ('r','v','m')
+            and not has_table_privilege('authenticated', c.oid, 'SELECT');" 2>/dev/null \
+        | grep -vE '^\s*(string_agg|-+|\(|$)' | head -1 | tr -d ' ')"
+      if [ -n "${unreadable:-}" ] && [ "$unreadable" != "NULL" ]; then
+        skip "the isolated stack is not serviceable: 'authenticated' cannot SELECT ${unreadable}. Every app query would answer 403 and the app would fall back to the login page, so a red suite here would be the STACK's failure, not the feature's."
+      fi
     else
       # `db diff` succeeded and produced NOTHING. The old code fell through this branch in
       # silence and ran the suite against a database that cannot serve the feature, so a
