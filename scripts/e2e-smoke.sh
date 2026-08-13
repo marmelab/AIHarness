@@ -72,7 +72,17 @@ skip() {
 # 403 the result never mentioned. Two rounds went into fixing tests that were never wrong.
 # One snapshot in the result answers "is the app even working" before anyone edits a spec.
 report_app_state() {
-  local f
+  local f t
+  # The request table FIRST, because it is the one that diagnoses. On the audited run it read
+  # "auth/v1/token 200, contacts_summary 403, contact_notes 200, all as authenticated": login
+  # fine, one relation refused, the one the schema delta rebuilt. The snapshot below said
+  # "Sign in" and the Playwright tail said "click intercepted" — both true, both pointing away
+  # from that.
+  for t in "$SRC"/test-results/*/trace.zip; do
+    [ -f "$t" ] || continue
+    unzip -p "$t" '*.network' 2>/dev/null \
+      | node "$(dirname "$0")/trace-requests.mjs" 2>/dev/null && break
+  done
   for f in "$SRC"/test-results/*/error-context.md; do
     [ -f "$f" ] || continue
     echo "--- what the app was showing when a spec failed ($(basename "$(dirname "$f")")) ---"
