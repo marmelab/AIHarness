@@ -230,10 +230,8 @@ export function createHookContext(input, name = "hook") {
      * `<sessionDir>/skips/<key>` instead of repeating the line.
      *
      * Every SubagentStop hook runs on every stop (the matcher is `.*`, because a role token
-     * cannot match a plugin's namespaced agent_type), so "not my role" is now reached tens
-     * of times per session by each of them. Measured on run eee7a672: 265 identical
-     * `not orchestrator` lines and ~294 `skip: <role> stop` lines out of 1040 — the file
-     * grew 27x and the lines that matter got harder to find, not easier.
+     * cannot match a plugin's namespaced agent_type), so "not my role" is reached tens of
+     * times per session by each of them, and repeating the line buries the ones that matter.
      *
      * The observability rule still holds (rules/hook-authoring.md: absence of a line must
      * mean absence of a run). The FIRST line per key still proves the hook ran and says what

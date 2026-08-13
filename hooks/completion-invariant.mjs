@@ -128,13 +128,11 @@ try {
   // slot: never more than one merger at a time), so its taskId + `at` are exactly the
   // "someone is merging this right now" signal.
   //
-  // Measured on run eee7a672: reviewer APPROVED TASK-001 at 08:03:25, the merger was
-  // dispatched at 08:03:35, this invariant rejected the stop at 08:03:41 — 6 s into a merge
-  // that completed fine at 08:04:02. The orchestrator read the rejection as "you still have
-  // unmerged work", re-dispatched the same merger, and block-duplicate-dispatch refused it
-  // 23 s later. That happened on all five tickets: 9 rejected stops, 5 refused dispatches
-  // and as many extra turns on the most expensive agent in the run, to reach the state the
-  // first merger was already reaching.
+  // Without this, a stop a few seconds after the merger was dispatched is rejected for work
+  // that merger is in the middle of merging. The orchestrator reads that as "you still have
+  // unmerged work", re-dispatches the same merger, and block-duplicate-dispatch refuses it —
+  // one rejected stop, one refused dispatch and two wasted turns per ticket, to reach the
+  // state the first merger was already reaching.
   const merging = inFlightMergeTask(ctx);
   const orphaned = unmerged
     .map((u) => u.branch)

@@ -61,23 +61,18 @@ skip() {
   exit 0
 }
 
-# What the APP was showing when a spec failed, not just what Playwright was waiting for.
-# Playwright writes a `# Page snapshot` per failed test; the caller keeps only the tail of
-# this stdout in e2e-result.json, so printing it here is what puts the app's own state in
-# front of whoever reads the result.
+# What the APP was doing when a spec failed, not just what Playwright was waiting for. The
+# caller keeps only the tail of this stdout in e2e-result.json, so printing it here is what
+# puts the app's own state in front of whoever reads the result.
 #
-# Run eee7a672 is the case for it: every failure read as "click intercepted / element
-# detached", the developer diagnosed a navigation race and added a wait, and nothing
-# changed — because the snapshot said the app was on the SIGN IN page, bounced there by a
-# 403 the result never mentioned. Two rounds went into fixing tests that were never wrong.
-# One snapshot in the result answers "is the app even working" before anyone edits a spec.
+# Without it, a red suite is read through Playwright's eyes alone — "click intercepted",
+# "element detached" — which describes a broken spec even when the app was refusing every
+# query. Rounds get spent on waits and locators that were never wrong.
 report_app_state() {
   local f t
-  # The request table FIRST, because it is the one that diagnoses. On the audited run it read
-  # "auth/v1/token 200, contacts_summary 403, contact_notes 200, all as authenticated": login
-  # fine, one relation refused, the one the schema delta rebuilt. The snapshot below said
-  # "Sign in" and the Playwright tail said "click intercepted" — both true, both pointing away
-  # from that.
+  # The request table FIRST, because it is the one that diagnoses. A status >= 400 on one
+  # relation while others answer 200 on the same token is a stack that refused the app, and
+  # neither the Playwright tail nor the page snapshot below can show that.
   for t in "$SRC"/test-results/*/trace.zip; do
     [ -f "$t" ] || continue
     unzip -p "$t" '*.network' 2>/dev/null \
@@ -214,15 +209,13 @@ esac
 # Of the relations the project's own grant file DECLARES readable by `authenticated`, which
 # ones actually are not. Empty on any error, so a failure to measure never becomes a skip.
 #
-# The declaration is the right source of truth, and it took two wrong attempts to get there.
-# "Every public relation must be readable" is a policy this project does not hold (grants are
-# enumerated relation by relation), so it would skip every run forever. "Nothing may become
-# less readable than before the delta" is a regression check, and it misses the case that
-# actually matters here: five committed migrations recreate contacts_summary with no
-# accompanying grant while 06_grants.sql declares it for `authenticated`, so a stack built
-# from migrations/ can arrive ALREADY missing it — unreadable before and after, no regression,
-# suite runs anyway, same false red. Asking "is the project's own declaration satisfied"
-# catches both, and invents nothing.
+# The declaration is the source of truth, and the two obvious alternatives are both wrong.
+# "Every public relation must be readable" is a policy a project enumerating its grants one
+# relation at a time does not hold, so it would skip every run forever. "Nothing may become
+# less readable than before the delta" is a regression check, and it misses a relation that
+# arrives ALREADY missing its grant — unreadable before and after, no regression, suite runs
+# anyway, same false red. Asking whether the declaration is satisfied catches both and
+# invents nothing.
 #
 # The marker prefix is what makes this parseable: the CLI decorates query output, and grepping
 # for a column header or a row separator would break the day that decoration changes.
@@ -245,14 +238,12 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
     if ls "$workdir"/supabase/migrations/*_e2e_throwaway.sql >/dev/null 2>&1; then
       npx supabase migration up --workdir "$workdir" --local >"$workroot/migup.log" 2>&1 \
         || { cat "$workroot/migup.log" >&2; skip "schema pending migration round (throwaway apply failed); deferring the Supabase e2e leg to the deploy-time migration."; }
-      # A generated delta rebuilds a changed VIEW with DROP + CREATE, and Postgres drops its
-      # GRANTs with it. They are declared in their own declarative file, which the delta has
-      # no reason to touch, so the rebuilt relation comes back readable by nobody: measured on
-      # run eee7a672, `GET /rest/v1/contacts_summary` answered 403, ra-core raised an error
-      # toast, the app fell back to the sign-in page, and the toast then intercepted the click
-      # in the shared `goToContacts` fixture. 7 specs failed, the suite was reported as the
-      # FEATURE's failure, and two developer rounds were spent "fixing" tests that were
-      # never wrong. Re-apply the grants so a rebuilt view keeps its access.
+      # Grants live in their own declarative file, which a generated delta has no reason to
+      # replay, and several paths can leave a relation the app reads without them — a delta
+      # that rebuilds a view rather than replacing it, or committed migrations that recreate
+      # one with no accompanying grant. PostgREST then answers 403, ra-core reads that as an
+      # invalid session and logs out, and every spec fails on a login page. Replay the
+      # declaration so that cannot be what a red suite means.
       for g in "$workdir"/supabase/schemas/*grant*.sql; do
         [ -f "$g" ] || continue
         echo "e2e-smoke: re-applying declarative grants ($(basename "$g")) after the throwaway migration"
@@ -260,11 +251,10 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
           || { cat "$workroot/grants.log" >&2; skip "could not re-apply $(basename "$g") after the throwaway migration; the stack would answer 403 on rebuilt views, which is not the feature's fault."; }
       done
 
-      # Then VERIFY the declaration holds, rather than trusting the re-apply above to have
-      # been the right remedy. Run eee7a672 is what this is for: contacts_summary answered 403
-      # to a properly authenticated caller (login 200, role=authenticated, contact_notes and
-      # sales both 200 on the same token) and the suite spent 25 minutes proving that the
-      # specs could not click a link.
+      # Then VERIFY the declaration holds, rather than trusting the replay above to have been
+      # the right remedy. A stack that refuses one relation to a properly authenticated caller
+      # cannot serve the app, and the suite would spend its whole runtime proving only that the
+      # specs cannot click a link.
       for g in "$workdir"/supabase/schemas/*grant*.sql; do
         [ -f "$g" ] || continue
         missing="$(declared_unreadable "$g")"

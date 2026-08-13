@@ -76,15 +76,13 @@ const ctx = createHookContext(input, "e2e-on-feature-review");
 // The runtime's own book-keeping stop, every ~32 s while an agent runs. It names no agent,
 // so identity falls to the newest-transcript GUESS, which lands on whichever reviewer is
 // currently running — and this hook then reads that reviewer's mid-turn snapshot, where no
-// contract line exists yet, as its verdict. Measured on run eee7a672: 18 consecutive
-// `feature-review not APPROVED (verdict=UNPARSEABLE)` lines between 08:40 and 08:50, one
-// every 32 s, while the reviewer was still working. The real stop at 08:51 parsed APPROVED
-// and launched the suite normally.
+// contract line exists yet, as its verdict — one `verdict=UNPARSEABLE` line every ~32 s for
+// as long as the reviewer works.
 //
-// Those lines are why an earlier audit recorded "verdict parsing fails on every reviewer
-// dispatch" as an open defect. It was never real: no reviewer's own stop ever failed to
-// parse. Same filter as record-review-verdict and record-smoke-evidence, and for the same
-// reason — a phantom decides what to LOG, never what to DO.
+// Those lines are why "verdict parsing fails on every reviewer dispatch" was once recorded as
+// an open defect. It was never real: no reviewer's own stop ever failed to parse. Same filter
+// as record-review-verdict and record-smoke-evidence, and for the same reason — a phantom
+// decides what to LOG, never what to DO.
 if (isPhantomStop(input)) process.exit(0);
 
 const sessionRef = sessionBranch(ctx);

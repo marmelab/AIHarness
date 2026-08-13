@@ -69,9 +69,9 @@ if (!identity) {
 }
 
 // --- gate 2: is validation this role's business --------------------------------------
-// Once per role, then counted in <sessionDir>/skips/: with the `.*` matcher this hook runs
-// on every stop of every agent, and one measured run spent 294 of its 1040 log lines saying
-// validation was not the stopping role's business.
+// Once per role, then counted in <sessionDir>/skips/: with the `.*` matcher this hook runs on
+// every stop of every agent, so repeating this line spends most of the log saying validation
+// was not the stopping role's business.
 const validateRoles = validateRoleSet();
 if (!matchesRole(identity, validateRoles)) {
   ctx.acceptOnce(

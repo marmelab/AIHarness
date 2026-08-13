@@ -519,7 +519,7 @@ FIX_RANGE: <the developer's pre-retry HEAD>..<its new DONE commit>
 FINDINGS_RAISED: <the previous REJECTED verdict body, verbatim>
 ```
 
-The reviewer then judges whether each raised finding is resolved and whether `FIX_RANGE` itself is sound, instead of re-reading the whole ticket. Without these lines a re-review is a second full pass: measured on a five-ticket run, three tickets were rejected once each and their re-reviews cost as much as the originals, which is why review was 47% of that run. Same narrowing the end-of-feature pass already uses — see `quality-reviewer.md` "A `FIX_ROUND:` block narrows the pass to the fix".
+The reviewer then judges whether each raised finding is resolved and whether `FIX_RANGE` itself is sound, instead of re-reading the whole ticket. Without these lines a re-review is a second full pass, costing as much as the original to re-report what it already said. Same narrowing the end-of-feature pass already uses — see `quality-reviewer.md` "A `FIX_ROUND:` block narrows the pass to the fix".
 
 **Loop Stage 2 until every still-live ticket is `MERGE` or `FAILED`** — bounded because `retries` can only climb to `MAX_RETRIES`.
 

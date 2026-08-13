@@ -3,19 +3,18 @@
 // `role` claim of the JWT it was sent with. Reads a `.network` stream on stdin (as produced
 // by `unzip -p <trace.zip> 0-trace.network`).
 //
-// This is the view that actually diagnoses a red suite, and the audit of run eee7a672 is the
-// proof. The Playwright tail said "click intercepted, element detached" and the page snapshot
-// said the app was on the sign-in page — and BOTH of those point away from the real cause. A
-// developer read the first and spent two rounds adding waits for a navigation race; reading
-// the second would have sent the next person hunting a broken login. The request table
-// settles it in one glance:
+// This is the view that diagnoses a red suite, and the two artefacts that already exist both
+// mislead without it. The Playwright tail reports an intercepted click or a detached element,
+// which describes a broken spec. The page snapshot reports whatever page the app ended on,
+// which sends the reader after that page's usual cause. Only the request table shows the shape
+// of a stack problem:
 //
 //     200  POST  role=-              /auth/v1/token?grant_type=password
 //     403  GET   role=authenticated  /rest/v1/contacts_summary?...
 //     200  GET   role=authenticated  /rest/v1/contact_notes?...
 //
-// Login succeeded, the role is right, and exactly ONE relation is refused — the one the
-// session's schema delta rebuilt. Nothing else in the artefacts says that.
+// Login succeeded, the role is right, and exactly one relation is refused. No spec written any
+// differently would have passed, and nothing else in the artefacts says so.
 //
 // Usage: unzip -p trace.zip 0-trace.network | node trace-requests.mjs
 

@@ -121,12 +121,10 @@ describe("completion-invariant — orphaned work", () => {
 });
 
 // A merger DISPATCHED for the ticket and still in flight is work in progress, not an orphan.
-// Measured on run eee7a672: the reviewer approved TASK-001 at 08:03:25, the merger was
-// dispatched at 08:03:35, this invariant rejected the stop at 08:03:41 — 6 s into a merge
-// that completed at 08:04:02. The orchestrator read the rejection as "you still have unmerged
-// work", re-dispatched the same merger, and block-duplicate-dispatch refused it 23 s later.
-// All five tickets did it: 9 rejected stops and 5 refused dispatches to reach the state the
-// first merger was already reaching.
+// Rejecting the stop a few seconds into that merge makes the orchestrator read it as "you still
+// have unmerged work" and re-dispatch the same merger, which block-duplicate-dispatch then
+// refuses: one rejected stop, one refused dispatch and two wasted turns per ticket, to reach
+// the state the first merger was already reaching.
 describe("completion-invariant — a merge in flight is not an orphan", () => {
   const recordMergerDispatch = (taskId, at = new Date().toISOString()) =>
     writeFileSync(

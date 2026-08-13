@@ -5,11 +5,10 @@
 //
 // It used to be the orchestrator's job alone: orchestrator.md tells it to append each
 // milestone with `Bash("echo ... >> harness-progress.log")`. A prompt instruction is not a
-// gate, and run eee7a672 is what that costs — a `#technical-harness` request where the file
-// was never created, so there was no live feed for 137 minutes AND no board either, because
-// render-status is gated on that same file existing. The harness's own rule is that every
-// gate is a hook rather than an instruction, precisely so it fires whether or not the model
-// cooperates; this one had been left as an instruction.
+// gate, and an orchestrator that skips it leaves a `#technical-harness` run with no live feed
+// at all AND no board either, because render-status is gated on that same file existing. The
+// harness's own rule is that every gate is a hook rather than an instruction, precisely so it
+// fires whether or not the model cooperates; this one had been left as an instruction.
 //
 // The FILE's existence stays the technical-run gate (a web-chat or normal run must never get
 // a board), which is why this is keyed on the dispatch prompt and not created unconditionally.

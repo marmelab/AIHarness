@@ -1,9 +1,8 @@
 // The technical run's live feed must exist because a HOOK created it, not because the
 // orchestrator remembered to.
 //
-// orchestrator.md tells it to append each milestone with a Bash echo. That is an
-// instruction, not a gate, and run eee7a672 shows the cost: a `#technical-harness` request
-// where harness-progress.log was never created, so there was no live feed for 137 minutes
+// orchestrator.md tells it to append each milestone with a Bash echo. That is an instruction,
+// not a gate: an orchestrator that skips it leaves a `#technical-harness` run with no live feed
 // and no board either, because render-status is gated on that same file existing.
 //
 // The file's EXISTENCE stays the technical-run gate, so this is keyed on the dispatch

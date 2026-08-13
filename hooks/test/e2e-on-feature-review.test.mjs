@@ -272,10 +272,9 @@ describe("e2e-on-feature-review", () => {
 
   // The runtime's own book-keeping stop, every ~32 s while an agent runs. It names no agent,
   // so identity fell to the newest-transcript guess — the reviewer still WORKING — and this
-  // hook read that mid-turn snapshot as a verdict. Run eee7a672 logged 18 consecutive
-  // `verdict=UNPARSEABLE` lines between 08:40 and 08:50, one every 32 s, and an earlier audit
-  // recorded them as "verdict parsing fails on every reviewer dispatch". It never did: the
-  // real stop at 08:51 parsed APPROVED and launched the suite.
+  // hook read that mid-turn snapshot as a verdict, one `verdict=UNPARSEABLE` line every ~32 s.
+  // Those lines were once recorded as "verdict parsing fails on every reviewer dispatch". It
+  // never did: the reviewer's own stop parsed APPROVED and launched the suite.
   test("a phantom stop is not read as a reviewer's verdict", () => {
     writeSmoke(SMOKE.record);
     approve();

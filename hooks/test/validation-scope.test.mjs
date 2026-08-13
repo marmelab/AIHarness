@@ -484,9 +484,9 @@ describe("a full session's stop sequence", () => {
     // 36 stops in total. Only the 12 developer stops get past the three gates at all...
     expect(count("START role=")).toBe(devStops * 2);
     // The other 24 are skipped, and each ROLE says so ONCE. With the `.*` matcher this hook
-    // runs on every stop of every agent, and logging each skip put 294 such lines in one
-    // measured run's 1040. One line per role still proves the hook ran and says what it saw;
-    // the totals move to the counters asserted below.
+    // runs on every stop of every agent, so logging each skip spends most of the log on them.
+    // One line per role still proves the hook ran and says what it saw; the totals move to the
+    // counters asserted below.
     expect(count("skip:")).toBe(4); // quality-reviewer / merger / orchestrator / planner
     for (const role of ["quality-reviewer", "merger", "orchestrator", "planner"])
       expect(count(`skip: aiharness:${role} stop`)).toBe(1);
