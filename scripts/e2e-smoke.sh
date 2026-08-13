@@ -211,25 +211,36 @@ case "$branch" in
     fi
     ;;
 esac
-# Which `public` relations `authenticated` cannot SELECT, as a comma list. The marker prefix
-# is what makes this parseable: the CLI decorates query output, and grepping for a column
-# header or a row separator would break the day that decoration changes. Empty on any error,
-# so a failure to measure never turns into a skip.
-unreadable_relations() {
+# Of the relations the project's own grant file DECLARES readable by `authenticated`, which
+# ones actually are not. Empty on any error, so a failure to measure never becomes a skip.
+#
+# The declaration is the right source of truth, and it took two wrong attempts to get there.
+# "Every public relation must be readable" is a policy this project does not hold (grants are
+# enumerated relation by relation), so it would skip every run forever. "Nothing may become
+# less readable than before the delta" is a regression check, and it misses the case that
+# actually matters here: five committed migrations recreate contacts_summary with no
+# accompanying grant while 06_grants.sql declares it for `authenticated`, so a stack built
+# from migrations/ can arrive ALREADY missing it — unreadable before and after, no regression,
+# suite runs anyway, same false red. Asking "is the project's own declaration satisfied"
+# catches both, and invents nothing.
+#
+# The marker prefix is what makes this parseable: the CLI decorates query output, and grepping
+# for a column header or a row separator would break the day that decoration changes.
+declared_unreadable() {
+  local grants="$1" rels
+  rels="$(sed -nE 's/^[[:space:]]*grant[[:space:]]+.*[[:space:]]on[[:space:]]+table[[:space:]]+(public\.)?"?([a-z0-9_]+)"?[[:space:]]+to[[:space:]]+"?authenticated"?.*/\2/Ip' \
+    "$grants" | sort -u | paste -sd, -)"
+  [ -z "$rels" ] && return 0
   npx supabase db query --workdir "$workdir" --local \
-    "select 'HARNESS_UNREADABLE:' || coalesce(string_agg(c.relname, ',' order by c.relname), '')
-       from pg_class c join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public'
-        and c.relkind in ('r','v','m')
-        and not has_table_privilege('authenticated', c.oid, 'SELECT');" 2>/dev/null \
+    "select 'HARNESS_UNREADABLE:' || coalesce(string_agg(r, ',' order by r), '')
+       from unnest(string_to_array('$rels', ',')) as r
+      where to_regclass('public.' || r) is not null
+        and not has_table_privilege('authenticated', 'public.' || r, 'SELECT');" 2>/dev/null \
     | sed -n 's/.*HARNESS_UNREADABLE:\([^"|]*\).*/\1/p' | tr -d ' "' | head -1
 }
 
 if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
   echo "e2e-smoke: session changed supabase/schemas/, materializing a throwaway migration..."
-  # The baseline the check below compares against: taken from the stack as the committed
-  # migrations built it, BEFORE the delta touches anything.
-  before_unreadable="$(unreadable_relations)"
   if npx supabase db diff --workdir "$workdir" --local -f _e2e_throwaway >"$workroot/dbdiff.log" 2>&1; then
     if ls "$workdir"/supabase/migrations/*_e2e_throwaway.sql >/dev/null 2>&1; then
       npx supabase migration up --workdir "$workdir" --local >"$workroot/migup.log" 2>&1 \
@@ -249,30 +260,18 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
           || { cat "$workroot/grants.log" >&2; skip "could not re-apply $(basename "$g") after the throwaway migration; the stack would answer 403 on rebuilt views, which is not the feature's fault."; }
       done
 
-      # Then MEASURE what applying the delta did to access, rather than trusting the re-apply
-      # above to have been the right remedy. Run eee7a672 could not be diagnosed past this
-      # point: the suite went red with a 403 on contacts_summary and the app on the sign-in
-      # page, and by the time anyone looked this workdir was deleted — so "the delta dropped
-      # the view's grants" and "login failed and the request went as anon" were both
-      # consistent with the evidence and neither could be confirmed.
-      #
-      # A REGRESSION, not a policy. Asserting "authenticated must be able to SELECT every
-      # public relation" would be wrong here: grants are enumerated relation by relation
-      # (113 statements in this project), so one legitimately ungranted relation would skip
-      # the suite on every run, forever — the same silent-inertia failure this whole audit
-      # was about. Comparing against the baseline taken before the delta has no policy in it:
-      # it only fires when applying the delta took access AWAY.
-      after_unreadable="$(unreadable_relations)"
-      lost=""
-      for rel in $(printf '%s' "$after_unreadable" | tr ',' ' '); do
-        case ",${before_unreadable}," in
-          *",${rel},"*) ;;                 # already unreadable before the delta: not ours
-          *) lost="${lost:+$lost, }$rel" ;;
-        esac
+      # Then VERIFY the declaration holds, rather than trusting the re-apply above to have
+      # been the right remedy. Run eee7a672 is what this is for: contacts_summary answered 403
+      # to a properly authenticated caller (login 200, role=authenticated, contact_notes and
+      # sales both 200 on the same token) and the suite spent 25 minutes proving that the
+      # specs could not click a link.
+      for g in "$workdir"/supabase/schemas/*grant*.sql; do
+        [ -f "$g" ] || continue
+        missing="$(declared_unreadable "$g")"
+        if [ -n "${missing:-}" ]; then
+          skip "the isolated stack does not satisfy $(basename "$g"): 'authenticated' cannot SELECT $missing. Every app query against those answers 403 and the app falls back to the login page, so a red suite here would be the STACK's failure, not the feature's."
+        fi
       done
-      if [ -n "$lost" ]; then
-        skip "applying the throwaway migration took SELECT away from 'authenticated' on: $lost. Every app query against those would answer 403 and the app would fall back to the login page, so a red suite here would be the STACK's failure, not the feature's."
-      fi
     else
       # `db diff` succeeded and produced NOTHING. The old code fell through this branch in
       # silence and ran the suite against a database that cannot serve the feature, so a
