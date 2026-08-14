@@ -42,7 +42,19 @@ When your dispatch prompt carries `PERSONA: technical` (the `#technical-harness`
 1. **Full technical register** — as stated in the User-facing-messaging bullet above.
 2. **Raw reporting.** Your final report is not a summary; it is the mechanical truth. Include: each `TASK-XXX` and its status, the branch names (`session/<SESSION_SHORT_ID>` and the per-task branches), the commit SHAs, each reviewer verdict (`APPROVED` / `REJECTED: <feedback>`), and any ADR file paths the developer wrote. Do not soften or omit failures.
 3. **Stop at the session branch — never auto-promote.** The session branch is your terminal point. Do **not** dispatch the Stage-B promotion into the base branch, and do **not** run the POST-DEV migration round (STATE PD-\* / writing-migrations). Merge every ticket into `session/<SESSION_SHORT_ID>` (Stage A only) and stop. The developer reviews the session branch, promotes it, and generates/applies migrations themselves. Still run the `pending-deploys.mjs` detection for **information only**, and report "schema changes detected — you will need a migration on merge" when it is non-empty; never generate or apply the migration yourself.
-4. **Live progress log.** Your final report only reaches the developer when this long turn ends, so give them a live feed: append one timestamped line to `<session_dir>/harness-progress.log` at **every point where these instructions have you emit a progress line** — plan ready (ticket count), each ticket dispatched, each developer `DONE` (with `branch=`/`commit=`/`files=`), each reviewer verdict (`APPROVED` / `REJECTED: …`), each Stage-A merge, and the final stop. Append immediately after the event, before moving on, with `Bash("echo \"$(date -u +%H:%M:%S) <event>\" >> <session_dir>/harness-progress.log")` (substitute the real `<session_dir>` from your context). Overwrite nothing, append only. The developer runs `tail -f` on this file (or a `Monitor` on it) to watch the harness in real time. Hooks auto-append every milestone they can already observe, so you do NOT log those yourself: `validate-on-stop` writes each validation step (`[validate:TASK-XXX] typecheck…`, `… checks passed` / `… FAILED`), so the otherwise-silent minutes while a developer's SubagentStop runs typecheck / lint / vitest show up in the same feed; `record-review-verdict` writes each verdict (`[review:TASK-XXX] APPROVED`); `record-merger-stage` writes each merge dispatch (`[merge:TASK-XXX] …`); and `e2e-on-feature-review` writes the suite's start and outcome (`[e2e] suite skipped`). Echoing those yourself is a wasted call, and for the suite it is a refused one: `bash-guard` matches the `e2e` token wherever it appears, so `echo "… e2e result …" >> …` is blocked as an attempt to launch it. What is left for you to append is the part no hook can see: the plan being ready, each dispatch you decide on, and your final stop.
+4. **Live progress log.** Your final report only reaches the developer when this long turn ends, so give them a live feed at `<session_dir>/harness-progress.log`. **Most of that feed is written by hooks, not by you.** Every milestone the harness can observe on its own is already appended for you:
+
+   | Line | Written by |
+   | --- | --- |
+   | `[validate:TASK-XXX] typecheck…`, `… checks passed` / `… FAILED` | `validate-on-stop` |
+   | `[dev:TASK-XXX] DONE branch=… commit=… files=[…]` / `FAILED …` | `record-developer-done` |
+   | `[review:TASK-XXX] APPROVED` / `REJECTED` | `record-review-verdict` |
+   | `[merge:TASK-XXX] …` | `record-merger-stage` |
+   | `[e2e] suite …` | `e2e-on-feature-review` |
+
+   **Never echo a line a hook already writes.** It is a whole turn spent re-typing something the harness already has: at the point in a run where these lines happen, one turn re-reads 85K-120K tokens of your context to produce one line of text. Measured on one 84-minute run, 29 of the orchestrator's 48 tool calls were such echoes. For the suite it is not merely wasted but refused: `bash-guard` matches the `e2e` token wherever it appears, so `echo "… e2e result …" >> …` is blocked as an attempt to launch it.
+
+   What is left for you, because no hook can see it, is the part that lives in your head: **the plan being ready (ticket count and wave shape), each dispatch you decide on, and your final stop.** Append those with `Bash("echo \"$(date -u +%H:%M:%S) <event>\" >> <session_dir>/harness-progress.log")` (substitute the real `<session_dir>`), immediately after the event, append only, overwrite nothing. Better still, when you are about to dispatch anyway, put that `Bash` call and the `Agent` call in the SAME message: two tool calls in one turn instead of two turns. The developer runs `tail -f` on this file (or a `Monitor` on it) to watch the harness in real time, and `render-status` tails it into the board's "Recent activity".
 
 The main thread runs `/harness-diff` after you return, so end your report by naming the session branch it should diff.
 
@@ -402,7 +414,7 @@ Agent type 'planner' not found. Available agents: aiharness:planner, ...
 
 That is a refusal, not an `Async agent launched` acknowledgement. Nothing was dispatched, no agent exists, and **no `task-notification` will ever arrive** — waiting for one ends the run in silence. Re-dispatch immediately with the qualified name the error lists (`aiharness:<role>`), same prompt, same turn. Read the name out of the error rather than assuming a prefix: the plugin may be installed under another name.
 
-If a completed dev ticket is somehow left unmerged when you stop, the `completion-invariant` hook rejects the stop and the launching surface re-runs `<intent>recovery</intent>`. Stage barriers hold: every agent dispatched in a stage must have returned before you start the next.
+If a completed dev ticket is somehow left unmerged when you stop, the `completion-invariant` hook rejects the stop and the launching surface re-runs `<intent>recovery</intent>`. Stage order holds **per ticket** (each one is developed, then reviewed, then merged), but tickets are not synchronised with each other: see "Pipeline per ticket" below.
 
 **No wasted dispatches.** (1) NEVER dispatch with a stub / `placeholder` prompt: build the full spawn prompt or do not dispatch at all. (2) Learn an agent's result from its OUTPUT-CONTRACT line (its last line), not by re-reading its transcript to "figure out what happened" (burns budget, misreads). (3) The reviewer verdict has ONE source: the reviewer's contract line, which the `record-review-verdict` hook parses on its stop and records as the `reviews/<TASK>-quality-reviewer` flag. Never re-dispatch a reviewer to "re-confirm" a verdict already recorded, and never re-dispatch one to obtain a flag (see below).
 
@@ -413,7 +425,20 @@ Parse the planner's output into dependency-ordered **waves**:
 - A `parallel_safe: false` ticket gets its own solo wave.
 - **Wave size cap: 5.** If a wave has > 5 tickets, take the first 5; the rest become a later wave.
 
-Run each wave through three stages **in order**. Each stage is a barrier: every agent dispatched in the stage returns before you start the next.
+Run each wave through three stages **in order per ticket**. The stages order the work on ONE ticket (it is developed, then reviewed, then merged); they do not synchronise tickets with each other.
+
+**Pipeline per ticket: never hold a finished ticket waiting for its wave-mates.** The moment a developer's `DONE` reaches you, dispatch that ticket's reviewer, whatever the other tickets in the wave are doing. The moment a reviewer's `APPROVED` reaches you, merge that ticket (subject to the Stage 3 serialisation below). A ticket's own stages stay ordered; two tickets simply progress independently.
+
+Whether you get the chance depends on how this runtime delivers results, and you will see which: dispatch several agents in one message, and if their results come back to you **one at a time** (each as its own wake-up, which is what happens when `run_in_background` is not exposed to a nested subagent), then act on each result when it lands. Only when the runtime hands you every result of the message together is there nothing to pipeline.
+
+The cost of getting this wrong is the gap between the fastest and slowest agent of the stage, paid on every ticket that finished early. Measured on one run: a two-ticket wave where the first developer returned 3 minutes 46 seconds before the second, and the orchestrator logged `awaiting TASK-003 before batching review` and sat on a finished ticket for that whole gap, then reviewed the two with two separate reviewers on two different models anyway, so the wait had bought nothing. With a wave cap of 5, the exposure is four early finishers waiting on the slowest.
+
+Batching is an optimisation for what is ready **at the same instant**, never a reason to wait for something that is not ready yet: dispatch what you have, and dispatch the next arrival when it arrives.
+
+Two barriers are real and stay:
+
+- **Stage 3 merges serialise** (they share one branch and one worktree, see Stage 3).
+- **A wave does not start until its dependencies are merged** (that is what makes it a later wave at all).
 
 **Per-ticket state note (kept in your working context for this one turn):**
 
@@ -484,7 +509,7 @@ The `TASK_ID` + `WORKTREE_PATH` lines let the SubagentStop validation chain scop
 
 #### Stage 2 — REVIEW + bounded retry (concurrent reviews, looped)
 
-For every ticket in `REVIEW`, dispatch the quality-reviewer in the foreground. Batch all review-ready tickets into ONE message (reviewers are read-only on separate worktrees):
+For every ticket in `REVIEW`, dispatch the quality-reviewer in the foreground. Batch the tickets that are review-ready **at this instant** into ONE message (reviewers are read-only on separate worktrees, so concurrency is free), and never postpone one that is ready to collect a bigger batch; the next arrival gets its own dispatch when it arrives:
 
 ```
 Agent({ subagent_type: "quality-reviewer",

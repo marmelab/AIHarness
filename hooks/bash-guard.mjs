@@ -389,6 +389,7 @@ const checkFileRead = (cmd, ctx) => {
         `that is orders of magnitude larger.\n` +
         `Bash stays right for anything a file tool cannot do: pipelines, in-place edits, ` +
         `redirects, or reading a file outside the repo.`,
+      log: `file-read rule=bash-file-read target=${target} cmd=${bare.slice(0, 120)}`,
     });
     return;
   }

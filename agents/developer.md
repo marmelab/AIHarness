@@ -10,9 +10,10 @@ tools:
   - Glob
   - Grep
   - Skill
-  # The Playwright MCP browser tools. The runtime does not always deliver a plugin's
-  # MCP tools to a subagent, so an agent that does not see them in its tool list drives
-  # the browser from Bash instead (see "Running the app for self-verification").
+  # The Playwright MCP browser tools. Like LSP below, these are DEFERRED: listing them
+  # here does NOT put them in a subagent's tool list, and they are reached through
+  # ToolSearch at runtime. Never read their absence from the list as absence from the
+  # runtime -- see "Running the app for self-verification" for the query to run.
   - mcp__plugin_aiharness_playwright__browser_navigate
   - mcp__plugin_aiharness_playwright__browser_snapshot
   - mcp__plugin_aiharness_playwright__browser_click
@@ -21,6 +22,7 @@ tools:
   - mcp__plugin_aiharness_playwright__browser_select_option
   - mcp__plugin_aiharness_playwright__browser_press_key
   - mcp__plugin_aiharness_playwright__browser_wait_for
+  - mcp__plugin_aiharness_playwright__browser_resize
   - mcp__plugin_aiharness_playwright__browser_take_screenshot
   - mcp__plugin_aiharness_playwright__browser_console_messages
   - mcp__plugin_aiharness_playwright__browser_close
@@ -234,9 +236,17 @@ This is the sanctioned way; other forms are refused by `bash-guard`.
 
 2. **Headless only** (this sandbox has no display): Playwright without `--headed` / `--ui` / `--debug`, the dev server without `--open`.
 
-3. **Drive it.** If the `browser_*` Playwright MCP tools are in your tool list, use them, preferring `browser_snapshot` (accessibility tree, token-cheap) over `browser_take_screenshot`. The runtime does not always deliver a plugin's MCP tools to a subagent; when they are absent, do not spend a turn looking for them, drive the browser from Bash with a headless Playwright script that PRINTS what it checked (`console.log`, `ariaSnapshot()`, `page.on('pageerror')`). Printed lines come back as tool output; a screenshot costs a few hundred kilobytes and answers a structural question with an image.
+3. **Drive it with the `browser_*` tools. Load them first: they are DEFERRED.** Exactly like `LSP`, the Playwright MCP tools are absent from your static tool list and are reached through `ToolSearch`. Looking for them in your list and falling back when they are missing is a test that always fails, because they are always missing from the list and always available one call later:
 
-4. **Always tear down**: close the browser and kill the server before you stop, or the SubagentStop validation chain stalls.
+   ```
+   ToolSearch({query: "select:mcp__plugin_aiharness_playwright__browser_navigate,mcp__plugin_aiharness_playwright__browser_snapshot,mcp__plugin_aiharness_playwright__browser_click,mcp__plugin_aiharness_playwright__browser_fill_form,mcp__plugin_aiharness_playwright__browser_select_option,mcp__plugin_aiharness_playwright__browser_resize,mcp__plugin_aiharness_playwright__browser_close", max_results: 10})
+   ```
+
+   Then `browser_navigate` -> `browser_snapshot`, preferring the accessibility tree (text, token-cheap) over `browser_take_screenshot`. Only if that query returns no match should you drive the browser from Bash instead, with a headless script that PRINTS what it checked (`NODE_PATH=$PWD/node_modules` so `require('playwright')` resolves, plus `console.log`, `ariaSnapshot()`, `page.on('pageerror')`).
+
+4. **Check a viewport-dependent spec at its other viewport, with `browser_resize`.** When you write an e2e spec that asserts on a control whose presence depends on screen width (a toolbar button, a sort control, a sidebar), the suite will run that spec under EVERY project configured in the project's Playwright config, mobile viewports included. Resize to the narrow one and snapshot before you commit: a spec that passes only on desktop fails the suite at end-of-feature, and repairing it there costs a full extra developer + review + merge round. This costs you one `browser_resize` and one `browser_snapshot`.
+
+5. **Always tear down**: close the browser and kill the server before you stop, or the SubagentStop validation chain stalls.
 
 ## Tool call efficiency — HARD RULE
 
@@ -280,21 +290,13 @@ If you need the detail behind a line of `PRIOR_WORK`, read the file it names, or
 
 No `PRIOR_WORK` block means there is nothing merged yet (you are in wave 1), not that you should go looking.
 
-**Load `LSP` before you use it.** It is a DEFERRED tool: it is NOT in your tool list at
-start, and listing it in your definition does not put it there. Call
-`ToolSearch({query: "select:LSP"})` once, early, and it becomes callable for the rest of
-your turn. If it answers `No matching deferred tools found`, the tool does not exist in this session
-(measured: subagents get it in a non-interactive run, not in an interactive one) — `grep` is
-then the CORRECT answer, not a fallback you owe an excuse for. Ask once, take the answer,
-move on: do not retry, do not hunt for a workaround, do not report it as a blocker.
+**Semantic questions go through `ts-symbols.mjs`. `LSP` is not available to you, so do not spend a turn checking.** A background subagent has the tool pruned from its set, and every harness agent runs in the background (four open runtime reports, no fix). Measured over one full run: 21 agents, 0 LSP calls. So skip `ToolSearch({query: "select:LSP"})` entirely and use the script, which answers the same questions through the project's own TypeScript program:
 
-When that load answers `No matching deferred tools found` — the normal case on this pipeline — use `node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs|def|sym` from your worktree for the same answers through the TypeScript program. See `.claude/rules/lsp-usage.md`.
+```bash
+cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs <file> <line> <col>
+```
 
-The first query after the server starts can answer `No symbols found in workspace ... has
-not finished indexing`. That is the server warming up, not an empty repo: repeat the same
-call once before concluding anything.
-
-**Use the `LSP` tool for semantic navigation — do not `grep` for symbols.** To find where a TypeScript identifier (type, component, hook, function, exported const) is defined or used in `.ts/.tsx/.js/.jsx`, call `LSP`: `goToDefinition`, `findReferences` (size the blast radius before changing a signature), `hover` (confirm a type), `workspaceSymbol` (locate a symbol), `incomingCalls` (who calls it). Never `grep -rn "<Symbol>" src/` in Bash for this — it misses re-exports and aliased imports and can't tell a definition from a comment. Reserve `grep`/`rg` for text and domain-word sweeps (e.g. deleting all mentions of a resource), database column/view names, and non-TS files (`.sql`, `.md`, `.json`, `.css`). See `.claude/rules/lsp-usage.md`.
+`refs` before changing a signature (text search misses re-exports and aliased imports, and answers for every same-named symbol at once), `def` for where a symbol is really declared, `sym` to locate one by name. Positions are 1-based. Reserve `grep`/`rg` for what it is genuinely good at: text and domain-word sweeps (deleting every mention of a resource), database column/view names, and non-TS files (`.sql`, `.md`, `.json`, `.css`). See `.claude/rules/lsp-usage.md`.
 
 ## Plan format
 

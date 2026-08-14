@@ -672,8 +672,19 @@ describe("bash-guard hook", () => {
         "rule=redirect kind=process-output",
       ],
       ["developer", "sed -i 's/a/b/' src/x.ts", "rule=sed-in-place"],
+      // This one shipped without a log field, so a run that refused eleven Bash reads
+      // recorded eleven bare `BLOCK` lines: a refusal happened, and hooks.log could not say
+      // which rule or which file. Every sibling above names both.
+      ["developer", "cat src/x.ts", "rule=bash-file-read"],
     ])("%s running '%s' logs %s", (agent, command, label) => {
       expect(logFor(agent, command)).toContain(label);
+    });
+
+    // The bare verb alone is what a missing `log` field produces, so pin its absence: the
+    // grammar of this file is one line per decision, saying what was decided and on what.
+    test("no block logs the bare verb with no rule", () => {
+      const log = logFor("developer", "cat src/x.ts");
+      expect(log).not.toMatch(/\[bash-guard\] BLOCK\s*$/m);
     });
   });
 });
