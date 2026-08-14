@@ -23,11 +23,12 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
 import { reviewsDir } from "./lib/reviews.mjs";
+import { scratchpadDir } from "./lib/scratchpad.mjs";
 import { getBaseBranch, git } from "./lib/git.mjs";
 import { sessionBranch } from "./lib/topology.mjs";
 
@@ -86,10 +87,30 @@ const listing = (dir) => {
   }
 };
 
+// Every place a ticket file has been observed. The orchestrator is TOLD the session dir
+// and does not always use it: one run wrote all five tickets into the runtime scratchpad
+// (`/tmp/claude-<uid>/<project>/<id>/`) instead, so a board looking only where the hooks
+// keep their state reported "0/0 merged · no tickets yet" for a session that merged five.
+// The board had never been wrong about this before only because it had never rendered.
+//
+// Reading the scratchpad too is a READ of a directory the session owns, not an endorsement
+// of writing tickets there — the mismatch itself is still a defect worth closing upstream.
+const ticketDirs = () => {
+  const dirs = [ctx.ticketsDir, ctx.sessionDir];
+  try {
+    const pad = scratchpadDir(ctx.sessionId);
+    // Tickets sit next to the scratchpad, not inside it.
+    if (pad) dirs.push(dirname(pad));
+  } catch {
+    // no session id / unreadable /tmp -> the two dirs above still answer
+  }
+  return dirs;
+};
+
 // A ticket's STATUS lives inside its file, so the dir's mtime is not enough.
 const ticketsMtimeMs = () => {
   let newest = 0;
-  for (const dir of [ctx.ticketsDir, ctx.sessionDir]) {
+  for (const dir of ticketDirs()) {
     try {
       for (const f of readdirSync(dir)) {
         if (TICKET_RE.test(f)) newest = Math.max(newest, mtimeMs(join(dir, f)));
@@ -135,9 +156,10 @@ const lastRenderKey = (() => {
 // What gets logged is a render.
 if (lastRenderKey && renderKey === lastRenderKey) process.exit(0);
 
-// Tickets live in the session dir itself or a `tickets/` subdir - try both.
+// Tickets live in the session dir itself, a `tickets/` subdir, or the scratchpad — see
+// ticketDirs().
 function readTickets() {
-  for (const dir of [ctx.ticketsDir, ctx.sessionDir]) {
+  for (const dir of ticketDirs()) {
     if (!existsSync(dir)) continue;
     const files = readdirSync(dir).filter((f) => TICKET_RE.test(f));
     if (!files.length) continue;
@@ -350,7 +372,15 @@ try {
   writeFileSync(join(outDir, "TICKETS.md"), ticketsMd);
   writeFileSync(statusJsonPath, JSON.stringify(statusJson, null, 2));
   if (diffPatch) writeFileSync(join(outDir, "session.diff"), diffPatch);
-  ctx.log(`rendered board -> ${outDir}`);
+  // Say WHAT was rendered, not just that something was. One render per state change is a
+  // legitimate line, but `rendered board -> <path>` repeated for every one of them carries
+  // no more information than its own count, and the board is the thing whose progression a
+  // reader wants from the log.
+  const t = statusJson.tickets ?? {};
+  ctx.log(
+    `rendered board ${t.merged ?? 0}/${t.total ?? 0} merged, ` +
+      `${t.inProgress ?? 0} in flight -> ${outDir}`,
+  );
 } catch (e) {
   ctx.log(`skipped: ${e?.message ?? e}`);
 }
