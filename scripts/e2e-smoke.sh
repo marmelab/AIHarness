@@ -238,23 +238,29 @@ if [ "$schema_changed" = "1" ] && [ -d "$workdir/supabase/schemas" ]; then
     if ls "$workdir"/supabase/migrations/*_e2e_throwaway.sql >/dev/null 2>&1; then
       npx supabase migration up --workdir "$workdir" --local >"$workroot/migup.log" 2>&1 \
         || { cat "$workroot/migup.log" >&2; skip "schema pending migration round (throwaway apply failed); deferring the Supabase e2e leg to the deploy-time migration."; }
-      # Grants live in their own declarative file, which a generated delta has no reason to
-      # replay, and several paths can leave a relation the app reads without them — a delta
-      # that rebuilds a view rather than replacing it, or committed migrations that recreate
-      # one with no accompanying grant. PostgREST then answers 403, ra-core reads that as an
-      # invalid session and logs out, and every spec fails on a login page. Replay the
-      # declaration so that cannot be what a red suite means.
+      # Grants live in their own declarative file, and a path that leaves a relation the app
+      # reads without them ends with PostgREST answering 403, ra-core reading that as an invalid
+      # session, and every spec failing on a login page. Replaying the declaration is BEST
+      # EFFORT: a failure here is logged and the run continues, because the verification below
+      # is the gate. Wiring this to `skip` instead made a broken remedy silently cancel the
+      # suite — `db query --file` executes through a prepared statement, which takes exactly one
+      # command, so a grant file with more than one statement always failed and always skipped.
+      #
+      # Hence the DO wrapper: PL/pgSQL accepts GRANT directly, so the whole file goes over as a
+      # single command. If a project's grant file holds something PL/pgSQL will not take, the
+      # block fails, the line below says so, and the verification still decides.
       for g in "$workdir"/supabase/schemas/*grant*.sql; do
         [ -f "$g" ] || continue
-        echo "e2e-smoke: re-applying declarative grants ($(basename "$g")) after the throwaway migration"
-        npx supabase db query --workdir "$workdir" --local --file "$g" >>"$workroot/grants.log" 2>&1 \
-          || { cat "$workroot/grants.log" >&2; skip "could not re-apply $(basename "$g") after the throwaway migration; the stack would answer 403 on rebuilt views, which is not the feature's fault."; }
+        echo "e2e-smoke: replaying declarative grants ($(basename "$g")) after the throwaway migration"
+        if ! npx supabase db query --workdir "$workdir" --local \
+            "do \$harness\$ begin $(cat "$g") end \$harness\$;" >>"$workroot/grants.log" 2>&1; then
+          echo "e2e-smoke: NOTE could not replay $(basename "$g") (see grants.log); the check below decides whether that mattered"
+        fi
       done
 
-      # Then VERIFY the declaration holds, rather than trusting the replay above to have been
-      # the right remedy. A stack that refuses one relation to a properly authenticated caller
-      # cannot serve the app, and the suite would spend its whole runtime proving only that the
-      # specs cannot click a link.
+      # The GATE. A stack that refuses one relation to a properly authenticated caller cannot
+      # serve the app, and the suite would spend its whole runtime proving only that the specs
+      # cannot click a link.
       for g in "$workdir"/supabase/schemas/*grant*.sql; do
         [ -f "$g" ] || continue
         missing="$(declared_unreadable "$g")"
