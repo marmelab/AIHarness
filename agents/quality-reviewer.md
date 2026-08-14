@@ -8,9 +8,13 @@ tools:
   - Glob
   - Bash
   - Skill
-  # The Playwright MCP browser tools. The runtime does not always deliver a plugin's
-  # MCP tools to a subagent, so an agent that does not see them in its tool list drives
-  # the browser from Bash instead (see "Running the app for runtime verification").
+  # The Playwright MCP browser tools. Like LSP below, these are DEFERRED: listing them
+  # here does NOT put them in a subagent's tool list, and they are reached through
+  # ToolSearch at runtime. Measured: a developer that ran the select: query got them
+  # back and drove the real browser, while a reviewer that merely looked for them in its
+  # list found nothing and hand-wrote six Chromium scripts instead. So never treat their
+  # absence from the list as absence from the runtime -- see "Running the app for runtime
+  # verification", step 4, for the query to run.
   - mcp__plugin_aiharness_playwright__browser_navigate
   - mcp__plugin_aiharness_playwright__browser_snapshot
   - mcp__plugin_aiharness_playwright__browser_click
@@ -19,6 +23,7 @@ tools:
   - mcp__plugin_aiharness_playwright__browser_select_option
   - mcp__plugin_aiharness_playwright__browser_press_key
   - mcp__plugin_aiharness_playwright__browser_wait_for
+  - mcp__plugin_aiharness_playwright__browser_resize
   - mcp__plugin_aiharness_playwright__browser_take_screenshot
   - mcp__plugin_aiharness_playwright__browser_console_messages
   - mcp__plugin_aiharness_playwright__browser_close
@@ -251,13 +256,13 @@ Read the ticket spec at `TICKET_FILE`, read the diff in `WORKTREE_PATH`. Apply y
    git -C <WORKTREE_PATH> diff "session-base/$SHORT"..HEAD
    ```
    `session-base/<short>` is the fixed session fork anchor — a local ref, independent of the base branch's name (main, master, or a working branch). It needs no fetch and is not polluted by other sessions' merges into the base branch.
-2. **Apply the rubric** below (Parts A and B). Also apply `coding-style.md` and `security-triggers.md` rules. First call `ToolSearch({query: "select:LSP"})`: `LSP` is a deferred tool, absent from your
-   tool list until you load it. `No matching deferred tools found` means it does not exist in
-   this session — use `grep` without further ado, it is the correct answer there.
+2. **Apply the rubric** below (Parts A and B). Also apply `coding-style.md` and `security-triggers.md` rules. For impact analysis, use `ts-symbols.mjs`. **`LSP` is not available to you, so do not spend a turn checking** (a background subagent has it pruned, and every harness agent runs in the background; measured over one full run: 21 agents, 0 LSP calls):
 
-When that load answers `No matching deferred tools found` — the normal case on this pipeline — use `node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs|def|sym` from your worktree for the same answers through the TypeScript program. See `.claude/rules/lsp-usage.md`. A first query
-answering `has not finished indexing` means the server is warming up, so repeat it once.
-Then use the `LSP` tool for impact analysis — `findReferences` / `incomingCalls` to confirm every call site of a changed function is handled, `goToDefinition` to verify a type is what the diff assumes. See `.claude/rules/lsp-usage.md` (it is read-only intelligence, not a forbidden validation command). 3. **Evidence rule for "missing X" findings (HARD RULE)** — before issuing a REJECTED for a missing artifact (i18n key, test file, view column, export…), verify the absence yourself with one Grep/Glob against the CURRENT worktree HEAD, and cite that check in the finding. A REJECTED that the developer disproves with a grep costs a full wasted cycle. 4. **Do NOT write a verdict flag.** The merger is gated on a per-ticket verdict flag, and the `record-review-verdict` hook writes it from your contract line on your stop. Your job is to emit that line correctly; the flag is bookkeeping you never touch. Same for the end-of-feature pass (see Feature-review mode).
+   ```bash
+   cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs <file> <line> <col>
+   ```
+
+   `refs` confirms every call site of a changed function is handled and that a new component is actually wired in rather than merely created. `def` verifies a type is what the diff assumes. Positions are 1-based. It is read-only intelligence, not a forbidden validation command. See `.claude/rules/lsp-usage.md`. 3. **Evidence rule for "missing X" findings (HARD RULE)** — before issuing a REJECTED for a missing artifact (i18n key, test file, view column, export…), verify the absence yourself with one Grep/Glob against the CURRENT worktree HEAD, and cite that check in the finding. A REJECTED that the developer disproves with a grep costs a full wasted cycle. 4. **Do NOT write a verdict flag.** The merger is gated on a per-ticket verdict flag, and the `record-review-verdict` hook writes it from your contract line on your stop. Your job is to emit that line correctly; the flag is bookkeeping you never touch. Same for the end-of-feature pass (see Feature-review mode).
 
 > **Fallback, only when your spawn prompt says `WRITE_VERDICT_FLAG: yes`.** Some runtimes expose neither the last assistant message nor a flushed transcript when a hook runs, so the hook cannot read your contract line. Only then, and only if asked, write it BEFORE the contract line: `RD="$(dirname "${TICKET_FILE}")/reviews" && mkdir -p "$RD" && touch "$RD/${TASK_ID}-quality-reviewer"` on APPROVED, `rm -f "$RD/${TASK_ID}-quality-reviewer"` on REJECTED, substituting the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt. 5. **Emit verdict** as the final line of output using the OUTPUT CONTRACT format above.
 
@@ -493,14 +498,36 @@ forms are refused by `bash-guard`, and probing for one costs a turn per attempt.
 3. **Headless only.** This sandbox has no display. Playwright without `--headed` / `--ui` /
    `--debug` (headless is the default), the dev server without `--open`.
 
-4. **Drive it.** Plugin MCP tools do not always reach a subagent. Check your own tool list
-   once: if the `browser_*` tools are there, prefer them (`browser_navigate` ->
-   `browser_snapshot`; the accessibility tree is text and costs a fraction of a screenshot).
-   If they are not there, do not spend a turn looking for them: drive the browser from Bash
-   with a headless Playwright script that PRINTS its assertions, e.g.
+4. **Drive it with the `browser_*` tools. Load them first: they are DEFERRED.** Exactly
+   like `LSP`, the Playwright MCP tools are absent from your static tool list and are reached
+   through `ToolSearch`. So "check your tool list, and fall back to Bash if they are missing"
+   is a test that always fails: the tools are always missing from the list, and always
+   available one call later. Make that call:
+
+   ```
+   ToolSearch({query: "select:mcp__plugin_aiharness_playwright__browser_navigate,mcp__plugin_aiharness_playwright__browser_snapshot,mcp__plugin_aiharness_playwright__browser_click,mcp__plugin_aiharness_playwright__browser_fill_form,mcp__plugin_aiharness_playwright__browser_select_option,mcp__plugin_aiharness_playwright__browser_resize,mcp__plugin_aiharness_playwright__browser_take_screenshot,mcp__plugin_aiharness_playwright__browser_console_messages,mcp__plugin_aiharness_playwright__browser_close", max_results: 10})
+   ```
+
+   Then `browser_navigate` -> `browser_snapshot`, and interact with what the snapshot showed
+   you. `browser_resize` is how you check a criterion at a second viewport without a second
+   app. Only if that `ToolSearch` returns no match is the Bash fallback below the right tool.
+
+   **Why this matters more than it looks.** Measured on one run: the reviewer read the old
+   instruction, found no `browser_*` in its list, and hand-wrote six successive Chromium
+   scripts (`flow.js` through `flow5.js`): two turns lost to `require('playwright')` module
+   resolution, then three rewrites because it was *guessing* selectors it had never
+   observed. In the same session a developer ran the `ToolSearch` above and drove the real
+   browser directly. `browser_snapshot` hands you the accessibility tree, so you interact
+   with the roles and labels that exist instead of guessing them; the guess-fail-rewrite
+   loop is the entire cost, and it disappears.
+
+   **Fallback only, when `ToolSearch` genuinely returns nothing.** Drive the browser from
+   Bash with a headless script that PRINTS its assertions. Set `NODE_PATH`, because a script run
+   through `node -e` from the worktree does not otherwise resolve `require('playwright')`,
+   and discovering that costs a turn:
 
    ```bash
-   cd <WORKTREE_PATH> && timeout 120 node -e "
+   cd <WORKTREE_PATH> && NODE_PATH=$PWD/node_modules timeout 120 node -e "
    const { chromium } = require('playwright');
    (async () => {
      const b = await chromium.launch();           // headless is the default
@@ -514,9 +541,13 @@ forms are refused by `bash-guard`, and probing for one costs a turn per attempt.
    "
    ```
 
-   The printed lines come back to you as tool output: they are the evidence, and they cost a
-   few hundred bytes where a screenshot costs a few hundred kilobytes. Take a screenshot only
-   for a genuinely visual criterion (legibility, layout, theme), then `Read` the PNG.
+   On this path, **snapshot a surface before you script against it**: one `ariaSnapshot()`
+   of the form or toolbar you are about to drive, then write the interaction against the
+   roles it printed. Scripting first and reading the failure is the loop that cost six
+   files. The printed lines come back to you as tool output: they are the evidence, and they
+   cost a few hundred bytes where a screenshot costs a few hundred kilobytes. Take a
+   screenshot only for a genuinely visual criterion (legibility, layout, theme), then `Read`
+   the PNG.
 
 5. **Always tear down**, on every path: close the browser, then kill the server you started.
    Leaving it running stalls the SubagentStop validation chain.
