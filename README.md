@@ -25,9 +25,9 @@ Around that, hooks:
 - block the commands that would make the pipeline look healthy while being broken:
   merging outside the merger, launching arbitrary containers, opening a headed browser
 
-441 tests cover those hooks. That number matters: the guards are the product, and an
-untested guard fails silently. One of them had been inert for months before a test caught
-it.
+A test suite covers those hooks, and CI runs it on every push. That coverage is the
+product: an untested guard fails silently, and one of them had been inert for months
+before a test caught it. `npm test` states the current count.
 
 ## Install
 
@@ -71,39 +71,94 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
 This repo's own [harness.config.json](harness.config.json) is a working reference, and
 `node scripts/check-config-sync.mjs` tells you whether your roles cover the hook matchers.
 
+#### Two blocks are capability switches
+
+`deploy` and `app` are absent from the defaults on purpose: **a capability exists if and
+only if its block is present.** Omit one and the feature is simply off, with no warning,
+which is the failure mode worth knowing about before you go looking for a bug.
+
+| Block | Present | Absent |
+| --- | --- | --- |
+| `app` | the reviewer boots your app and verifies the feature at runtime; the developer can self-check in a browser | no runtime verification anywhere in the pipeline |
+| `deploy` | the deploy-time migration round runs, gated by its own review | no migration round |
+
+`app` takes `smokeCommand`, `portBase`, and optionally `portArg`, `strictPortArg`,
+`hashRouting`, `demoMode`. `deploy` takes `relevantGlobs` (required when the block is
+present).
+
+#### Key reference
+
+**Read by hooks.** These change what the harness enforces.
+
+| Key | Effect |
+| --- | --- |
+| `validation.steps` | the chain run on every developer stop, and the commands `bash-guard` then forbids agents from running by hand. Per step: `id`, `kind`, `command` (or `runner: "vitest"` + `config` + `projects`), `changedScoped`, `extensions`, `condition.pathExists`, `formatter`, `autoCommit` |
+| `validation.extraForbidden` | extra command tokens agents may not run (e.g. `build`, `e2e`) |
+| `containers.allow` | container images an agent may start. `[]` blocks every launch |
+| `roles.<role>.pipeline` | whether the role takes part in the ticket pipeline |
+| `roles.<role>.debounce` | whether a duplicate dispatch of the role is refused |
+| `roles.<role>.validate` | whether the validation chain runs on the role's stop |
+| `roles` (the key names) | must cover every `SubagentStop` matcher; `check-config-sync` fails otherwise |
+| `layout.src` / `.e2e` / `.adr` | where the harness looks for source, specs and ADRs |
+| `worktree.provision` | how a task worktree gets its dependencies (default `npm-link`) |
+| `launcher.*` | four extension points for a managed launcher; each consuming hook is inert when its key is unset. See [rules/launcher-interface.md](rules/launcher-interface.md) |
+
+**Read by agent prompts.** Instructions, not enforcement: an agent can ignore them.
+
+| Key | Effect |
+| --- | --- |
+| `app.*` | how the developer and the reviewer launch and drive your app |
+
+**Declarative.** Validated or defaulted, but nothing reads them. Setting them changes
+nothing today.
+
+| Key | Note |
+| --- | --- |
+| `roles.<role>.model` | **required** (a role without a non-empty `model` string fails config loading) yet read only by tests. The model actually used comes from the agent's own frontmatter, plus the explicit `model:` the orchestrator passes on some dispatches |
+| `name`, `skills.developerMenu`, `documentator.author` | no consumer; the documentator's git identity is pinned in its prompt and in `restrict-documentator-bash`, not read from here |
+
 The harness is **opt-in per request**: nothing routes through it until you ask, with
 `#harness` or "use the agent team".
 
-### One thing to check: the LSP tool
+### The LSP tool: interactive sessions only
 
-The plugin declares a TypeScript language server (via `npx`, so nothing to install) and
-tells the developer, the reviewer and the planner to resolve symbols through the `LSP`
-tool instead of grepping for them. That matters more than it sounds: a `grep` goes through
-Bash, and in an interactive session Claude Code asks a model to analyse each shell command
-before running it, which costs seconds per call. An `LSP` call does not go through the
-shell at all.
+The plugin declares a TypeScript language server (via `npx`, so nothing to install). It
+pays off in an **interactive** session: an `LSP` call resolves a symbol through the type
+system without going through the shell, where Claude Code analyses each command before
+running it, costing seconds per call.
+
+**The pipeline agents do not get it, and do not look for it.** Every harness agent is
+dispatched by the orchestrator, which is itself a subagent and so cannot ask for a
+foreground dispatch. They all run in the background, and a background subagent has `LSP`
+pruned from its tool set: four open runtime reports, no fix, and the one confirmed
+workaround is the foreground dispatch a nested subagent cannot request. Measured over one
+full run: 21 agents, 0 LSP calls, 357 Bash calls.
+
+So they answer symbol questions with [`scripts/ts-symbols.mjs`](scripts/ts-symbols.mjs),
+which reaches the same TypeScript program from Bash, and [`rules/lsp-usage.md`](rules/lsp-usage.md)
+tells them not to spend a turn probing for the tool. **There is nothing to configure for
+the pipeline.** The rest of this section is about your own interactive sessions.
 
 **Only one LSP server can own a file extension.** The runtime registers the first one and
 the others never start; the order is undefined and there is no priority field, so a plugin
 cannot win, yield, or even detect that it lost. If you also have the official
-`typescript-lsp` plugin enabled, it may claim `.ts` first — and it ships no binary, so
-every call answers `Executable not found in $PATH` and the agents silently fall back to
-`grep`. Nothing fails; the run just gets slower and more expensive.
+`typescript-lsp` plugin enabled, it may claim `.ts` first, and it ships no binary, so
+every call answers `Executable not found in $PATH`. Nothing fails; your interactive
+sessions just fall back to `grep`.
 
 Two things report it, both automatic:
 
 - Every session start prints one line naming the conflicting plugin and the remedy.
 - `npm run check` (in this repo) fails on the same condition.
 
-To fix it, disable the other plugin — `/plugin`, then Manage, then toggle it off — or set
-it to `false` in `enabledPlugins`. Check the **user** scope (`~/.claude/settings.json`),
-not just the project's: a plugin enabled there is invisible to anything the project does,
-which is exactly how this went unnoticed for two full runs. Alternatively, keep the other
-plugin and install the binary it expects (`npm install -g typescript-language-server
-typescript`).
+To fix it, disable the other plugin (`/plugin`, then Manage, then toggle it off) or set it
+to `false` in `enabledPlugins`. Check the **user** scope (`~/.claude/settings.json`), not
+just the project's: a plugin enabled there is invisible to anything the project does, which
+is exactly how this went unnoticed for two full runs. Alternatively, keep the other plugin
+and install the binary it expects (`npm install -g typescript-language-server typescript`).
 
-Verify with any TypeScript symbol: an `LSP` `workspaceSymbol` call should return locations
-rather than an error.
+Verify in an interactive session: an `LSP` `workspaceSymbol` call on any TypeScript symbol
+should return locations rather than an error.
 
 ## What you supply, what you get
 
