@@ -48,25 +48,3 @@ hypothesis and ask them to confirm rather than silently choosing.
 
 Fold the answers into the orchestrator dispatch prompt: scope-out and acceptance become
 ticket constraints.
-
-## Why the main thread, and not an agent
-
-Not because a subagent cannot ask. It can, and one does: SETUP-INTERVIEW is a multi-turn
-interview conducted by the orchestrator, and both the plan gate and the migration gate end
-a turn to ask you something.
-
-The reason is what a question COSTS a subagent. It ends its turn, and the answer comes
-back to a FRESH agent with no memory of having asked, which is why the plan gate resumes
-with a brand-new orchestrator and why the migration gate writes its approval to a file
-first. An interrogation is iterative by construction (each question depends on the last
-answer), so running it in a subagent means persisting state between every question, the
-way SETUP-INTERVIEW persists `project-context.json` after each domain.
-
-That machinery is worth it to set up a whole project once. It is not worth it for five
-scoping questions. The main thread holds the same conversation for free, which is the only
-reason this lives there.
-
-The planner is not the fallback either. It flags ambiguity and reports open questions, and
-it stops for **one** question when a request is too vague to decompose safely, but that is
-a last-resort check at the decomposition threshold, not a scoping conversation. By then the
-dispatch prompt is already written.
