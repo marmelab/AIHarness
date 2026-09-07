@@ -537,16 +537,9 @@ Agent({ subagent_type: "aiharness:quality-reviewer",
   prompt: "ROLE: quality-reviewer\nTASK_ID: T\nTICKET_FILE: <TICKETS_DIR>/T.json\nWORKTREE_PATH: <WORKTREE_BASE>/T" })
 ```
 
-**Review model.** Per-ticket review is the largest single line of a run's cost: 9 reviewer dispatches were 57% of one measured session. Pass `model: "sonnet"` for an ordinary ticket, and OMIT `model` entirely (the agent file's `opus` then applies) when either holds:
+**Review model: you do not have to get this right.** Per-ticket review is the largest single line of a run's cost, so the model is chosen for you. The `route-review-model` hook reads your `TICKET_FILE` and rewrites the dispatch before it runs: an ordinary ticket goes to `sonnet`, and a ticket whose `files_to_modify` includes anything under `supabase/` or which carries `schema_sensitive: true` keeps the agent file's `opus`. Pass `model` or omit it as you like; the hook corrects it either way, and it corrects it silently rather than refusing the dispatch. `MODE: feature-review`, `MODE: feature-smoke` and `MODE: migration-review` are exempt: they judge the integrated feature and the migration, where a miss has nothing downstream to catch it.
 
-- the ticket's `files_to_modify` includes anything under `supabase/`, or
-- the ticket carries `schema_sensitive: true`.
-
-The second condition is not redundant with the first. In the session this rule comes from, one of the two findings that paid for opus was on a diff containing no SQL at all: a select input on a `CHECK`-constrained column, left clearable, could submit `""` and fail the constraint on save. A rule keyed only on the file list would have sent that ticket to the cheaper model.
-
-Omitting the field rather than naming `opus` is deliberate. A runtime that ignores `model` leaves the reviewer at its declared `opus`, so the failure mode of this optimisation is spending too much, never reviewing too weakly.
-
-`MODE: feature-review`, `MODE: feature-smoke` and `MODE: migration-review` never pass `model`: they judge the integrated feature and the migration, where a miss has nothing downstream to catch it.
+This used to be your job, and it did not work: over nine runs following this instruction, 16 of 60 per-ticket reviewer dispatches passed `model: "sonnet"` and 17 more ran on `opus` for tickets that touched no `supabase/` file, worth up to $16.82 of the $166 those runs cost.
 
 Store the verdict in `reviews.quality` and resolve each:
 
@@ -564,6 +557,8 @@ FINDINGS_RAISED: <the previous REJECTED verdict body, verbatim>
 ```
 
 The reviewer then judges whether each raised finding is resolved and whether `FIX_RANGE` itself is sound, instead of re-reading the whole ticket. Without these lines a re-review is a second full pass, costing as much as the original to re-report what it already said. Same narrowing the end-of-feature pass already uses — see `quality-reviewer.md` "A `FIX_ROUND:` block narrows the pass to the fix".
+
+This one is **enforced**, because it needs three values only you have. The `require-fix-round` hook counts reviewer dispatches per ticket and REFUSES the second and later one when the prompt carries no `FIX_ROUND:` line, naming the three lines to add. The refusal still counts, so re-issuing with the block goes through. Unlike the review model, the harness cannot fill these in for you: it does not know the pre-retry HEAD or the verdict body.
 
 **Loop Stage 2 until every still-live ticket is `MERGE` or `FAILED`** — bounded because `retries` can only climb to `MAX_RETRIES`.
 

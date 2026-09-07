@@ -12,6 +12,11 @@
 //     created for a dispatch that is not going to happen.
 //   - record-merger-stage writes its authorization marker only for a dispatch that got
 //     past the merger gates above it, so a refused merger leaves no marker behind.
+//   - require-fix-round runs BEFORE route-review-model, because it counts a dispatch as
+//     having happened and then may refuse it. Routing a call that is about to be refused
+//     would be work thrown away; and the count must include the refused attempt, or the
+//     retry that adds FIX_ROUND would look like the first review and be waved through
+//     without it.
 
 import { runChain } from "./lib/hook-chain.mjs";
 import { check as openProgressLog } from "./open-progress-log.mjs";
@@ -21,6 +26,8 @@ import { check as blockMergerWithoutReview } from "./block-merger-without-review
 import { check as blockPromoteUnmerged } from "./block-promote-unmerged.mjs";
 import { check as recordMergerStage } from "./record-merger-stage.mjs";
 import { check as enforceDevDispatch } from "./enforce-dev-dispatch.mjs";
+import { check as requireFixRound } from "./require-fix-round.mjs";
+import { check as routeReviewModel } from "./route-review-model.mjs";
 import { check as forceForeground } from "./force-foreground-orchestrator-dispatch.mjs";
 import { check as setupWorktree } from "./setup-worktree.mjs";
 
@@ -32,6 +39,8 @@ runChain([
   ["block-promote-unmerged", blockPromoteUnmerged],
   ["record-merger-stage", recordMergerStage],
   ["enforce-dev-dispatch", enforceDevDispatch],
+  ["require-fix-round", requireFixRound],
+  ["route-review-model", routeReviewModel],
   ["force-foreground-orchestrator-dispatch", forceForeground],
   ["setup-worktree", setupWorktree],
 ]);

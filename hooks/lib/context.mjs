@@ -13,17 +13,40 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { additionalContext, decisionBlock } from "./io.mjs";
+import { additionalContext, decisionBlock, updatedToolInput } from "./io.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
 import { exec } from "./process.mjs";
 import { loadConfig, sessionDirFromEnv, worktreeProvision } from "./config.mjs";
 
 /**
+ * Merge `patch` over `base`, treating an explicit `undefined` as a removal.
+ *
+ * Removal is the case that matters: "leave this reviewer on the model its agent file
+ * declares" is spelled by DELETING `model`, not by naming a model, so that a runtime which
+ * ignores the field still lands on the stronger default.
+ *
+ * A new object every time, per rules/coding-style.md: the payload is read by every guard
+ * after this one.
+ * @param {Record<string, unknown>} base
+ * @param {Record<string, unknown>} patch
+ * @returns {Record<string, unknown>}
+ */
+export function applyPatch(base, patch) {
+  const out = { ...(base || {}) };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === undefined) delete out[k];
+    else out[k] = v;
+  }
+  return out;
+}
+
+/**
  * @param {string | Record<string, unknown>} input
  * @param {string} [name]
+ * @param {{ onRewrite?: (patch: Record<string, unknown>) => void }} [options]
  * @returns {object}
  */
-export function createHookContext(input, name = "hook") {
+export function createHookContext(input, name = "hook", options = {}) {
   const i = typeof input === "string" ? JSON.parse(input) : input || {};
   const clean = (s) => String(s ?? "").replace(/[\t\n]/g, " ");
 
@@ -261,6 +284,35 @@ export function createHookContext(input, name = "hook") {
         seen = 0; // no session state to count in: fall back to logging every time
       }
       if (seen === 0) verdict("ACCEPT", detail);
+      process.exit(0);
+    },
+
+    /**
+     * Correct this tool call's input instead of refusing it, and RETURN so the rest of the
+     * chain still runs.
+     *
+     * `patch` is merged over the payload's `tool_input`; a key set to `undefined` is
+     * REMOVED, which is how a guard restores a field's default. The chain collects the
+     * patches and emits one `updatedInput` after the last guard, because emitting here
+     * would end the process and skip every guard below (setup-worktree among them, which
+     * is what actually creates the worktree).
+     *
+     * A guard that can fix a dispatch should prefer this to ctx.fail: a refusal is correct
+     * for something only the caller can decide, and pure waste for something the harness
+     * already knows. Measured on Claude Code 2.1.263, where updatedInput is honoured.
+     *
+     * @param {Record<string, unknown>} patch
+     * @param {{ log?: string }} [opts]
+     * @returns {void}
+     */
+    rewriteInput(patch, { log: detail } = {}) {
+      verdict("REWRITE", detail);
+      if (options.onRewrite) {
+        options.onRewrite(patch);
+        return;
+      }
+      // No chain collecting for us: emit and end, so a guard run on its own still works.
+      updatedToolInput(applyPatch(i.tool_input, patch));
       process.exit(0);
     },
 

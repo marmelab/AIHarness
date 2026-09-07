@@ -27,6 +27,28 @@ export function decisionBlock(reason) {
 }
 
 /**
+ * Emit a rewritten `tool_input` for a PreToolUse call, letting it proceed with the new
+ * value. Measured on 2.1.263: the agent asked to Read `data.txt` and received the contents
+ * of the file this channel substituted, so a guard can CORRECT a dispatch instead of
+ * refusing it and spending a turn on the retry.
+ *
+ * `permissionDecision` is deliberately NOT sent with it. Measured: `updatedInput` alone is
+ * honoured, and adding `permissionDecision: "allow"` would also wave the call past whatever
+ * the project's permission rules would have asked, which is not this channel's job.
+ * @param {Record<string, unknown>} toolInput  The COMPLETE replacement tool_input.
+ */
+export function updatedToolInput(toolInput) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: toolInput,
+      },
+    }) + "\n",
+  );
+}
+
+/**
  * Emit `context` as additional context for the agent, leaving the tool call in place.
  * Pair with exit 0: any non-zero exit discards this channel.
  * @param {string} hookEventName  The event from the payload, echoed back as the runtime expects.

@@ -15,6 +15,12 @@
 // applied to it. Each guard still gets its OWN ctx, built with its own name, so the
 // `[hook-name]` prefix in hooks.log is unchanged.
 //
+// A guard may also CORRECT the call with ctx.rewriteInput instead of refusing it. That is
+// not terminal: the patch is collected here and one `updatedInput` is emitted after the
+// last guard, so setup-worktree still runs. Each later guard sees the patched tool_input,
+// because a chain where two guards disagree about what the call says is a bug waiting to
+// happen.
+//
 // Every guard also stays runnable standalone (`node hooks/<guard>.mjs`), which is the
 // shape all the hook tests use, so the behavior the tests pin is the behavior the
 // dispatcher runs.
@@ -22,7 +28,8 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHookContext } from "./context.mjs";
+import { applyPatch, createHookContext } from "./context.mjs";
+import { updatedToolInput } from "./io.mjs";
 
 /**
  * The hook payload on stdin, or {} when it cannot be parsed.
@@ -53,10 +60,19 @@ export function readPayload() {
  * @returns {never}
  */
 export function runChain(guards, input = readPayload()) {
+  let current = input;
+  let rewritten = false;
   for (const [name, check] of guards) {
-    const ctx = createHookContext(input, name);
+    const onRewrite = (patch) => {
+      current = {
+        ...current,
+        tool_input: applyPatch(current.tool_input, patch),
+      };
+      rewritten = true;
+    };
+    const ctx = createHookContext(current, name, { onRewrite });
     try {
-      check(input, ctx);
+      check(current, ctx);
     } catch (e) {
       // Includes a guard reaching for session state in a context that has no session
       // id: that throws at the point of access, and this is where it becomes one
@@ -82,6 +98,7 @@ export function runChain(guards, input = readPayload()) {
       }
     }
   }
+  if (rewritten) updatedToolInput(current.tool_input);
   process.exit(0);
 }
 
