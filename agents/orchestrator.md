@@ -181,7 +181,7 @@ Entered immediately after `VALIDATED` (same turn):
 1. Dispatch the planner with the setup flag:
    ```
    Agent({
-     subagent_type: "planner",
+     subagent_type: "aiharness:planner",
      description: "Scaffolding tickets from validated project context",
      prompt: "Read $CLAUDE_PROJECT_DIR/docs/project-context.json and produce scaffolding tickets per agent rules.\n\nSETUP_MODE=true\nTICKETS_DIR=<absolute path>"
    })
@@ -210,7 +210,7 @@ For MEMORY only. No team, no worktree, no merger.
 1. Dispatch ONE `documentator`:
    ```
    Agent({
-     subagent_type: "documentator",
+     subagent_type: "aiharness:documentator",
      description: "Capture: <one-line summary>",
      prompt: "ROLE: documentator\nTICKETS_DIR: <absolute path>\nUSER_REQUEST: <user's request, verbatim>\nCONTEXT: <session ids, file paths, ADRs the user pointed at — empty if none>\n\nFollow your instructions: pick the least invasive lever, write the artifact under /home/developer/.claude/local/, update the ledger. If you produce a hook, propose the settings.local.json patch in your output — do not apply it."
    })
@@ -238,7 +238,7 @@ Only for `<intent>rollback-conflict</intent>`. No team, no planner.
 1. Dispatch ONE `developer` and tell it to load the `resolving-rollback-conflicts` skill. The `BRANCH_NAME: <SESSION_SHORT_ID>/simple` line routes it to the fixed `<base>/simple` worktree. Copy `BASE_BRANCH`, `FAILED_COMMIT`, `COMMITS_TO_REVERT` verbatim from the user turn:
    ```
    Agent({
-     subagent_type: "developer",
+     subagent_type: "aiharness:developer",
      description: "Resolve rollback conflict",
      prompt: "ROLE: developer\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nBASE_BRANCH: <copied>\nFAILED_COMMIT: <copied>\nCOMMITS_TO_REVERT:\n<block copied verbatim>\n\nLoad Skill({skill: \"resolving-rollback-conflicts\"}) and follow it exactly — it replaces the normal ticket workflow."
    })
@@ -253,7 +253,7 @@ Only for `<intent>rollback-conflict</intent>`. No team, no planner.
 2. On `DONE: branch=…` → dispatch the merger with the ROLLBACK template:
    ```
    Agent({
-     subagent_type: "merger",
+     subagent_type: "aiharness:merger",
      description: "Promote rollback branch",
      prompt: "ROLE: merger (ROLLBACK mode — single-shot, no team)\nSESSION_SHORT_ID: <SESSION_SHORT_ID>\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\n\nFollow the ROLLBACK mode in merger.md: skip Stage A, run ROLLBACK PROMOTION (merge BRANCH_NAME directly into the base branch). Never touch session/<SESSION_SHORT_ID>.\nOutput: \"DONE: ROLLBACK commit=<short sha>\" OR \"FAILED: ROLLBACK <reason>\""
    })
@@ -279,7 +279,7 @@ SIMPLE skips the planner and the wave. No team, no `TICKET_FILE`. Dispatch ONE `
 
 ```
 Agent({
-  subagent_type: "developer",
+  subagent_type: "aiharness:developer",
   description: "SIMPLE: <one-line summary>",
   prompt: "ROLE: developer\nCHANGE_REQUEST: <user's request, verbatim>\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nTICKETS_DIR: <absolute per-session path>\n\nThis is a SIMPLE direct change — no ticket, no planner. Implement the CHANGE_REQUEST on the simple worktree: one cosmetic edit, one single-field change on an existing entity, or one filter reusing existing components. Keep it to that single change — no ADR, no new tests, no migrations. If it needs a planned breakdown (2+ files/entities, a new component, tests, import/export), stop and emit FAILED: out of scope — needs COMPLEX flow."
 })
@@ -304,7 +304,7 @@ Only when the diff touched deploy-relevant paths (`config.deploy.relevantGlobs`,
 2. Dispatch ONE `quality-reviewer`:
    ```
    Agent({
-     subagent_type: "quality-reviewer",
+     subagent_type: "aiharness:quality-reviewer",
      description: "SIMPLE review: <one-line summary>",
      prompt: "ROLE: quality-reviewer (SIMPLE mode — single-shot, no team)\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nTICKETS_DIR: <absolute per-session path>\n\nFollow the SIMPLE-mode workflow in your agent file. Return text only: \"APPROVED\" or \"BLOCKED:\\n- ...\". No SendMessage."
    })
@@ -321,7 +321,7 @@ Entered only from S-REVIEW on `BLOCKED:`.
 2. Otherwise re-dispatch the **same** developer in the **same** worktree with the findings:
    ```
    Agent({
-     subagent_type: "developer",
+     subagent_type: "aiharness:developer",
      description: "Fix DB review findings: <one-line summary>",
      prompt: "ROLE: developer\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\n\nFIX — the database review found problems in your previous commit. Address every point below and commit the fix in the same worktree. Do NOT change anything else.\n<paste the reviewer's BLOCKED: list verbatim>"
    })
@@ -337,7 +337,7 @@ Entered only from S-REVIEW on `BLOCKED:`.
 3. Otherwise dispatch the single-shot SIMPLE merger (Stage A + promotion in one shot):
    ```
    Agent({
-     subagent_type: "merger",
+     subagent_type: "aiharness:merger",
      description: "Merge SIMPLE branch <SESSION_SHORT_ID>/simple",
      prompt: "ROLE: merger (SIMPLE mode — single-shot, no team)\nSESSION_SHORT_ID: <SESSION_SHORT_ID>\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nWORKTREE_PATH: <WORKTREE_BASE>/simple\n\nFollow the WORKFLOW in merger.md. Use the single-shot columns (Stage A then promotion in one shot).\nOutput: \"DONE: SIMPLE commit=<short sha>\" OR \"FAILED: SIMPLE <reason>\""
    })
@@ -368,7 +368,7 @@ Entered only from S-REVIEW on `BLOCKED:`.
 2. Dispatch the planner:
    ```
    Agent({
-     subagent_type: "planner",
+     subagent_type: "aiharness:planner",
      description: "Plan tickets for: <one-line summary>",
      prompt: "<user need verbatim>\n\nTICKETS_DIR=<absolute path>"
    })
@@ -457,7 +457,7 @@ In ONE assistant message, dispatch a foreground developer for every ticket in th
 
 ```
 Agent({
-  subagent_type: "developer",
+  subagent_type: "aiharness:developer",
   description: "Implement TASK-XXX",
   prompt: "ROLE: developer\nTASK_ID: TASK-XXX\nTICKET_FILE: <TICKETS_DIR>/TASK-XXX.json\nWORKTREE_PATH: <WORKTREE_BASE>/TASK-XXX\nBRANCH_NAME: <SESSION_SHORT_ID>/TASK-XXX\n<the PRIOR_WORK block below, from wave 2 onwards>"
 })
@@ -498,7 +498,7 @@ Only for a ticket that reached `REVIEW` **and** whose ticket JSON has `"separate
 
 ```
 Agent({
-  subagent_type: "test-writer",
+  subagent_type: "aiharness:test-writer",
   description: "Strengthen tests for TASK-XXX",
   prompt: "ROLE: test-writer\nTASK_ID: TASK-XXX\nTICKET_FILE: <TICKETS_DIR>/TASK-XXX.json\nWORKTREE_PATH: <WORKTREE_BASE>/TASK-XXX\nBRANCH_NAME: <SESSION_SHORT_ID>/TASK-XXX",
   run_in_background: false
@@ -512,7 +512,7 @@ The `TASK_ID` + `WORKTREE_PATH` lines let the SubagentStop validation chain scop
 For every ticket in `REVIEW`, dispatch the quality-reviewer in the foreground. Batch the tickets that are review-ready **at this instant** into ONE message (reviewers are read-only on separate worktrees, so concurrency is free), and never postpone one that is ready to collect a bigger batch; the next arrival gets its own dispatch when it arrives:
 
 ```
-Agent({ subagent_type: "quality-reviewer",
+Agent({ subagent_type: "aiharness:quality-reviewer",
   description: "Review T",
   model: "<see the review-model rule below, or omit>",
   prompt: "ROLE: quality-reviewer\nTASK_ID: T\nTICKET_FILE: <TICKETS_DIR>/T.json\nWORKTREE_PATH: <WORKTREE_BASE>/T" })
@@ -553,7 +553,7 @@ The reviewer then judges whether each raised finding is resolved and whether `FI
 Per-ticket mergers all merge into the shared `session/<SESSION_SHORT_ID>` branch inside the single `_session` worktree, with no lock on Stage A — concurrent mergers would race on the branch and `.git/index.lock`. Dispatch them **one at a time**: one foreground merger per message, wait, then the next. `BRANCH_NAME` is always `<SESSION_SHORT_ID>/TASK-XXX` — the canonical branch `setup-worktree` created for this ticket. Do NOT use the `branch=` value echoed in the developer's `dev_output` (it reflects the prompt's `BRANCH_NAME`, which may carry a phantom slug) nor the planner's suggestion — both can disagree with the branch that actually exists and make the merge fail with "not something we can merge":
 
 ```
-Agent({ subagent_type: "merger",
+Agent({ subagent_type: "aiharness:merger",
   description: "Merge T",
   prompt: "ROLE: merger\nTASK_ID: T\nSTAGE: a-only\nBRANCH_NAME: <SESSION_SHORT_ID>/T\nWORKTREE_PATH: <WORKTREE_BASE>/T\nSESSION_SHORT_ID: <SESSION_SHORT_ID>\nTICKETS_DIR: <TICKETS_DIR>" })
 ```
@@ -598,7 +598,7 @@ With all tickets merged, run ONE fresh global review of the integrated feature b
 
 ```
 Agent({
-  subagent_type: "quality-reviewer",
+  subagent_type: "aiharness:quality-reviewer",
   description: "Feature-review: <one-line summary>",
   prompt: "ROLE: quality-reviewer (MODE: feature-review)\nSESSION_DIFF_BASE: session-base/<SESSION_SHORT_ID>..session/<SESSION_SHORT_ID>\nTICKETS_DIR: <absolute per-session path>\n\nReview the whole integrated feature per feature-review mode. Text verdict only, no SendMessage.\n\n<the RUNTIME_CHECK block below, when the diff changes UI under src/components/>",
   run_in_background: false
@@ -675,7 +675,7 @@ Then promote the session branch to the base branch (the branch the session was f
 
   ```
   Agent({
-    subagent_type: "merger",
+    subagent_type: "aiharness:merger",
     description: "Promote session branch to base branch",
     prompt: "ROLE: merger\nMODE: promote\nSESSION_SHORT_ID: <SESSION_SHORT_ID>"
   })
@@ -715,7 +715,7 @@ Reached when the merger reports `promote conflict`. ONE assistant message:
 1. Dispatch a resolver (no team):
    ```
    Agent({
-     subagent_type: "developer",
+     subagent_type: "aiharness:developer",
      description: "Resolve session->base-branch promotion conflict",
      prompt: "ROLE: promotion-conflict-resolver (gated $CLAUDE_PROJECT_DIR exception)\nSESSION_SHORT_ID: <id>\nUnder the promotion lock, in $CLAUDE_PROJECT_DIR on the base branch (where the failed promotion left $CLAUDE_PROJECT_DIR checked out), re-run the merge and resolve it honouring BOTH sides, then commit. Run:\ncd $CLAUDE_PROJECT_DIR && flock $CLAUDE_PROJECT_DIR/.promote.lock bash -c 'git merge --no-ff session/<id> || true'\nResolve the conflicting files, then complete the merge with a single locked commit:\nflock $CLAUDE_PROJECT_DIR/.promote.lock bash -c 'git add -A && git commit --no-edit'\nKnown limitation: between the initial merge and this final locked commit, the lock is briefly released while you resolve files; a concurrent promotion in that window is a rare, accepted edge case.\nOutput: RESOLVED: commit=<sha> or FAILED: <reason>. Never modify anything under session/<id>."
    })
@@ -765,7 +765,7 @@ The user's reply means satisfied / wants-adjustment / ambiguous. (Chat surface, 
 
 ```
 Agent({
-  subagent_type: "documentator",
+  subagent_type: "aiharness:documentator",
   description: "Capture business knowledge",
   prompt: "ROLE: documentator (Mode 2)\nSESSION_LOG: <session_dir>/log.jsonl\nSESSION_SHORT_ID: <SESSION_SHORT_ID>\nSESSION_DIFF_BASE: session-base/<SESSION_SHORT_ID>..session/<SESSION_SHORT_ID>\nreason: business-knowledge\n\nFollow your Mode 2 instructions: read the session diff (the SESSION_DIFF_BASE two-dot range) and append business-knowledge bullets to $CLAUDE_PROJECT_DIR/MEMORY.md (silently do nothing if there is nothing concrete).",
   run_in_background: true
@@ -785,7 +785,7 @@ Then:
 Dispatch ONE developer and tell it to load the `writing-migrations` skill. `BRANCH_NAME: <id>/simple` routes it to the fixed `<base>/simple` worktree:
 
 ```
-Agent({ subagent_type: "developer",
+Agent({ subagent_type: "aiharness:developer",
   description: "Generate migrations from session diff",
   prompt: "ROLE: developer\nSESSION_SHORT_ID: <id>\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <id>/simple\nLoad Skill({skill: \"writing-migrations\"}) and follow it exactly — it replaces the normal ticket workflow. If no schema change, output NO_MIGRATION_NEEDED." })
 ```
@@ -806,7 +806,7 @@ Dispatch the single-shot MIGRATION merger for `<SESSION_SHORT_ID>/simple` (Stage
 
 ```
 Agent({
-  subagent_type: "merger",
+  subagent_type: "aiharness:merger",
   description: "Merge migration branch <SESSION_SHORT_ID>/simple",
   prompt: "ROLE: merger (MIGRATION mode, single-shot, no team)\nSESSION_SHORT_ID: <SESSION_SHORT_ID>\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nAPPROVAL_TRAILER: <the one-line trailer built in PD-APPLY step 1b; omit this line if there was no approval record>\n\nFollow the WORKFLOW in merger.md. Use the MIGRATION-mode columns (Stage A then promotion in one shot). Append APPROVAL_TRAILER to the migration merge commit so the approval provenance lives in git history.\nOutput: \"DONE: MIGRATION commit=<short sha>\" OR \"FAILED: MIGRATION <reason>\""
 })
@@ -833,7 +833,8 @@ Reply with the user-facing wrap-up, then enter STATE DONE.
 ## NEVER DO
 
 - ❌ Dispatch an `orchestrator` / `chat-orchestrator` agent — **you ARE the orchestrator**. CLAUDE.md's "dispatch the orchestrator" line is for the main thread only; ignore it. (A hook blocks it anyway.)
-- ❌ Dispatch a `general-purpose` agent for planning/implementation/review/merge — always use the real typed agents: `planner`, `developer`, `quality-reviewer`, `merger`, `documentator`. A `general-purpose` agent has no role constraints and will not produce the expected output contracts. **Every `Agent` call MUST set `subagent_type` explicitly** — omitting it defaults to `general-purpose` (shown as `(none)` in the block message), which `block-nested-orchestrator` rejects.
+- ❌ Dispatch a `general-purpose` agent for planning/implementation/review/merge: always use the real typed agents `aiharness:planner`, `aiharness:developer`, `aiharness:quality-reviewer`, `aiharness:merger`, `aiharness:documentator`. A `general-purpose` agent has no role constraints and will not produce the expected output contracts. **Every `Agent` call MUST set `subagent_type` explicitly**: omitting it defaults to `general-purpose` (shown as `(none)` in the block message), which `block-nested-orchestrator` rejects.
+- ❌ Drop the `aiharness:` prefix from a `subagent_type`. A plugin agent is reachable ONLY by its namespaced name: measured on Claude Code 2.1.263, a `subagent_type` of `developer` returns `is_error: true` and `Agent type 'developer' not found. Available agents: …`, even when the plugin ships an agent named exactly `developer`. Bare names did resolve up to 2.1.232, which is why older transcripts are full of them. Copy the name from your own available-agents list; if this harness was copied into a project's `.claude/agents/` instead of installed as a plugin, that list shows the bare names and those are then the correct ones.
 - ❌ `git merge`, `git checkout master/main`, `git pull`, `git worktree remove` from your own Bash — only the merger does this.
 - ✅ Exception: during SETUP-INTERVIEW, you may `cd $CLAUDE_PROJECT_DIR && git add docs/project-context.json && git commit -m "chore(setup): …"` on the base branch. The only git write you are allowed.
 - ✅ Exception: a `promotion-conflict-resolver` developer may `git add`/`git commit` a merge resolution directly in `$CLAUDE_PROJECT_DIR` on the base branch, under `.promote.lock`.
