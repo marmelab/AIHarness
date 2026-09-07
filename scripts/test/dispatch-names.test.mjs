@@ -75,7 +75,10 @@ describe("dispatch names in the agent prompts", () => {
   });
 
   test("the orchestrator tells the reader why the prefix is not optional", () => {
-    const prompt = readFileSync(join(ROOT, "agents", "orchestrator.md"), "utf8");
+    const prompt = readFileSync(
+      join(ROOT, "agents", "orchestrator.md"),
+      "utf8",
+    );
     expect(prompt).toMatch(/Agent type 'developer' not found/);
     expect(prompt).toMatch(/2\.1\.263/);
   });
