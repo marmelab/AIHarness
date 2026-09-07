@@ -45,9 +45,9 @@ export function readPayload() {
 /**
  * Run `guards` in order against one payload, then exit 0 (allow).
  *
- * A guard that THROWS is logged and the chain continues. Under one-process-per-hook a
- * crashing guard denied nothing and its siblings still ran; that stays true here, and
- * the error is recorded rather than swallowed.
+ * A guard that THROWS is reported on BOTH channels and the chain continues. Under
+ * one-process-per-hook a crashing guard denied nothing and its siblings still ran;
+ * that stays true here, and the error is reported rather than swallowed.
  * @param {Array<[string, (input: object, ctx: object) => void]>} guards
  * @param {object} [input]
  * @returns {never}
@@ -62,7 +62,24 @@ export function runChain(guards, input = readPayload()) {
       // id: that throws at the point of access, and this is where it becomes one
       // reported line instead of a dead chain. ctx.log falls back to stderr when there
       // is no session dir to write to, so the report survives having nowhere to go.
-      ctx.log(`ERROR ${String(e?.stack ?? e).slice(0, 300)}`);
+      const detail = String(e?.stack ?? e).slice(0, 300);
+      ctx.log(`ERROR ${detail}`);
+      // ...and unconditionally on stderr, the agent-visible channel, because hooks.log
+      // ALONE made a crashed guard indistinguishable from a guard that had no opinion:
+      // the chain exits 0, the tool call proceeds, and the only trace sits in a session
+      // file nobody reads. Observed on bash-guard, where one missing import left every
+      // rule it owns silently inert behind an exit 0 and an empty stderr.
+      //
+      // Deliberately still fail-OPEN. These guards share one process and run on every
+      // matching tool call, so denying on an internal error would refuse calls the
+      // crashed guard had no opinion about — including the ones needed to diagnose it —
+      // and wedge the session until settings.json is edited. Loud beats closed here:
+      // the hole stays visible for as long as it exists, and nothing is wedged.
+      try {
+        ctx.error(`guard crashed, its rules did NOT run: ${detail}`);
+      } catch {
+        // reporting must never break the chain
+      }
     }
   }
   process.exit(0);
