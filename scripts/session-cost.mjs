@@ -7,9 +7,16 @@
 //
 // What it answers: which role the money went to, and why. The unit is the TURN, because
 // every turn re-reads the agent's whole accumulated context. On one profiled run, input was
-// 99.5% of all tokens and, once priced, still 88% of the bill; its most expensive developer
-// went from 27K to 134K tokens of context across 121 turns, so its last turns cost five
-// times its first.
+// 99.9% of all tokens and 97% of the bill; its most expensive developer went from 16K to
+// 134K tokens of context across 65 turns, so its last turns cost eight times its first.
+//
+// A TURN IS ONE API RESPONSE, NOT ONE TRANSCRIPT ENTRY. The transcript writes one entry per
+// content block, each repeating the SAME usage object, so a response that thinks and then
+// calls two tools appears as three entries carrying identical cache_read figures. Summing
+// per entry inflated one run's turns 1.85x, its cache reads 76%, and its output 8.8x, and
+// made 30% of turns look like they produced nothing when they were the thinking block of a
+// response that did call a tool. Group by message.id, take usage ONCE per id, and count
+// tool_use across that id's entries.
 // Two numbers follow from that and neither is visible in a usage total:
 //
 //   - turns with NO tool call. Deliberation and narration, paid at full context price.
@@ -81,6 +88,10 @@ function tally(file) {
   } catch {
     return t;
   }
+  // One record per API response, keyed by message.id. An entry with no id is its own
+  // response (older transcripts, and the runtime's own synthetic entries).
+  const byId = new Map();
+  let anon = 0;
   for (const line of body.split("\n")) {
     if (!line.trim()) continue;
     let event;
@@ -91,25 +102,32 @@ function tally(file) {
     }
     const usage = event.type === "assistant" && event.message?.usage;
     if (!usage) continue;
-    t.turns++;
-    t.out += usage.output_tokens || 0;
-    t.cacheRead += usage.cache_read_input_tokens || 0;
-    t.cacheWrite += usage.cache_creation_input_tokens || 0;
-    const ctx =
-      (usage.cache_read_input_tokens || 0) +
-      (usage.cache_creation_input_tokens || 0) +
-      (usage.input_tokens || 0);
-    if (!t.ctxFirst) t.ctxFirst = ctx;
-    t.ctxLast = ctx;
-    t.model = (event.message.model || t.model)
-      .replace(/^claude-/, "")
-      .replace(/-\d{8}$/, "");
-    const calls = (event.message.content || []).filter(
+    const id = event.message.id || `anon-${anon++}`;
+    if (!byId.has(id)) byId.set(id, { usage, calls: 0, model: event.message.model });
+    const rec = byId.get(id);
+    rec.calls += (event.message.content || []).filter(
       (c) => c.type === "tool_use",
     ).length;
-    if (calls) {
+    if (!rec.model && event.message.model) rec.model = event.message.model;
+  }
+  for (const rec of byId.values()) {
+    const u = rec.usage;
+    t.turns++;
+    t.out += u.output_tokens || 0;
+    t.cacheRead += u.cache_read_input_tokens || 0;
+    t.cacheWrite += u.cache_creation_input_tokens || 0;
+    const ctx =
+      (u.cache_read_input_tokens || 0) +
+      (u.cache_creation_input_tokens || 0) +
+      (u.input_tokens || 0);
+    if (!t.ctxFirst) t.ctxFirst = ctx;
+    t.ctxLast = ctx;
+    t.model = (rec.model || t.model)
+      .replace(/^claude-/, "")
+      .replace(/-\d{8}$/, "");
+    if (rec.calls) {
       t.toolTurns++;
-      t.toolCalls += calls;
+      t.toolCalls += rec.calls;
     }
   }
   return t;
@@ -214,7 +232,7 @@ console.log(
 );
 console.log(
   `tool calls per tool-using turn: ${(tot.toolCalls / (tot.toolTurns || 1)).toFixed(1)}` +
-    ` (1.0 means nothing was ever batched)`,
+    ` (1.0 means no response ever called two tools at once)`,
 );
 const top = rows[0];
 console.log(

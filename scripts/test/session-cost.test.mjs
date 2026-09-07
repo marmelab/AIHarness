@@ -33,17 +33,30 @@ const usage = (over = {}) => ({
   ...over,
 });
 
-/** One billed assistant message. */
-const assistant = (content, over) =>
+let msgSeq = 0;
+
+/** One billed assistant response, as a single transcript entry. */
+const assistant = (content, over, id) =>
   JSON.stringify({
     type: "assistant",
     message: {
+      id: id || `msg_${msgSeq++}`,
       role: "assistant",
       model: "claude-sonnet-5",
       content,
       usage: usage(over),
     },
   });
+
+/**
+ * One response as the runtime actually writes it: one entry per content block, every entry
+ * repeating the SAME id and the SAME usage object. Summing per entry is what inflated a
+ * profiled run's turns 1.85x and its cache reads 76%.
+ */
+const splitResponse = (blocks, over) => {
+  const id = `msg_${msgSeq++}`;
+  return blocks.map((b) => assistant([b], over, id));
+};
 
 const text = (t = "thinking") => [{ type: "text", text: t }];
 const tool = (n = 1) =>
@@ -94,7 +107,38 @@ describe("session-cost", () => {
     expect(run(dir).stdout).toContain("tool calls per tool-using turn: 4.0");
   });
 
-  test("reports 1.0 when nothing was ever batched", () => {
+  test("counts a response split across entries as ONE turn", () => {
+    // The regression that made this script wrong on its first run: a response that thinks
+    // and then calls two tools is three transcript entries carrying one identical usage
+    // object. Per entry that reads as 3 turns and 3000 cache-read tokens, one of them
+    // apparently producing nothing.
+    const dir = session([
+      {
+        role: "developer",
+        lines: splitResponse([
+          { type: "thinking", thinking: "which file" },
+          { type: "tool_use", name: "Read", input: {} },
+          { type: "tool_use", name: "Read", input: {} },
+        ]),
+      },
+    ]);
+    const out = run(dir).stdout;
+    expect(out).toContain("1 agents, 1 turns");
+    expect(out).toContain("0.00M cache-read");
+    expect(out).toContain("tool calls per tool-using turn: 2.0");
+    expect(out).toContain("0/1 (0%)");
+  });
+
+  test("a thinking-only response with no tool call still counts once", () => {
+    const dir = session([
+      { role: "developer", lines: splitResponse([{ type: "thinking", thinking: "hm" }]) },
+    ]);
+    const out = run(dir).stdout;
+    expect(out).toContain("1 agents, 1 turns");
+    expect(out).toContain("1/1 (100%)");
+  });
+
+  test("reports 1.0 when no response ever called two tools at once", () => {
     const dir = session([
       { role: "developer", lines: [assistant(tool()), assistant(tool()), assistant(text())] },
     ]);
