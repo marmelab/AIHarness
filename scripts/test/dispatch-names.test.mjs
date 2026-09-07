@@ -74,12 +74,14 @@ describe("dispatch names in the agent prompts", () => {
       expect(d.value.split(":")[0], `${d.file}:${d.line}`).toBe(PLUGIN);
   });
 
-  test("the orchestrator tells the reader why the prefix is not optional", () => {
+  test("the orchestrator prompt says a bare name is rejected", () => {
+    // One assertion: the prompt has to tell the agent the prefix is mandatory. The
+    // measurement behind it belongs in the commit message, not in a prompt the
+    // orchestrator re-reads every turn.
     const prompt = readFileSync(
       join(ROOT, "agents", "orchestrator.md"),
       "utf8",
     );
     expect(prompt).toMatch(/Agent type 'developer' not found/);
-    expect(prompt).toMatch(/2\.1\.263/);
   });
 });

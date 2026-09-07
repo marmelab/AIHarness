@@ -72,17 +72,12 @@ describe("prompt cache TTL per agent", () => {
     ]);
   });
 
-  test("the frontmatter says why it is on the orchestrator alone", () => {
-    // The next reader's first instinct is to copy it onto the expensive agents. The
-    // numbers have to be right there when they look.
+  test("the frontmatter says it is restricted, and what copying it costs", () => {
+    // The next reader's first instinct is to copy the block onto the expensive agents, so
+    // the restriction and the price of ignoring it have to be where they will look. Two
+    // assertions, not five: pinning the exact wording of a comment makes it unrewritable.
     const fm = frontmatter("orchestrator.md");
-    expect(fm).toMatch(/2x/);
-    expect(fm).toMatch(/1\.25x/);
-    expect(fm).toMatch(/idles/);
-    expect(fm).toMatch(/all 41 are orchestrator turns/);
-  });
-
-  test("the reader is warned the knob needs a recent runtime", () => {
-    expect(frontmatter("orchestrator.md")).toMatch(/2\.1\.248\+/);
+    expect(fm).toMatch(/THIS AGENT ONLY/);
+    expect(fm).toMatch(/\$20\.10/);
   });
 });

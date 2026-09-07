@@ -20,23 +20,11 @@ tools:
   # names and is the only lever left if the chain turns out to be what withholds it.
   - ToolSearch
   - LSP
-# A one-hour prompt cache TTL, on this agent and no other. A 1h cache write bills 2x input
-# against 1.25x for the 5-minute default, so it only pays for an agent that idles longer
-# than five minutes between turns, and the orchestrator is the only one that does: it waits
-# on its children.
-#
-# Measured across nine benchmark runs (scripts/session-cost.mjs): 41 turns re-wrote their
-# whole context after a gap over five minutes, and all 41 are orchestrator turns. Zero in
-# 60 developers, 71 reviewers, 43 mergers, 9 planners, 2 test-writers. On run a68592d0 the
-# five affected turns re-wrote 61K, 76K, 92K, 101K and 111K tokens with cache_read at 0
-# each time, on gaps of 8 to 10 minutes: a full rebuild of what was already cached, at 12x
-# the price of reading it.
-#
-# Modelled on the same nine runs, cache-write cost with 1h vs 1.25x-on-everything:
-# orchestrator $16.03 -> $10.82 (+$5.21). Every other role loses, because they never idle:
-# reviewers -$12.43, developers -$5.58, planner -$1.50, merger -$0.46. Set globally this
-# knob costs $14.89 more, 30% worse. Hence: here only. Requires Claude Code 2.1.248+, and
-# is ignored while a subscription is on usage credits.
+# THIS AGENT ONLY. A 1h cache write bills 2x input vs 1.25x, so it pays only for an agent
+# that idles past the TTL, and this is the only one that does: it waits on its children.
+# Measured over 9 runs, all 41 context rebuilds after a >5min gap are orchestrator turns,
+# none in 185 other agents. Worth +$5.21 here, -$20.10 if copied elsewhere. Needs cc 2.1.248+.
+# See scripts/test/agent-cache-ttl.test.mjs, which fails if a second agent takes it.
 experimental:
   cacheTtl: 1h
 ---
@@ -537,9 +525,7 @@ Agent({ subagent_type: "aiharness:quality-reviewer",
   prompt: "ROLE: quality-reviewer\nTASK_ID: T\nTICKET_FILE: <TICKETS_DIR>/T.json\nWORKTREE_PATH: <WORKTREE_BASE>/T" })
 ```
 
-**Review model: you do not have to get this right.** Per-ticket review is the largest single line of a run's cost, so the model is chosen for you. The `route-review-model` hook reads your `TICKET_FILE` and rewrites the dispatch before it runs: an ordinary ticket goes to `sonnet`, and a ticket whose `files_to_modify` includes anything under `supabase/` or which carries `schema_sensitive: true` keeps the agent file's `opus`. Pass `model` or omit it as you like; the hook corrects it either way, and it corrects it silently rather than refusing the dispatch. `MODE: feature-review`, `MODE: feature-smoke` and `MODE: migration-review` are exempt: they judge the integrated feature and the migration, where a miss has nothing downstream to catch it.
-
-This used to be your job, and it did not work: over nine runs following this instruction, 16 of 60 per-ticket reviewer dispatches passed `model: "sonnet"` and 17 more ran on `opus` for tickets that touched no `supabase/` file, worth up to $16.82 of the $166 those runs cost.
+**Review model: not your problem.** `route-review-model` rewrites the dispatch from the ticket. Pass `model` or omit it, either way it is corrected.
 
 Store the verdict in `reviews.quality` and resolve each:
 
@@ -558,7 +544,7 @@ FINDINGS_RAISED: <the previous REJECTED verdict body, verbatim>
 
 The reviewer then judges whether each raised finding is resolved and whether `FIX_RANGE` itself is sound, instead of re-reading the whole ticket. Without these lines a re-review is a second full pass, costing as much as the original to re-report what it already said. Same narrowing the end-of-feature pass already uses — see `quality-reviewer.md` "A `FIX_ROUND:` block narrows the pass to the fix".
 
-This one is **enforced**, because it needs three values only you have. The `require-fix-round` hook counts reviewer dispatches per ticket and REFUSES the second and later one when the prompt carries no `FIX_ROUND:` line, naming the three lines to add. The refusal still counts, so re-issuing with the block goes through. Unlike the review model, the harness cannot fill these in for you: it does not know the pre-retry HEAD or the verdict body.
+`require-fix-round` REFUSES a second review of a ticket without these lines, so this is not optional.
 
 **Loop Stage 2 until every still-live ticket is `MERGE` or `FAILED`** — bounded because `retries` can only climb to `MAX_RETRIES`.
 
@@ -848,7 +834,7 @@ Reply with the user-facing wrap-up, then enter STATE DONE.
 
 - ❌ Dispatch an `orchestrator` / `chat-orchestrator` agent — **you ARE the orchestrator**. CLAUDE.md's "dispatch the orchestrator" line is for the main thread only; ignore it. (A hook blocks it anyway.)
 - ❌ Dispatch a `general-purpose` agent for planning/implementation/review/merge: always use the real typed agents `aiharness:planner`, `aiharness:developer`, `aiharness:quality-reviewer`, `aiharness:merger`, `aiharness:documentator`. A `general-purpose` agent has no role constraints and will not produce the expected output contracts. **Every `Agent` call MUST set `subagent_type` explicitly**: omitting it defaults to `general-purpose` (shown as `(none)` in the block message), which `block-nested-orchestrator` rejects.
-- ❌ Drop the `aiharness:` prefix from a `subagent_type`. A plugin agent is reachable ONLY by its namespaced name: measured on Claude Code 2.1.263, a `subagent_type` of `developer` returns `is_error: true` and `Agent type 'developer' not found. Available agents: …`, even when the plugin ships an agent named exactly `developer`. Bare names did resolve up to 2.1.232, which is why older transcripts are full of them. Copy the name from your own available-agents list; if this harness was copied into a project's `.claude/agents/` instead of installed as a plugin, that list shows the bare names and those are then the correct ones.
+- ❌ Drop the `aiharness:` prefix from a `subagent_type`: a bare name is rejected outright (`Agent type 'developer' not found`). Copy the name from your available-agents list, which is authoritative in either layout.
 - ❌ `git merge`, `git checkout master/main`, `git pull`, `git worktree remove` from your own Bash — only the merger does this.
 - ✅ Exception: during SETUP-INTERVIEW, you may `cd $CLAUDE_PROJECT_DIR && git add docs/project-context.json && git commit -m "chore(setup): …"` on the base branch. The only git write you are allowed.
 - ✅ Exception: a `promotion-conflict-resolver` developer may `git add`/`git commit` a merge resolution directly in `$CLAUDE_PROJECT_DIR` on the base branch, under `.promote.lock`.
