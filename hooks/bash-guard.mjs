@@ -4,6 +4,7 @@
 
 import { runStandalone } from "./lib/hook-chain.mjs";
 import {
+  bareRole,
   isDeveloper,
   isOrchestrator,
   isQualityReviewer,
@@ -100,15 +101,22 @@ const runsUnitTests = (c) =>
   /(npm\s+run\s+test(:unit)?(:[a-z]+)?|npm\s+test\b|npx\s+vitest|make\s+test(-unit)?(-[a-z]+)?)/.test(
     c,
   );
-// Any make target whose name carries `e2e`, not just the ones that RUN the suite: the
-// targets that bring the stack UP are worse than the suite itself. Observed in the wild
-// on `make start-e2e`, which (1) never returns, because it backgrounds a dev server that
+// Two different acts share the `e2e` token, and they need different audiences, so they
+// are two predicates. Lumping them into one category is what made this rule too broad:
+// one half is a reader, the other destroys state a human is using.
+//
+// The SUITE RUNNER executes specs against a stack that is already up. It mutates
+// nothing, it terminates, and with the stack down it merely fails.
+const runsE2eSuite = (c) => /npx\s+playwright\s+test/.test(c);
+
+// Any make target whose name carries `e2e`, plus the harness smoke script: these bring
+// the stack UP or DOWN, which is worse than running the suite. Observed in the wild on
+// `make start-e2e`, which (1) never returns, because it backgrounds a dev server that
 // keeps the pipe open, (2) `rm -rf`s the e2e database, destroying a human's session, and
 // (3) starts the SHARED stack the harness deliberately replaces with a slot-leased
 // isolated one. Matching the token rather than enumerating targets keeps this from
 // growing a per-project list.
-const runsE2eTests = (c) =>
-  /(npx\s+playwright\s+test|make\s+[\w:-]*e2e|e2e-smoke\.sh)/.test(c);
+const mutatesE2eStack = (c) => /(make\s+[\w:-]*e2e|e2e-smoke\.sh)/.test(c);
 const runsLint = (c) => /(make\s+lint\b|npm\s+run\s+lint\b)/.test(c);
 const runsBuild = (c) =>
   /(npx\s+vite\s+build|npm\s+run\s+build\b|make\s+build\b)/.test(c);
@@ -127,8 +135,8 @@ const CATEGORY_RULES = {
     "unit tests: the validation hooks run vitest automatically. In this sandbox vitest browser mode HANGS without CI=true (chromium headed waits for display). Trust the hooks.",
   ],
   e2e: [
-    runsE2eTests,
-    "e2e tests: NO agent launches the suite, not even the orchestrator. The e2e-on-feature-review hook runs it once, on the integrated session worktree, only after the feature review APPROVED, and writes <session_dir>/e2e-result.json. Write the spec, read the result, don't run it. If a human asked you directly: say it is not yours to run, and offer the two real options, they run it themselves with a user-typed `!` command (those bypass this guard by design), or the change goes through #harness and the end-of-feature hook runs it. Do NOT offer to bypass this guard or ask to be authorized to: a deny blocks the call whatever anyone answers, so the offer is impossible as well as wrong.",
+    runsE2eSuite,
+    "e2e tests: NO agent launches the suite, not even the orchestrator. The e2e-on-feature-review hook runs it once, on the integrated session worktree, only after the feature review APPROVED, and writes <session_dir>/e2e-result.json. Write the spec, read the result, don't run it. A main session, acting on a human's direct request, MAY run the suite against a stack the human has already started; you are not a main session. If a human asked you directly: say it is not yours to run, and offer the two real options, they run it themselves with a user-typed `!` command (those bypass this guard by design), or the change goes through #harness and the end-of-feature hook runs it. Do NOT offer to bypass this guard or ask to be authorized to: a deny blocks the call whatever anyone answers, so the offer is impossible as well as wrong.",
   ],
   lint: [
     runsLint,
@@ -142,10 +150,10 @@ const CATEGORY_RULES = {
 
 // Which categories to guard comes from the SAME config the validation chain runs
 // (kills the triple-encoding: runner, guard, and doc no longer drift). Each
-// validation step's kind maps to a category (lint included — it is now a chain
-// step), plus validation.extraForbidden (build, e2e — never run during tickets,
-// not part of the chain). Fail-open to ALL categories if the config can't be read,
-// so a malformed config never weakens the guard.
+// validation step's kind maps to a category (lint and e2e included — both are chain
+// steps), plus validation.extraForbidden for what is never run during tickets and is
+// not part of the chain (build). Fail-open to ALL categories if the config can't be
+// read, so a malformed config never weakens the guard.
 const KIND_TO_CATEGORY = {
   format: "prettier",
   typecheck: "typecheck",
@@ -183,19 +191,44 @@ const READONLY_SEGMENT =
 const maskSearchPatterns = (c) =>
   String(c).replace(READONLY_SEGMENT, (seg) => seg.split(/\s+/)[0]);
 
-// e2e is the one category gated for EVERY caller, not just the two agents below:
-// launching the suite is a hook's job (e2e-on-feature-review.mjs), so an orchestrator
-// or a main-session Bash call must be refused too. Still config-driven — drop "e2e"
-// from validation.extraForbidden and this stops applying, like any other category.
-const checkE2eAnyCaller = (cmd, ctx) => {
+// Bringing the e2e stack up or down is refused to EVERY caller, main session included,
+// because it destroys state a human may be using and it does not terminate. This is the
+// half that must never be relaxed by audience. Still config-driven — the "e2e" category
+// comes from a validation step of kind "e2e" (or validation.extraForbidden), so removing
+// it stops this applying, like any other category.
+const checkE2eStack = (cmd, ctx) => {
   // Masked like the rules below: this one keys on the script's FILE NAME, so without it
   // every `wc`, `head` or `awk` naming that file was refused as an attempt to launch the
   // suite, and the script could not be maintained through Bash at all.
-  if (!activeCategories.has("e2e") || !runsE2eTests(maskSearchPatterns(cmd)))
+  if (!activeCategories.has("e2e") || !mutatesE2eStack(maskSearchPatterns(cmd)))
     return;
   ctx.block({
+    reason:
+      "Validation command forbidden: e2e stack: bringing the e2e stack up or down is refused for EVERY caller, main session included. `make start-e2e` never returns (it backgrounds a dev server that holds the pipe open) and it `rm -rf`s the e2e database out from under a human. The harness runs the suite through e2e-on-feature-review.mjs on a slot-leased isolated stack and writes <session_dir>/e2e-result.json. If a human asked you directly: say starting the stack is not yours to run, and offer the two real options, they start it themselves with a user-typed `!` command (those bypass this guard by design), or the change goes through #harness. Do NOT offer to bypass this guard or ask to be authorized to: a deny blocks the call whatever anyone answers, so the offer is impossible as well as wrong. See the harness rule validation-commands.md.",
+    log: `any-caller rule=e2e-stack cmd=${cmd.slice(0, 120)}`,
+  });
+};
+
+// Running the SUITE is gated by audience, unlike the stack half above: every SUBAGENT is
+// refused (launching the suite is e2e-on-feature-review.mjs's job, the orchestrator
+// included, and a manual run mid-ticket burns budget for a result the hook already
+// produces), while a main session acting on a human's direct request is not — it can
+// iterate on specs against a stack the human started.
+//
+// Gating on "any identified caller" rather than on the config.roles roster is
+// deliberate: it needs no roster to be complete in a consuming project, and it also
+// refuses a non-harness subagent, so it is strictly tighter than a roster. Note this is
+// fail-open on identity — an empty agent_type HAS been observed, which is why `who`
+// falls back to ctx.agentType, and such a caller would be taken for the main session.
+// That is acceptable HERE and only here: the destructive half stays universal, so the
+// worst case is a slow failing run, never a deleted database or a hung shell.
+const checkE2eSuite = (cmd, ctx, who) => {
+  if (!activeCategories.has("e2e") || !runsE2eSuite(maskSearchPatterns(cmd)))
+    return;
+  if (!bareRole(who)) return;
+  ctx.block({
     reason: `Validation command forbidden: ${CATEGORY_RULES.e2e[1]} See the harness rule validation-commands.md, including what to answer when a human asks you directly.`,
-    log: `any-caller rule=e2e cmd=${cmd.slice(0, 120)}`,
+    log: `subagent=${bareRole(who)} rule=e2e-suite cmd=${cmd.slice(0, 120)}`,
   });
 };
 
@@ -404,13 +437,19 @@ export function check(input, ctx) {
 
   checkBrowser(cmd, ctx);
   checkGuardState(cmd, ctx, agent);
-  checkE2eAnyCaller(cmd, ctx);
+  checkE2eStack(cmd, ctx);
 
   // Resolve identity the same robust way as the guard-state rule above: prefer the
   // payload agent_type, fall back to the CLAUDE_AGENT_NAME-derived ctx.agentType,
   // and match via the suffix-aware predicates, so a `developer-TASK-001` runtime
   // name (or an empty agent_type) is still gated, not silently waved through.
   const who = agent || ctx.agentType || "";
+
+  // Before the developer/reviewer barrier below: running the suite is refused to EVERY
+  // subagent, not just those two, so the orchestrator, merger, planner, test-writer and
+  // documentator stay gated.
+  checkE2eSuite(cmd, ctx, who);
+
   const isReviewer = isQualityReviewer(who);
   if (!isDeveloper(who) && !isReviewer) return;
 
