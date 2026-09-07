@@ -44,7 +44,7 @@ writeFileSync(
 
 const SESSION_ID = "test-1234";
 
-const runHook = (agent, command) => {
+const runHook = (agent, command, envOverrides = {}) => {
   const env = {
     ...process.env,
     HARNESS_TMP_ROOT: tmpRoot,
@@ -52,6 +52,7 @@ const runHook = (agent, command) => {
   };
   delete env.CLAUDE_AGENT_NAME;
   delete env.CLAUDE_PROJECT_DIR;
+  Object.assign(env, envOverrides);
   const input = JSON.stringify({
     tool_name: "Bash",
     agent_type: agent,
@@ -111,10 +112,11 @@ describe("bash-guard hook", () => {
       expect(isBlocked(r)).toBe(false);
     });
 
-    // `npx playwright test` IS refused, but by the e2e rule below (no agent launches
-    // the suite), never for a missing --headless flag the CLI cannot even accept.
+    // For a subagent `npx playwright test` IS refused, but by the e2e rule below (no
+    // agent launches the suite), never for a missing --headless flag the CLI cannot
+    // even accept.
     test("plain playwright test is refused for e2e, not for headlessness", () => {
-      const r = runHook("", "npx playwright test");
+      const r = runHook("orchestrator", "npx playwright test");
       expect(isBlocked(r)).toBe(true);
       expect(r.stdout).toContain("e2e-on-feature-review");
       expect(r.stdout).not.toContain("--headed");
@@ -169,11 +171,11 @@ describe("bash-guard hook", () => {
       expect(isBlocked(r)).toBe(false);
     });
 
-    // e2e is the one category scoped to EVERY caller: launching the suite is the
-    // e2e-on-feature-review hook's job, so no agent may do it by hand.
-    describe("e2e is blocked for every caller", () => {
-      const e2eCases = [
-        ["orchestrator", "npx playwright test"],
+    // The e2e category is split by what the command DOES, because the two halves need
+    // different audiences. Mutating the stack is refused to everyone; running the suite
+    // is refused to every subagent but allowed to a main session.
+    describe("mutating the e2e stack is blocked for every caller", () => {
+      const stackCases = [
         [
           "orchestrator",
           "E2E_SMOKE_SRC=/tmp/wt/_session bash .claude/scripts/e2e-smoke.sh",
@@ -190,7 +192,7 @@ describe("bash-guard hook", () => {
         ["", "make start-e2e 2>&1 | tail -30"],
       ];
 
-      test.each(e2eCases)("%s running '%s' → blocked", (agent, command) => {
+      test.each(stackCases)("%s running '%s' → blocked", (agent, command) => {
         const r = runHook(agent, command);
         expect(r.status).toBe(0);
         expect(isBlocked(r)).toBe(true);
@@ -224,6 +226,49 @@ describe("bash-guard hook", () => {
           noE2e,
         );
         expect(isBlocked(r)).toBe(false);
+      });
+    });
+
+    // Running the suite against an already-running stack mutates nothing and
+    // terminates, so it is gated by audience rather than refused outright. Every
+    // subagent is still refused — the roster is deliberately NOT consulted, so a role
+    // absent from config.roles (merger, planner, test-writer, documentator here) is
+    // gated all the same, and the orchestrator invariant holds.
+    describe("running the e2e suite is blocked for every subagent", () => {
+      test.each([
+        "orchestrator",
+        "developer",
+        "developer-TASK-007",
+        "aiharness:developer",
+        "quality-reviewer",
+        "merger",
+        "planner",
+        "test-writer",
+        "documentator",
+        "general-purpose",
+      ])("%s running the suite → blocked", (agent) => {
+        const r = runHook(agent, "npx playwright test e2e/foo.spec.ts");
+        expect(r.status).toBe(0);
+        expect(isBlocked(r)).toBe(true);
+      });
+
+      test("main session running the suite → allowed", () => {
+        const r = runHook("", "npx playwright test e2e/foo.spec.ts");
+        expect(r.status).toBe(0);
+        expect(isBlocked(r)).toBe(false);
+      });
+
+      test("main session may still not bring the stack up", () => {
+        expect(isBlocked(runHook("", "make start-e2e-ci"))).toBe(true);
+      });
+
+      // CLAUDE_AGENT_NAME is the fallback identity when agent_type is absent, so a
+      // subagent that arrives without one is still gated.
+      test("subagent identified only by CLAUDE_AGENT_NAME → blocked", () => {
+        const r = runHook("", "npx playwright test", {
+          CLAUDE_AGENT_NAME: "developer-TASK-003",
+        });
+        expect(isBlocked(r)).toBe(true);
       });
     });
 

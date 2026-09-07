@@ -55,8 +55,25 @@ guard, so they can never drift:
   budget and with no recovery marker, because a red suite is not an orphaned pipeline
   and "never wedge the pipeline" still holds.
 - `bash-guard.mjs` (PreToolUse Bash) blocks `developer` / `quality-reviewer` from
-  running those same commands manually, plus `validation.extraForbidden` (build,
-  e2e). The forbidden set is DERIVED from `validation.steps`, not hardcoded here.
+  running those same commands manually, plus `validation.extraForbidden` (build).
+  The forbidden set is DERIVED from `validation.steps`, not hardcoded here.
+- **The e2e category is split by what the command does, because the two halves need
+  different audiences:**
+  - *Bringing the stack up or down* (`make …e2e`, `e2e-smoke.sh`) is refused to
+    EVERY caller, a main session included. It destroys state a human may be using
+    (`rm -rf` on the e2e database) and it does not terminate (`make start-e2e`
+    backgrounds a dev server that holds the pipe open). Never relax this by audience.
+  - *Running the suite* (`npx playwright test`) is refused to every SUBAGENT, the
+    orchestrator included, but allowed to a main session acting on a human's direct
+    request, against a stack the human has already started. The gate keys on "any
+    identified caller", not on the `config.roles` roster, so it needs no roster to be
+    complete and also refuses a non-harness subagent.
+
+  This split is what makes the main-session relaxation safe: the identity gate is
+  fail-open (an empty `agent_type` has been observed in the wild), so a caller whose
+  role does not resolve is taken for a main session. That is tolerable only because
+  the destructive half stays universal, which bounds the worst case at a slow failing
+  run rather than a deleted database.
 
 ## Why blocked (developer / quality-reviewer)
 
@@ -90,6 +107,11 @@ Say plainly that it is not yours to run, and give the two real options:
 - or, for e2e specifically, the change goes through the harness (`#harness`) and the
   end-of-feature hook runs the suite on the integrated session worktree, writing
   `<session_dir>/e2e-result.json`.
+
+For e2e there is a third option worth offering, because the split above makes it real:
+ask the human to bring the stack up once themselves (`!make start-e2e-ci`), after which
+a main session can iterate on `npx playwright test <spec>` on its own. A subagent still
+cannot, so from inside the harness the two options above remain the whole answer.
 
 **Never offer to bypass, disable or work around a harness guard, and never suggest the
 human could authorize you to.** It is not a permission question: a `PreToolUse` deny blocks
