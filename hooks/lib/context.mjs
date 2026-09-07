@@ -19,14 +19,8 @@ import { exec } from "./process.mjs";
 import { loadConfig, sessionDirFromEnv, worktreeProvision } from "./config.mjs";
 
 /**
- * Merge `patch` over `base`, treating an explicit `undefined` as a removal.
- *
- * Removal is the case that matters: "leave this reviewer on the model its agent file
- * declares" is spelled by DELETING `model`, not by naming a model, so that a runtime which
- * ignores the field still lands on the stronger default.
- *
- * A new object every time, per rules/coding-style.md: the payload is read by every guard
- * after this one.
+ * Merge `patch` over `base`. An explicit `undefined` REMOVES the key, which is how a
+ * guard restores a field's default rather than naming a value for it.
  * @param {Record<string, unknown>} base
  * @param {Record<string, unknown>} patch
  * @returns {Record<string, unknown>}
@@ -288,20 +282,15 @@ export function createHookContext(input, name = "hook", options = {}) {
     },
 
     /**
-     * Correct this tool call's input instead of refusing it, and RETURN so the rest of the
-     * chain still runs.
+     * Correct this tool call's input instead of refusing it, and RETURN.
      *
-     * `patch` is merged over the payload's `tool_input`; a key set to `undefined` is
-     * REMOVED, which is how a guard restores a field's default. The chain collects the
-     * patches and emits one `updatedInput` after the last guard, because emitting here
-     * would end the process and skip every guard below (setup-worktree among them, which
-     * is what actually creates the worktree).
+     * Returning is the contract: emitting here would end the process and skip every guard
+     * below, setup-worktree included. The chain collects patches and emits one
+     * `updatedInput` after the last guard.
      *
-     * A guard that can fix a dispatch should prefer this to ctx.fail: a refusal is correct
-     * for something only the caller can decide, and pure waste for something the harness
-     * already knows. Measured on Claude Code 2.1.263, where updatedInput is honoured.
-     *
-     * @param {Record<string, unknown>} patch
+     * Prefer this to ctx.fail for anything the harness can work out itself; a refusal
+     * costs the caller a turn.
+     * @param {Record<string, unknown>} patch  Merged over tool_input; `undefined` removes.
      * @param {{ log?: string }} [opts]
      * @returns {void}
      */
@@ -319,14 +308,9 @@ export function createHookContext(input, name = "hook", options = {}) {
     /**
      * Warn the agent WITHOUT blocking its tool call, and END THE PROCESS.
      *
-     * Exits 0 and puts the message on the one channel the agent actually reads
-     * (`hookSpecificOutput.additionalContext`; see lib/io.mjs for the measured channel
-     * table). The obvious spelling, exit 1 with the message on stderr, delivers to the
-     * user and to hooks.log but never to the agent: this harness's three PostToolUse
-     * checks were written that way and their text reached no developer transcript, so a
-     * mistake they detect at the moment it is made was still found minutes later by an
-     * Opus reviewer, at the price of a retry round.
-     *
+     * Exits 0 with the message on `additionalContext`, the only non-blocking channel the
+     * agent receives. Exiting 1 with it on stderr reaches the user and not the agent; see
+     * lib/io.mjs.
      * @param {string} message  Shown to the agent verbatim.
      * @param {{ log?: string }} [options]
      * @returns {never}

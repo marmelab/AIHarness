@@ -2,8 +2,7 @@
 // It scans the written .ts/.tsx file for typing escape hatches and, when it finds one,
 // exits 0 with the warning on stdout as `additionalContext`.
 //
-// It used to exit 1 with the warning on stderr, and passed these tests doing so, while the
-// runtime showed that message to the user and never to the agent it was addressed to. So
+// It used to exit 1 with the warning on stderr, and passed these tests doing so. So
 // "flagged" is now defined by the stdout contract, not by the exit code.
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

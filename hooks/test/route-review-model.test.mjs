@@ -1,15 +1,8 @@
 // Tests for route-review-model: the per-ticket review model, decided by the harness.
 //
-// The rule lived in orchestrator.md for a month and was followed 16 times out of 60. What
-// the tests have to pin is not the rule (that part was never in doubt) but the two things
-// that make enforcing it safe:
-//
-//   1. the direction of each rewrite, since they are asymmetric: an ordinary ticket is SET
-//      to sonnet, a schema-sensitive one has `model` REMOVED so the agent file's opus
-//      applies. Naming opus instead of removing would make a runtime that ignores `model`
-//      review the riskiest tickets on the cheap one.
-//   2. fail-open, in the expensive direction: anything the guard cannot read leaves the
-//      dispatch alone.
+// What matters is not the rule but the two things that make enforcing it safe: the
+// asymmetric direction of each rewrite (SET sonnet, REMOVE model), and fail-open in the
+// expensive direction.
 
 import { describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -115,16 +108,15 @@ describe("route-review-model", () => {
   });
 
   test("a ticket touching supabase/ has model REMOVED, not set to opus", () => {
-    // Removal, so a runtime that ignores `model` leaves the reviewer on its declared
-    // opus. Naming opus here would invert the failure mode of the whole optimisation.
+    // Removal, so a runtime ignoring `model` leaves the reviewer on its declared opus.
     const r = run({ ticket: TOUCHES_SUPABASE, model: "sonnet" });
     expect(r.updated).not.toHaveProperty("model");
     cleanup();
   });
 
   test("schema_sensitive alone is enough to keep the stronger model", () => {
-    // The case that paid for opus in the run this rule comes from had no SQL in its diff:
-    // a select on a CHECK-constrained column, left clearable, could submit "".
+    // The case this condition exists for had no SQL in its diff: a select on a
+    // CHECK-constrained column, left clearable, could submit "".
     const r = run({ ticket: FLAGGED, model: "sonnet" });
     expect(r.updated).not.toHaveProperty("model");
     cleanup();
@@ -202,7 +194,7 @@ describe("route-review-model", () => {
     });
 
     test("a ticket with no files_to_modify and no flag is ordinary", () => {
-      // Nothing says the database is involved, so the cheap model is the right read.
+      // Nothing says the database is involved.
       const r = run({ ticket: { id: "TASK-001" } });
       expect(r.updated.model).toBe("sonnet");
       cleanup();

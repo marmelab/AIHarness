@@ -4,9 +4,8 @@
 // is a sentinel-writing script so the test verifies invocation/scoping without
 // depending on prettier.
 //
-// A formatter failure is reported as `additionalContext` with exit 0, not as exit 1 with a
-// message on stderr: the model is the only party that can act on it, and exit 1 is the one
-// channel the model never receives (see lib/io.mjs).
+// A formatter failure is reported on `additionalContext`, not exit 1, since the model is
+// the only party that can act on it (see lib/io.mjs).
 
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

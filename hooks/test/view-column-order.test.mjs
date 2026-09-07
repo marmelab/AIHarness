@@ -43,10 +43,8 @@ left join tasks t on t.contact_id = co.id;
 /**
  * Commit the file as HEAD, then write `after` on top and run the hook over it.
  *
- * A flag is now exit 0 with the message on stdout as `additionalContext`, not exit 1 with
- * it on stderr: exit 1 is the channel the runtime shows the user and hides from the agent,
- * so the old shape passed this test while reaching no developer. Reading the message off
- * stdout is therefore the assertion that matters.
+ * A flag is exit 0 with the message on stdout, not exit 1 with it on stderr, so reading it
+ * off stdout is the assertion that matters.
  */
 const run = (before, after, name = "03_views.sql") => {
   const rel = `supabase/schemas/${name}`;

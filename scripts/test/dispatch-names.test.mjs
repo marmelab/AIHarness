@@ -1,17 +1,8 @@
 // Every subagent_type literal in an agent prompt must name an agent the runtime can
-// actually resolve.
+// resolve, which for a plugin agent means the namespaced name.
 //
-// A plugin agent is reachable ONLY by its namespaced name. Measured on Claude Code 2.1.263:
-// a plugin shipping an agent named `developer` refuses `subagent_type: "developer"` with
-// `is_error: true` and `Agent type 'developer' not found. Available agents: …`, and accepts
-// only `<plugin>:developer`. Bare names resolved up to 2.1.232, so this was silent for
-// months: the orchestrator's 19 dispatch literals were all bare, and across nine benchmark
-// runs it improvised the prefix 118 times out of 204 dispatches rather than reading it in
-// its own prompt.
-//
-// This is a static test on purpose. The failure mode is a hard runtime error inside a
-// dispatch, which costs a turn and is only visible in a transcript, so it must be caught
-// here instead.
+// Static on purpose: the failure is a hard error inside a dispatch, visible only in a
+// transcript, so nothing downstream catches it.
 
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -69,15 +60,11 @@ describe("dispatch names in the agent prompts", () => {
   });
 
   test("the namespace matches the plugin manifest rather than a hardcoded string", () => {
-    // If the plugin is ever renamed, this fails instead of the templates going stale.
     for (const d of dispatchLiterals)
       expect(d.value.split(":")[0], `${d.file}:${d.line}`).toBe(PLUGIN);
   });
 
   test("the orchestrator prompt says a bare name is rejected", () => {
-    // One assertion: the prompt has to tell the agent the prefix is mandatory. The
-    // measurement behind it belongs in the commit message, not in a prompt the
-    // orchestrator re-reads every turn.
     const prompt = readFileSync(
       join(ROOT, "agents", "orchestrator.md"),
       "utf8",

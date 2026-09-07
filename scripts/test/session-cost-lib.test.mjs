@@ -1,9 +1,7 @@
 // Unit tests for the session-cost arithmetic.
 //
-// Each of these guards a counting rule that was wrong in a shipped version of the script
-// and produced a figure someone then quoted. The placeholder test is the reason this file
-// exists: the bug it catches was invisible to the CLI tests, which only asserted that a
-// number was printed.
+// The placeholder test is why this file exists: that bug was invisible to the CLI tests,
+// which only asserted that a number was printed.
 
 import { describe, expect, test } from "vitest";
 import {
@@ -70,8 +68,7 @@ const streamedResponse = ({ id = "msg_1", blocks, finalOutput, ts }) =>
 
 describe("tallyTranscript", () => {
   test("takes the server's final output count, not the streaming placeholder", () => {
-    // The bug this file was written for: keeping the FIRST entry's usage reported 32K
-    // output on a run whose real output was 280K.
+    // Keeping the FIRST entry's usage reported 32K output where the truth was 280K.
     const body = streamedResponse({
       blocks: [{ type: "thinking", thinking: "which file" }, ...tool(2)],
       finalOutput: 232,
@@ -232,14 +229,14 @@ describe("detectCacheExpiries", () => {
   });
 
   test("does not flag a large write that follows a short gap", () => {
-    // Context growth, not a TTL lapse: the agent simply added a lot of new material.
+    // Context growth, not a TTL lapse.
     expect(
       detectCacheExpiries([turn(0, 5000, 50000), turn(1, 48000, 7000)]).count,
     ).toBe(0);
   });
 
   test("does not flag a long gap whose next turn mostly read cache", () => {
-    // The cache survived, or the runtime rebuilt it for free; either way nothing was rewritten.
+    // Nothing was rewritten.
     expect(
       detectCacheExpiries([turn(0, 5000, 50000), turn(30, 900, 60000)]).count,
     ).toBe(0);
@@ -348,8 +345,7 @@ describe("classifyReviewDispatch", () => {
   });
 
   test("ranks a verdict-flag retry above the re-review it also matches", () => {
-    // A retry caused by a harness bug must not be hidden inside the re-review bucket:
-    // one run spent $6.40 on six of them and they bought nothing.
+    // A retry caused by a harness bug must not hide inside the re-review bucket.
     expect(
       classifyReviewDispatch("Re-review TASK-004 fix (verdict-flag retry)"),
     ).toBe("verdict-flag retry");

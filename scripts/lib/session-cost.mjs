@@ -1,21 +1,15 @@
 // Accounting for one session's transcripts: turns, tokens, dollars, cache expiries.
 //
-// Split out of session-cost.mjs so the arithmetic is unit-testable. The CLI parses argv
-// and exits at import time; every rule that was ever wrong here is a pure function below.
-//
-// Three accounting traps, each measured on session a68592d0 (21 agents, 556 responses):
+// Split out of session-cost.mjs so the arithmetic is unit-testable. Three traps, each of
+// which produced a figure someone then quoted:
 //
 //  1. A TURN IS ONE API RESPONSE, NOT ONE TRANSCRIPT ENTRY. The transcript writes one
-//     entry per content block, each repeating the SAME input-side usage. Summing per entry
-//     inflated that run's turns 1.85x and its cache reads 76%.
-//  2. output_tokens IS A STREAMING PLACEHOLDER ON EVERY ENTRY BUT THE LAST. The early
-//     entries of a response carry 2 to 4; only the entry that also carries
-//     `usage.iterations` holds the server's final count. Keeping the FIRST entry's usage
-//     reported 32K output for a run whose real output was 280K, a 8.75x undercount.
-//     Prefer the sum of `iterations[]` (the server's own accounting, and correct even if a
-//     response ever chains several inference passes), fall back to the max.
-//  3. cache_creation_input_tokens IS NOT ONE PRICE. A 5-minute write bills 1.25x input, a
-//     1-hour write 2x, and the split only appears under `usage.cache_creation`.
+//     entry per content block, each repeating the same input-side usage.
+//  2. output_tokens IS A STREAMING PLACEHOLDER on every entry but the last. Only the
+//     entry carrying `usage.iterations` holds the server's final count. Prefer the sum of
+//     `iterations` (correct even if a response chains several passes), else the max.
+//  3. cache_creation IS NOT ONE PRICE: 1.25x input at 5 minutes, 2x at an hour, and the
+//     split only appears under `usage.cache_creation`.
 //
 // Prices are per million tokens, Anthropic first-party API. Cache read is 0.1x input.
 
@@ -40,12 +34,8 @@ export function normalizeModel(model) {
 }
 
 /**
- * Rate for a model, and whether it was actually in the table.
- *
- * An unknown model is priced at the fallback rate rather than at zero, because a silent
- * zero reads as "this agent was free". `known: false` is what the CLI reports, so a
- * dollar figure is never quoted as exact when a model was guessed.
- *
+ * Rate for a model. An unknown one is priced at the fallback rather than at zero, since a
+ * silent zero reads as "this agent was free"; `known: false` is what the CLI warns on.
  * @param {string} model
  * @returns {{input: number, output: number, known: boolean, name: string}}
  */
@@ -57,8 +47,7 @@ export function rateFor(model) {
 }
 
 /**
- * Price one tally. Cache reads and writes are input-rate derivatives, output its own rate.
- *
+ * Price one tally. Cache reads and writes are input-rate derivatives.
  * @param {{in: number, cacheRead: number, cw5m: number, cw1h: number, out: number, model: string}} t
  */
 export function price(t) {
@@ -82,19 +71,16 @@ export function price(t) {
   };
 }
 
-// A cache entry written with the 5-minute TTL is gone after 5 minutes of silence; the next
-// turn then re-writes the whole context instead of reading it. Both conditions are needed:
-// a large write alone is just a growing context, and a long gap alone may follow a turn
-// that wrote nothing.
+// A 5-minute cache entry dies after 5 minutes of silence and the next turn re-writes the
+// whole context. BOTH conditions are needed: a large write alone is a growing context, a
+// long gap alone may follow a turn that wrote nothing.
 export const EXPIRY_GAP_MS = 5 * 60 * 1000;
 export const EXPIRY_WRITE_SHARE = 0.5;
-// Below this the "share of context" test is noise: the opening turns of an agent are
-// almost all cache write by construction.
+// Below this the share test is noise: an agent's opening turns are almost all write.
 export const EXPIRY_MIN_CONTEXT = 20000;
 
 /**
  * Turns whose cache write looks like a re-write after a TTL lapse.
- *
  * @param {{ts: number, in: number, cw: number, cr: number}[]} turns sorted by ts
  * @returns {{count: number, tokens: number, at: number[]}}
  */
@@ -114,9 +100,8 @@ export function detectCacheExpiries(turns) {
   return { count: at.length, tokens, at };
 }
 
-// The orchestrator names each reviewer dispatch in free text, so this classifier reads a
-// human label, not a field. Order matters: a verdict-flag retry is also a "Re-review".
-// A dispatch that matches nothing lands in "other" rather than being forced into a bucket.
+// Reads a free-text label, not a field. ORDER MATTERS: a verdict-flag retry is also a
+// "Re-review". No match lands in "other" rather than being forced into a bucket.
 const REVIEW_KINDS = [
   [/verdict-flag/i, "verdict-flag retry"],
   [/^feature-smoke/i, "feature smoke"],
@@ -190,8 +175,8 @@ export function tallyTranscript(body) {
       rec.cr !== (usage.cache_read_input_tokens || 0) ||
       rec.cw !== (usage.cache_creation_input_tokens || 0)
     ) {
-      // The input side is supposed to be identical across a response's entries. A count
-      // here means that assumption broke and the totals are suspect.
+      // The input side must be identical across a response's entries; a count here means
+      // that assumption broke and the totals are suspect.
       usageMismatches++;
     }
     rec.outMax = Math.max(rec.outMax, usage.output_tokens || 0);

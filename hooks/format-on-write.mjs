@@ -5,9 +5,8 @@
 // SubagentStop validation chain already applies the format step (and would
 // re-run it), so formatting their in-flight writes is redundant churn.
 //
-// Non-blocking: the Write already succeeded, so a formatter failure only warns. The warning
-// goes out as additionalContext with exit 0, because exit 1 puts it on a channel the model
-// never reads (see lib/io.mjs) and the model is the only party that can act on it.
+// Non-blocking: the Write already succeeded, so a formatter failure only warns, on
+// additionalContext rather than exit 1 (see lib/io.mjs).
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

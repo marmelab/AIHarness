@@ -1,18 +1,8 @@
 // The one-hour prompt cache TTL belongs to the orchestrator and to nothing else.
 //
-// This is a cost knob with a sign that flips per role. A 1h cache write bills 2x input
-// where the 5-minute default bills 1.25x, so it pays only for an agent that idles past the
-// TTL between turns and then re-writes its whole context instead of reading it.
-//
-// Measured with scripts/session-cost.mjs across the nine benchmark runs: 41 turns did that
-// re-write, and all 41 are orchestrator turns. None of the 60 developers, 71 reviewers, 43
-// mergers, 9 planners or 2 test-writers has a single one, because none of them waits on a
-// child. Modelled on the same runs, the knob is worth +$5.21 on the orchestrator and
-// -$20.10 on everyone else; set globally it costs $14.89 more than the default.
-//
-// So "which agents declare it" is the whole correctness of the change, and a well-meaning
-// copy of the frontmatter block into developer.md would silently make the harness more
-// expensive with nothing to show for it. Hence a test that counts.
+// The knob's sign flips per role: it pays for an agent that idles past the TTL, and costs
+// money for one that does not. So "which agents declare it" IS the correctness of the
+// change, and a well-meaning copy onto developer.md would be a silent regression.
 
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -73,9 +63,7 @@ describe("prompt cache TTL per agent", () => {
   });
 
   test("the frontmatter says it is restricted, and what copying it costs", () => {
-    // The next reader's first instinct is to copy the block onto the expensive agents, so
-    // the restriction and the price of ignoring it have to be where they will look. Two
-    // assertions, not five: pinning the exact wording of a comment makes it unrewritable.
+    // Two assertions, not five: pinning a comment's exact wording makes it unrewritable.
     const fm = frontmatter("orchestrator.md");
     expect(fm).toMatch(/THIS AGENT ONLY/);
     expect(fm).toMatch(/\$20\.10/);

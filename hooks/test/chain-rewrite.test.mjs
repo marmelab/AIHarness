@@ -1,13 +1,8 @@
 // Tests for the input-rewrite channel in the guard chain.
 //
-// The chain runs every PreToolUse(Agent) guard in one process and setup-worktree runs
-// LAST, so a guard that corrected a dispatch by writing its JSON and exiting would create
-// no worktree and the dispatch would fail on something unrelated to what it fixed. Hence
-// ctx.rewriteInput RETURNS, the chain accumulates, and one updatedInput is emitted after
-// the last guard.
-//
-// The other half is that later guards must see the corrected call. A chain where guard 8
-// gates a value guard 7 already changed is a bug with a long fuse.
+// Two invariants: rewriteInput must not end the chain (setup-worktree runs LAST, so a
+// guard that emitted and exited would fix the model and leave the dispatch with no
+// worktree), and later guards must see the corrected call.
 
 import { describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -99,7 +94,6 @@ describe("runChain with a rewriting guard", () => {
   });
 
   test("does NOT end the chain, so setup-worktree still gets to run", () => {
-    // The whole reason rewriteInput returns instead of exiting.
     const r = runChainWith(
       [
         `ctx.rewriteInput({ model: "sonnet" });`,
@@ -156,8 +150,7 @@ describe("runChain with a rewriting guard", () => {
   });
 
   test("a refusal after a rewrite wins, and no updatedInput is emitted", () => {
-    // ctx.fail ends the process. A denied call must not be handed a corrected input as
-    // though it were going ahead.
+    // A denied call must not be handed a corrected input as though it were going ahead.
     const r = runChainWith(
       [`ctx.rewriteInput({ model: "sonnet" });`, `ctx.fail("denied");`],
       DISPATCH,

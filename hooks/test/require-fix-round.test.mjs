@@ -1,14 +1,7 @@
 // Tests for require-fix-round: a second review of the same ticket must be narrowed.
 //
-// The mechanical question is "is this a re-review", and the tests pin the answer the guard
-// uses: its own per-ticket dispatch count. The review verdict flag cannot answer it, since
-// reviews.mjs writes that flag only on APPROVED and clears it on REJECTED and on every
-// developer re-dispatch, so its absence is exactly the state of a ticket about to be
-// re-reviewed.
-//
-// The count must include a REFUSED attempt. Otherwise the retry that adds FIX_ROUND looks
-// like the first review of the ticket and is waved through without it, which is the same
-// hole the guard exists to close.
+// The load-bearing case is that a REFUSED attempt still counts. Otherwise the retry that
+// adds FIX_ROUND reads as the first review and is waved through without it.
 
 import { afterEach, describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -126,9 +119,8 @@ describe("require-fix-round", () => {
     dispatch();
     expect(dispatch().status).toBe(2);
     expect(counter()).toBe(2);
-    // The orchestrator now re-issues WITH the block. That is dispatch 3, and it has to be
-    // allowed: had the refusal not been counted, this one would read as review 2 and be
-    // refused again, which is a loop.
+    // Dispatch 3, with the block: had the refusal not counted, it would read as review 2
+    // and be refused again, which is a loop.
     expect(dispatch({ extra: FIX_BLOCK }).status).toBe(0);
     expect(counter()).toBe(3);
   });

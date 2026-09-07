@@ -1,11 +1,7 @@
 // Tests for lib/io.mjs and ctx.flag: WHICH channel a hook writes on.
 //
-// This file exists because the harness got the channel wrong three times over and no test
-// could see it. A hook that exits 1 with a message on stderr looks like a warning, passes
-// any test that asserts its exit code and its stderr, and delivers nothing to the agent:
-// the runtime files that as `hook_non_blocking_error` and shows it to the user only.
-// Measured on Claude Code 2.1.263. So these tests assert the STDOUT CONTRACT, which is the
-// only part the runtime reads back.
+// Asserting the exit code and the process's stderr is exactly what let the old bug pass,
+// so these tests assert the STDOUT CONTRACT, the only part the runtime reads back.
 
 import { describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";

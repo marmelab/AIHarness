@@ -7,10 +7,9 @@
 // split between turns that called a tool and turns that only produced text. That split is
 // the reason the script exists, and no usage total shows it.
 //
-// These tests can only see what the CLI prints. The counting rules themselves are unit
-// tested in session-cost-lib.test.mjs, because a spawnSync assertion that a number was
-// printed cannot tell a right number from a wrong one: that is how the output placeholder
-// bug survived a green suite.
+// These tests only see what the CLI prints; the counting rules are unit tested in
+// session-cost-lib.test.mjs. A spawnSync assertion that a number was printed cannot tell a
+// right number from a wrong one.
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -253,7 +252,7 @@ describe("session-cost", () => {
   });
 
   test("prices the run and splits the bill by token kind", () => {
-    // 1M cache read on sonnet-5 is $0.20 (0.1x the $2 input rate); 100K output is $1.00.
+    // 1M cache read on sonnet-5 is $0.20 (0.1x the $2 rate); 100K output is $1.00.
     const dir = session([
       {
         role: "developer",
@@ -273,8 +272,6 @@ describe("session-cost", () => {
   });
 
   test("reports the main thread separately from the agents it dispatched", () => {
-    // The main thread pays real money but is not an agent, so averaging it into a role
-    // would misattribute it; leaving it out entirely hides part of the bill.
     const dir = session(
       [
         {
@@ -306,8 +303,6 @@ describe("session-cost", () => {
   });
 
   test("counts a cache re-write after a long gap as an expiry", () => {
-    // The 5-minute TTL dies during a long SubagentStop hook, and the next turn pays 1.25x
-    // input on the whole context instead of 0.1x. Same tokens, 12x the price.
     const dir = session([
       {
         role: "orchestrator",

@@ -12,11 +12,8 @@
 //     created for a dispatch that is not going to happen.
 //   - record-merger-stage writes its authorization marker only for a dispatch that got
 //     past the merger gates above it, so a refused merger leaves no marker behind.
-//   - require-fix-round runs BEFORE route-review-model, because it counts a dispatch as
-//     having happened and then may refuse it. Routing a call that is about to be refused
-//     would be work thrown away; and the count must include the refused attempt, or the
-//     retry that adds FIX_ROUND would look like the first review and be waved through
-//     without it.
+//   - require-fix-round runs BEFORE route-review-model: it may refuse the call, and
+//     routing one that is about to be refused is work thrown away.
 
 import { runChain } from "./lib/hook-chain.mjs";
 import { check as openProgressLog } from "./open-progress-log.mjs";

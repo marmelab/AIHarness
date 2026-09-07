@@ -1,29 +1,22 @@
 #!/usr/bin/env node
-// Token cost of one harness session: per-agent turns, tokens, dollars, and cache expiries.
+// Token cost of one harness session: per-agent turns, tokens, dollars, cache expiries.
 //
-// The counterpart to session-timeline.mjs, which measures WALL CLOCK and says so: cost and
-// time do not distribute the same way. A run whose longest pole is one developer can still
-// spend most of its money somewhere else entirely.
+// The counterpart to session-timeline.mjs, which measures WALL CLOCK: cost and time do not
+// distribute the same way. A run whose longest pole is one developer can still spend most
+// of its money elsewhere.
 //
-// What it answers: which role the money went to, and why. The unit is the TURN, because
-// every turn re-reads the agent's whole accumulated context. On one profiled run, input was
-// 99% of all tokens and 77% of the bill; its most expensive developer went from 26K to
-// 86K tokens of context across 66 turns.
+// The unit is the TURN, because every turn re-reads the agent's whole accumulated context.
+// Four things no usage total shows:
 //
-// Four numbers here are invisible in any usage total:
+//   - turns with NO tool call: deliberation, paid at full context price.
+//   - tool calls per turn: batching reads costs fewer context re-reads than serialising.
+//   - CACHE EXPIRIES: a 5-minute cache dies during a long hook and the next turn re-writes
+//     the context at 1.25x input instead of reading it at 0.1x. 12x, for waiting.
+//   - REVIEW DISPATCHES BY KIND: a re-review costs as much as a review, and a retry caused
+//     by a harness bug costs the same again and buys nothing.
 //
-//   - turns with NO tool call. Deliberation and narration, paid at full context price.
-//   - tool calls per turn. An agent that batches reads pays for fewer context re-reads
-//     than one that serialises them.
-//   - CACHE EXPIRIES. A 5-minute cache entry dies during a long hook (validation, e2e) and
-//     the next turn re-writes the whole context at 1.25x input instead of reading it at
-//     0.1x. That is a 12x price step on the same tokens, caused by waiting, not by working.
-//   - REVIEW DISPATCHES BY KIND. A re-review costs as much as a review; a retry caused by
-//     a harness bug costs the same again and buys nothing.
-//
-// The arithmetic lives in scripts/lib/session-cost.mjs and is unit-tested there. This file
-// parses argv and formats; it is exercised through spawnSync (scripts/test/session-cost.test.mjs),
-// never imported. Same reason the hooks' parsers live in hooks/lib/.
+// The arithmetic is in scripts/lib/session-cost.mjs and unit-tested there. This file parses
+// argv and formats, so it is exercised through spawnSync, never imported.
 //
 // Usage: node scripts/session-cost.mjs <session-id> [--project <slug>] [--by-role] [--json]
 //   <slug> defaults to the current repo's transcript directory name under
@@ -73,8 +66,8 @@ const read = (file) => {
 
 const withPrice = (t) => ({ ...t, usd: price(t) });
 
-// The main thread is a real payer (it dispatches, it reads reports) but it is not an agent,
-// so it stays out of the agent totals rather than being averaged into a role.
+// A real payer, but not an agent: kept out of the agent totals rather than averaged into
+// a role.
 const main = withPrice(tallyTranscript(read(mainTranscript)));
 
 const rows = [];

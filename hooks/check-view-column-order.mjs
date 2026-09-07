@@ -18,11 +18,8 @@
 // stays free to justify a deliberate full rebuild (a DROP + CREATE migration is a
 // legitimate, if heavier, answer).
 //
-// The warning goes out via ctx.flag (exit 0 + additionalContext), NOT exit 1. This hook
-// shipped exiting 1 with the message on stderr, which the runtime delivers to the user and
-// not to the agent: the text below appears in none of the three developer transcripts that
-// edited 03_views.sql, and the mistake it detects still reached the Opus reviewer in 8 of 8
-// benchmark runs, one retry round each. See lib/io.mjs for the measured channel table.
+// Via ctx.flag, NOT exit 1: on exit 1 the runtime hands the message to the user and never
+// to the agent it is addressed to. See lib/io.mjs.
 
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";

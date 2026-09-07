@@ -15,11 +15,9 @@
 // applied to it. Each guard still gets its OWN ctx, built with its own name, so the
 // `[hook-name]` prefix in hooks.log is unchanged.
 //
-// A guard may also CORRECT the call with ctx.rewriteInput instead of refusing it. That is
-// not terminal: the patch is collected here and one `updatedInput` is emitted after the
-// last guard, so setup-worktree still runs. Each later guard sees the patched tool_input,
-// because a chain where two guards disagree about what the call says is a bug waiting to
-// happen.
+// ctx.rewriteInput is NOT terminal: patches are collected here, later guards see the
+// patched tool_input, and one `updatedInput` is emitted after the last guard so
+// setup-worktree still runs.
 //
 // Every guard also stays runnable standalone (`node hooks/<guard>.mjs`), which is the
 // shape all the hook tests use, so the behavior the tests pin is the behavior the

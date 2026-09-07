@@ -5,9 +5,8 @@
 // so a legitimate, justified suppression is never broken. A justified
 // `@ts-expect-error <reason>` on the same line is NOT flagged.
 //
-// Non-blocking means ctx.flag (exit 0 + additionalContext), not exit 1: on exit 1 the
-// runtime hands the message to the user and never to the agent, so the flag was invisible
-// to the developer it was written for. See lib/io.mjs.
+// Non-blocking means ctx.flag, not exit 1: exit 1 reaches the user, not the agent. See
+// lib/io.mjs.
 
 import { readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
