@@ -5,7 +5,7 @@
 // in `contacts_summary`. It typechecks, every test passes, and the deploy fails with
 // PostgreSQL 42P16 — so the only signal that can arrive in time is this one.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -40,7 +40,14 @@ from contacts co
 left join tasks t on t.contact_id = co.id;
 `;
 
-/** Commit the file as HEAD, then write `after` on top and run the hook over it. */
+/**
+ * Commit the file as HEAD, then write `after` on top and run the hook over it.
+ *
+ * A flag is now exit 0 with the message on stdout as `additionalContext`, not exit 1 with
+ * it on stderr: exit 1 is the channel the runtime shows the user and hides from the agent,
+ * so the old shape passed this test while reaching no developer. Reading the message off
+ * stdout is therefore the assertion that matters.
+ */
 const run = (before, after, name = "03_views.sql") => {
   const rel = `supabase/schemas/${name}`;
   const abs = join(repo, rel);
@@ -57,12 +64,17 @@ const run = (before, after, name = "03_views.sql") => {
     cwd: repo,
     transcript_path: "/dev/null",
   });
-  try {
-    execFileSync("node", [HOOK], { input: payload, encoding: "utf8" });
-    return { flagged: false, message: "" };
-  } catch (e) {
-    return { flagged: true, message: String(e.stderr || "") };
-  }
+  const r = spawnSync("node", [HOOK], { input: payload, encoding: "utf8" });
+  if (r.status !== 0)
+    throw new Error(`hook exited ${r.status}: ${r.stderr || r.stdout}`);
+  if (!r.stdout.trim()) return { flagged: false, message: "", raw: r };
+  const out = JSON.parse(r.stdout);
+  return {
+    flagged: true,
+    message: out.hookSpecificOutput.additionalContext,
+    event: out.hookSpecificOutput.hookEventName,
+    raw: r,
+  };
 };
 
 describe("check-view-column-order", () => {
@@ -78,6 +90,22 @@ describe("check-view-column-order", () => {
     expect(r.message).toContain("42P16");
     // The remedy is the useful part: the order it should have had.
     expect(r.message).toContain("nb_tasks, importance");
+    // ... and it has to arrive on the channel the developer actually reads.
+    expect(r.raw.status).toBe(0);
+    expect(r.raw.stderr).toBe("");
+    expect(r.event).toBe("PostToolUse");
+  });
+
+  test("does not block the edit it flags", () => {
+    // A mid-select column can be a deliberate choice paired with a DROP + CREATE
+    // migration, so the hook warns and gets out of the way.
+    const after = VIEW_BEFORE.replace(
+      "  co.status,\n",
+      "  co.status,\n  co.importance,\n",
+    );
+    const r = run(VIEW_BEFORE, after);
+    expect(r.raw.status).toBe(0);
+    expect(r.raw.stdout).not.toContain('"decision"');
   });
 
   test("accepts the same column appended last", () => {

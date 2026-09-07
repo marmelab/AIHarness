@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { decisionBlock } from "./io.mjs";
+import { additionalContext, decisionBlock } from "./io.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
 import { exec } from "./process.mjs";
 import { loadConfig, sessionDirFromEnv, worktreeProvision } from "./config.mjs";
@@ -63,6 +63,7 @@ export function createHookContext(input, name = "hook") {
     );
   };
   const agentType = clean(i.agent_type) || agentName;
+  const hookEventName = clean(i.hook_event_name);
 
   const sessionDirOf = () =>
     join(TMP_ROOT, sanitizePath(REPO), requireSessionId());
@@ -178,6 +179,7 @@ export function createHookContext(input, name = "hook") {
     agentType,
     agentName,
     agentId,
+    hookEventName,
 
     // Session-scoped, so each one refuses rather than resolving to a shared path.
     get sessionId() {
@@ -259,6 +261,27 @@ export function createHookContext(input, name = "hook") {
         seen = 0; // no session state to count in: fall back to logging every time
       }
       if (seen === 0) verdict("ACCEPT", detail);
+      process.exit(0);
+    },
+
+    /**
+     * Warn the agent WITHOUT blocking its tool call, and END THE PROCESS.
+     *
+     * Exits 0 and puts the message on the one channel the agent actually reads
+     * (`hookSpecificOutput.additionalContext`; see lib/io.mjs for the measured channel
+     * table). The obvious spelling, exit 1 with the message on stderr, delivers to the
+     * user and to hooks.log but never to the agent: this harness's three PostToolUse
+     * checks were written that way and their text reached no developer transcript, so a
+     * mistake they detect at the moment it is made was still found minutes later by an
+     * Opus reviewer, at the price of a retry round.
+     *
+     * @param {string} message  Shown to the agent verbatim.
+     * @param {{ log?: string }} [options]
+     * @returns {never}
+     */
+    flag(message, { log: detail } = {}) {
+      verdict("FLAG", detail);
+      additionalContext(hookEventName, `[${name}] ${message}`);
       process.exit(0);
     },
 

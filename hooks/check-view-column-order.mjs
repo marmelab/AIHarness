@@ -14,9 +14,15 @@
 // feedback arrived minutes later from another agent.
 //
 // So it is checked here, against the file's own git HEAD, at the moment of the edit.
-// Non-blocking (exit 1), like the other PostToolUse checks: the developer is told
-// immediately, in the turn that made the change, and stays free to justify a deliberate
-// full rebuild (a DROP + CREATE migration is a legitimate, if heavier, answer).
+// Non-blocking: the developer is told immediately, in the turn that made the change, and
+// stays free to justify a deliberate full rebuild (a DROP + CREATE migration is a
+// legitimate, if heavier, answer).
+//
+// The warning goes out via ctx.flag (exit 0 + additionalContext), NOT exit 1. This hook
+// shipped exiting 1 with the message on stderr, which the runtime delivers to the user and
+// not to the agent: the text below appears in none of the three developer transcripts that
+// edited 03_views.sql, and the mistake it detects still reached the Opus reviewer in 8 of 8
+// benchmark runs, one retry round each. See lib/io.mjs for the measured channel table.
 
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -141,7 +147,7 @@ const ctx = createHookContext(input, "check-view-column-order");
 ctx.log(
   `FLAG ${filePath} ${problems.map((p) => `${p.view}(+${p.added.join(",")})`).join(" ")}`,
 );
-ctx.error(
+ctx.flag(
   problems
     .map(
       (p) =>
@@ -154,4 +160,3 @@ ctx.error(
     )
     .join("\n\n"),
 );
-process.exit(1);

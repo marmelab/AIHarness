@@ -3,6 +3,10 @@
 // human/main-thread path only (harness subagents are skipped). The formatter here
 // is a sentinel-writing script so the test verifies invocation/scoping without
 // depending on prettier.
+//
+// A formatter failure is reported as `additionalContext` with exit 0, not as exit 1 with a
+// message on stderr: the model is the only party that can act on it, and exit 1 is the one
+// channel the model never receives (see lib/io.mjs).
 
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,12 +56,13 @@ const setup = (extensions = [".ts", ".tsx"]) => {
     writeFileSync(filePath, "const x=1");
     const input = JSON.stringify({
       tool_name: "Write",
+      hook_event_name: "PostToolUse",
       ...(agent ? { agent_type: agent } : {}),
       tool_input: { file_path: filePath },
     });
     return spawnSync("node", [HOOK], { input, env, encoding: "utf8" });
   };
-  return { run, sentinel };
+  return { run, sentinel, repo };
 };
 
 describe("format-on-write hook", () => {
@@ -85,5 +90,26 @@ describe("format-on-write hook", () => {
   test("unparseable payload → exits 0", () => {
     const r = spawnSync("node", [HOOK], { input: "nope", encoding: "utf8" });
     expect(r.status).toBe(0);
+  });
+
+  test("a formatter that fails reports on the channel the model reads", () => {
+    const { run, repo } = setup();
+    // Replace the formatter with one that exits non-zero.
+    writeFileSync(join(repo, "fmt.sh"), "#!/bin/sh\nexit 3\n");
+    const r = run("", "a.ts");
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe("");
+    const out = JSON.parse(r.stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+    expect(out.hookSpecificOutput.additionalContext).toContain(
+      "failed to format",
+    );
+    expect(out.hookSpecificOutput.additionalContext).toContain("a.ts");
+  });
+
+  test("a formatter that succeeds says nothing at all", () => {
+    const { run } = setup();
+    const r = run("", "a.ts");
+    expect(r.stdout).toBe("");
   });
 });
