@@ -20,6 +20,25 @@ tools:
   # names and is the only lever left if the chain turns out to be what withholds it.
   - ToolSearch
   - LSP
+# A one-hour prompt cache TTL, on this agent and no other. A 1h cache write bills 2x input
+# against 1.25x for the 5-minute default, so it only pays for an agent that idles longer
+# than five minutes between turns, and the orchestrator is the only one that does: it waits
+# on its children.
+#
+# Measured across nine benchmark runs (scripts/session-cost.mjs): 41 turns re-wrote their
+# whole context after a gap over five minutes, and all 41 are orchestrator turns. Zero in
+# 60 developers, 71 reviewers, 43 mergers, 9 planners, 2 test-writers. On run a68592d0 the
+# five affected turns re-wrote 61K, 76K, 92K, 101K and 111K tokens with cache_read at 0
+# each time, on gaps of 8 to 10 minutes: a full rebuild of what was already cached, at 12x
+# the price of reading it.
+#
+# Modelled on the same nine runs, cache-write cost with 1h vs 1.25x-on-everything:
+# orchestrator $16.03 -> $10.82 (+$5.21). Every other role loses, because they never idle:
+# reviewers -$12.43, developers -$5.58, planner -$1.50, merger -$0.46. Set globally this
+# knob costs $14.89 more, 30% worse. Hence: here only. Requires Claude Code 2.1.248+, and
+# is ignored while a subscription is on usage credits.
+experimental:
+  cacheTtl: 1h
 ---
 
 # ORCHESTRATOR
