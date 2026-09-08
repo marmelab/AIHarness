@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // PostToolUse(Write|Edit): flag TypeScript typing escape hatches in .ts/.tsx files.
 //
-// Deliberately non-blocking (exit 1, not exit 2): it flags a workaround rather
-// than blocking a write, so a legitimate, justified suppression is never broken.
-// A justified `@ts-expect-error <reason>` on the same line is NOT flagged.
+// Deliberately non-blocking: it flags a workaround rather than blocking a write,
+// so a legitimate, justified suppression is never broken. A justified
+// `@ts-expect-error <reason>` on the same line is NOT flagged.
+//
+// Non-blocking means ctx.flag, not exit 1: exit 1 reaches the user, not the agent. See
+// lib/io.mjs.
 
 import { readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
@@ -48,8 +51,7 @@ if (hits.length === 0) process.exit(0);
 
 const ctx = createHookContext(input, "check-typescript-shortcuts");
 ctx.log(`FLAG ${filePath} ${hits.join(", ")}`);
-ctx.error(
+ctx.flag(
   `${filePath} contains a typing workaround (${[...new Set(hits)].join(", ")}).\n` +
     `Replace it with the correct type instead of bypassing the typecheck.`,
 );
-process.exit(1);

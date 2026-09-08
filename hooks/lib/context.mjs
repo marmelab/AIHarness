@@ -13,17 +13,34 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { decisionBlock } from "./io.mjs";
+import { additionalContext, decisionBlock, updatedToolInput } from "./io.mjs";
 import { REPO, TMP_ROOT, sanitizePath } from "./paths.mjs";
 import { exec } from "./process.mjs";
 import { loadConfig, sessionDirFromEnv, worktreeProvision } from "./config.mjs";
 
 /**
+ * Merge `patch` over `base`. An explicit `undefined` REMOVES the key, which is how a
+ * guard restores a field's default rather than naming a value for it.
+ * @param {Record<string, unknown>} base
+ * @param {Record<string, unknown>} patch
+ * @returns {Record<string, unknown>}
+ */
+export function applyPatch(base, patch) {
+  const out = { ...(base || {}) };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === undefined) delete out[k];
+    else out[k] = v;
+  }
+  return out;
+}
+
+/**
  * @param {string | Record<string, unknown>} input
  * @param {string} [name]
+ * @param {{ onRewrite?: (patch: Record<string, unknown>) => void }} [options]
  * @returns {object}
  */
-export function createHookContext(input, name = "hook") {
+export function createHookContext(input, name = "hook", options = {}) {
   const i = typeof input === "string" ? JSON.parse(input) : input || {};
   const clean = (s) => String(s ?? "").replace(/[\t\n]/g, " ");
 
@@ -63,6 +80,7 @@ export function createHookContext(input, name = "hook") {
     );
   };
   const agentType = clean(i.agent_type) || agentName;
+  const hookEventName = clean(i.hook_event_name);
 
   const sessionDirOf = () =>
     join(TMP_ROOT, sanitizePath(REPO), requireSessionId());
@@ -178,6 +196,7 @@ export function createHookContext(input, name = "hook") {
     agentType,
     agentName,
     agentId,
+    hookEventName,
 
     // Session-scoped, so each one refuses rather than resolving to a shared path.
     get sessionId() {
@@ -259,6 +278,46 @@ export function createHookContext(input, name = "hook") {
         seen = 0; // no session state to count in: fall back to logging every time
       }
       if (seen === 0) verdict("ACCEPT", detail);
+      process.exit(0);
+    },
+
+    /**
+     * Correct this tool call's input instead of refusing it, and RETURN.
+     *
+     * Returning is the contract: emitting here would end the process and skip every guard
+     * below, setup-worktree included. The chain collects patches and emits one
+     * `updatedInput` after the last guard.
+     *
+     * Prefer this to ctx.fail for anything the harness can work out itself; a refusal
+     * costs the caller a turn.
+     * @param {Record<string, unknown>} patch  Merged over tool_input; `undefined` removes.
+     * @param {{ log?: string }} [opts]
+     * @returns {void}
+     */
+    rewriteInput(patch, { log: detail } = {}) {
+      verdict("REWRITE", detail);
+      if (options.onRewrite) {
+        options.onRewrite(patch);
+        return;
+      }
+      // No chain collecting for us: emit and end, so a guard run on its own still works.
+      updatedToolInput(applyPatch(i.tool_input, patch));
+      process.exit(0);
+    },
+
+    /**
+     * Warn the agent WITHOUT blocking its tool call, and END THE PROCESS.
+     *
+     * Exits 0 with the message on `additionalContext`, the only non-blocking channel the
+     * agent receives. Exiting 1 with it on stderr reaches the user and not the agent; see
+     * lib/io.mjs.
+     * @param {string} message  Shown to the agent verbatim.
+     * @param {{ log?: string }} [options]
+     * @returns {never}
+     */
+    flag(message, { log: detail } = {}) {
+      verdict("FLAG", detail);
+      additionalContext(hookEventName, `[${name}] ${message}`);
       process.exit(0);
     },
 

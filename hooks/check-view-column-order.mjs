@@ -14,9 +14,12 @@
 // feedback arrived minutes later from another agent.
 //
 // So it is checked here, against the file's own git HEAD, at the moment of the edit.
-// Non-blocking (exit 1), like the other PostToolUse checks: the developer is told
-// immediately, in the turn that made the change, and stays free to justify a deliberate
-// full rebuild (a DROP + CREATE migration is a legitimate, if heavier, answer).
+// Non-blocking: the developer is told immediately, in the turn that made the change, and
+// stays free to justify a deliberate full rebuild (a DROP + CREATE migration is a
+// legitimate, if heavier, answer).
+//
+// Via ctx.flag, NOT exit 1: on exit 1 the runtime hands the message to the user and never
+// to the agent it is addressed to. See lib/io.mjs.
 
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -141,7 +144,7 @@ const ctx = createHookContext(input, "check-view-column-order");
 ctx.log(
   `FLAG ${filePath} ${problems.map((p) => `${p.view}(+${p.added.join(",")})`).join(" ")}`,
 );
-ctx.error(
+ctx.flag(
   problems
     .map(
       (p) =>
@@ -154,4 +157,3 @@ ctx.error(
     )
     .join("\n\n"),
 );
-process.exit(1);
