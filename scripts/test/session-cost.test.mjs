@@ -241,7 +241,22 @@ describe("session-cost", () => {
       },
     );
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("no transcript at");
+    expect(r.stderr).toContain("no main transcript at");
+  });
+
+  // Transcripts are pruned after cleanupPeriodDays (30 by default) and the main thread is
+  // ONE file while the subagent directory can outlive it. Refusing the run then made an
+  // older benchmark impossible to re-cost, which is the case the tool is kept for.
+  test("a pruned main transcript costs the agents anyway, and says what is missing", () => {
+    const dir = session([{ role: "developer", lines: [assistant(tool())] }]);
+    rmSync(join(dir, "projects", SLUG, `${SESSION}.jsonl`), { force: true });
+    const r = run(dir);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("1 agents, 1 turns");
+    expect(r.stderr).toContain("no main transcript at");
+    expect(r.stderr).toContain("subagents only");
+    // No main thread means no main-thread line, not a zeroed one presented as a total.
+    expect(r.stdout).not.toContain("main thread");
   });
 
   test("explains an empty session instead of printing an empty table", () => {
