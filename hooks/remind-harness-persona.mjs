@@ -28,10 +28,20 @@ const technical = /#technical-harness/.test(prompt);
 const plain = /#harness\b/.test(prompt);
 if (!technical && !plain) process.exit(0);
 
+// A level the user sized themselves. Passing it on is what keeps a one-field change out
+// of the full COMPLEX pipeline, and it is exactly the kind of word a dispatch prompt
+// rewritten from memory paraphrases away.
+const level = (prompt.match(/\blevel\s*[=:]\s*(bugfix|small|feature)\b/i) ||
+  prompt.match(/#(?:technical-)?harness\s+(bugfix|small|feature)\b/i) ||
+  [])[1];
+
 const lines = [
   "The user opted into the agent harness. The orchestrator dispatch must carry, each on its own line:",
   "- `GATE: <none|migration|plan|waves>` — always explicit; it fails closed to `plan` on a missing value.",
   "- the `<session_dir>` for this session.",
+  level
+    ? `- \`LEVEL: ${level.toLowerCase()}\` — the user sized this request themselves. Pass it VERBATIM: \`bugfix\`/\`small\` route to the SIMPLE flow, \`feature\` to COMPLEX, and it outranks the orchestrator's own classification.`
+    : "- `LEVEL: <bugfix|small|feature>` — optional. Include it when the user sized the request; omit it and the orchestrator classifies for itself.",
 ];
 if (technical)
   lines.push(
