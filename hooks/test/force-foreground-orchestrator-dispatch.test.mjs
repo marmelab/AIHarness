@@ -117,10 +117,10 @@ describe("force-foreground-orchestrator-dispatch", () => {
   });
 });
 
-// In a runtime that exposes no run_in_background, this guard has nothing left to deny, and
-// it used to say so on every single dispatch: 35 identical ACCEPT lines in one session's
-// log, which buries the lines that mean something.
-describe("the inert-runtime note is logged once per session", () => {
+// An absent run_in_background is accepted, and the acceptance used to be logged on every
+// single dispatch: 35 identical ACCEPT lines in one session's log, which buries the lines
+// that mean something.
+describe("the absent-parameter note is logged once per session", () => {
   const inertRun = (root, sessionId) =>
     spawnSync("node", [HOOK], {
       input: JSON.stringify({
@@ -137,7 +137,7 @@ describe("the inert-runtime note is logged once per session", () => {
     if (!existsSync(log)) return [];
     return readFileSync(log, "utf8")
       .split("\n")
-      .filter((l) => l.includes("guard is inert"));
+      .filter((l) => l.includes("run_in_background absent"));
   };
 
   test("five dispatches produce one note, and none of them is blocked", () => {
@@ -151,6 +151,9 @@ describe("the inert-runtime note is logged once per session", () => {
     expect(inertLines(root, sessionId)).toHaveLength(1);
     // And it corrects the doctrine that caused the re-dispatch, at the source.
     expect(inertLines(root, sessionId)[0]).toContain("task-notification");
+    // The premise is measured, not assumed: a runtime that DOES expose the parameter must
+    // not be described as one that cannot.
+    expect(inertLines(root, sessionId)[0]).not.toContain("guard is inert");
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -164,8 +167,8 @@ describe("the inert-runtime note is logged once per session", () => {
   });
 
   // An explicit false is the compliant shape and stays a normal per-dispatch accept: it is
-  // not the inert case, so it must not consume or trigger the note.
-  test("an explicit false is never reported as inert", () => {
+  // not the absent case, so it must not consume or trigger the note.
+  test("an explicit false never produces the note", () => {
     const root = mkdtempSync(join(tmpdir(), "force-fg-explicit-"));
     spawnSync("node", [HOOK], {
       input: JSON.stringify({
