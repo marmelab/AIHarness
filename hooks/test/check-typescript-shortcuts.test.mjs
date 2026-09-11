@@ -21,14 +21,16 @@ afterAll(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-// Write `source` to a file named `name`, then run the hook against it.
-const runHook = (name, source) => {
+// Write `source` to a file named `name`, then run the hook against it. The payload
+// carries `content`, the way the runtime's own Write payload does: this hook judges what
+// the tool WROTE, so a fixture that only puts the text on disk exercises a different hook.
+const runHook = (name, source, toolInput) => {
   const filePath = join(tmpRoot, name);
   writeFileSync(filePath, source);
   const input = JSON.stringify({
     tool_name: "Write",
     session_id: "test-1234",
-    tool_input: { file_path: filePath },
+    tool_input: { file_path: filePath, content: source, ...toolInput },
   });
   return spawnSync("node", [HOOK], { input, encoding: "utf8" });
 };
@@ -106,12 +108,54 @@ describe("check-typescript-shortcuts hook", () => {
         tool_name: "Edit",
         session_id: "test-1234",
         hook_event_name: "PostToolUse",
-        tool_input: { file_path: filePath },
+        tool_input: {
+          file_path: filePath,
+          new_string: "const x = value as any;",
+        },
       }),
       encoding: "utf8",
     });
     expect(JSON.parse(r.stdout).hookSpecificOutput.hookEventName).toBe(
       "PostToolUse",
     );
+  });
+
+  // The flag is about the change, not about the file it landed in. Reporting a legacy
+  // module's existing `any`s on every edit to it says nothing about what the agent did,
+  // and a warning that is usually wrong is one the agent learns to skip.
+  describe("it judges the written text, not the file around it", () => {
+    const LEGACY = "let legacy: any = 1;\nconst other = x as any;\n";
+
+    test("an edit that adds clean code to a file full of `any` is not flagged", () => {
+      const r = runHook("legacy-edit.ts", LEGACY, {
+        content: undefined,
+        new_string: "const total: number = items.length;",
+      });
+      expect(isFlagged(r)).toBe(false);
+    });
+
+    test("an edit that ADDS the shortcut is flagged, in that same file", () => {
+      const r = runHook("legacy-add.ts", LEGACY, {
+        content: undefined,
+        new_string: "const total = items as any;",
+      });
+      expect(flagMessage(r)).toMatch(/as any/);
+    });
+
+    test("a MultiEdit is judged on the text of its edits", () => {
+      const r = runHook("multi.ts", LEGACY, {
+        content: undefined,
+        edits: [
+          { new_string: "const a: number = 1;" },
+          { new_string: "const b = c as any;" },
+        ],
+      });
+      expect(flagMessage(r)).toMatch(/as any/);
+    });
+
+    test("a payload that says nothing about what was written flags nothing", () => {
+      const r = runHook("no-text.ts", LEGACY, { content: undefined });
+      expect(isFlagged(r)).toBe(false);
+    });
   });
 });
