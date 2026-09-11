@@ -316,7 +316,10 @@ export function createHookContext(input, name = "hook", options = {}) {
      * @returns {never}
      */
     flag(message, { log: detail } = {}) {
-      verdict("FLAG", detail);
+      // With no detail this logged a bare `FLAG`, which says a hook fired and nothing
+      // about what it saw, so every caller printed its own FLAG line first and the log
+      // carried both. The message's first line is what those lines said anyway.
+      verdict("FLAG", detail || String(message).split("\n")[0].slice(0, 200));
       additionalContext(hookEventName, `[${name}] ${message}`);
       process.exit(0);
     },

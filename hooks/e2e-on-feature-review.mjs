@@ -1,9 +1,19 @@
 #!/usr/bin/env node
-// SubagentStop - the ONLY place the e2e suite is launched. Two triggers.
+// SubagentStop - the ONLY place the e2e suite is launched. Three triggers.
+//
+// 0. WAVE COMPLETE. The merger stop that leaves every ticket `merged` — the last wave's
+//    merge. The suite is the runtime gate, so it runs BEFORE the feature review instead
+//    of behind it. Measured on run 565b7a14: with the suite behind the review the same
+//    flows were exercised three times (a reviewer driving the browser by hand, then the
+//    suite, then two fix rounds), 27% of the request's wall clock. Running it first means
+//    a red suite is fixed while no reviewer is in flight, and the review that follows
+//    reads e2e-result.json instead of re-clicking the app.
 //
 // 1. FEATURE REVIEW. The end-of-feature `MODE: feature-review` dispatch, and only when
 //    that review APPROVED, so a BLOCKED review that sends the work back to a developer
-//    never pays for a 10-minute suite.
+//    never pays for a 10-minute suite. Still needed after trigger 0: a review can be the
+//    thing that moved the code, and a session whose tickets the wave trigger could not
+//    read (SIMPLE, an unreadable ticket) has no other way in.
 //
 //    The gate is the reviewer's VERDICT, parsed through lib/verdict.mjs, the same parser
 //    record-review-verdict uses to write the flag. Reading the verdict rather than waiting
@@ -12,10 +22,11 @@
 //    being visible to another is a race whatever the runtime's execution order turns out
 //    to be. The flag is consulted only as a fallback for an UNPARSEABLE verdict.
 //
-// 2. MERGER, after a fix for a red suite lands. All three must hold: the FEATURE flag
-//    exists (so a feature review has already approved), the last result says `failed`, and
-//    its sessionSha is not the session branch's current head (so something was merged
-//    since). That is exactly the state after "fix the failing spec, merge it".
+// 2. MERGER, after a fix for a red suite lands. All three must hold: the suite has run
+//    at least once for this session (a FEATURE flag, or a result on disk from trigger 0),
+//    the last result says `failed`, and its sessionSha is not the session branch's current
+//    head (so something was merged since). That is exactly the state after "fix the
+//    failing spec, merge it".
 //
 //    Without this, re-running the suite meant re-running a full opus feature-review whose
 //    only purpose was to re-trigger the hook. Each fix round then cost a review it did not
@@ -41,6 +52,7 @@ import { git } from "./lib/git.mjs";
 import { isFeatureReview } from "./lib/review-mode.mjs";
 import { FEATURE_KEY, reviewFlag } from "./lib/reviews.mjs";
 import { isMerger } from "./lib/teams.mjs";
+import { allTicketsMerged, readTickets } from "./lib/tickets.mjs";
 import {
   sessionBaseBranch,
   sessionBranch,
@@ -117,13 +129,32 @@ const stillRunning = (r) => {
 const supersedable = (r) =>
   r.status === "failed" || (r.status === "running" && !stillRunning(r));
 
-const mergerFixLanded = () => {
+const isMergerStop = () => {
   const meta = readAgentMeta(input);
-  if (!meta || !isMerger(meta.agentType)) return false;
-  if (!featureFlag()) return false; // no feature review has approved yet: the wave is still running
+  return Boolean(meta && isMerger(meta.agentType));
+};
+
+const waveIsOver = () => allTicketsMerged(readTickets(ctx));
+
+const mergerFixLanded = () => {
+  if (!isMergerStop()) return false;
+  // Mid-wave merges run nothing: the code is not whole yet. An approved feature review
+  // and a complete wave are the two ways this session can be past that point — before
+  // trigger 0 existed, the flag was the only one, and a result on disk then implied it.
+  if (!featureFlag() && !waveIsOver()) return false;
   if (!previous || !supersedable(previous)) return false;
   const head = headSha();
   return Boolean(head && previous.sessionSha && previous.sessionSha !== head);
+};
+
+// The last wave's merge: every planned ticket is `merged` (the merger writes that status
+// after a successful merge) and nothing has judged this code yet. Deliberately blind to
+// the merger's own STAGE: what matters is the state it leaves behind, not the dispatch
+// that produced it.
+const waveComplete = () => {
+  if (!isMergerStop()) return false;
+  if (featureFlag() || previous) return false;
+  return waveIsOver();
 };
 
 let trigger = "";
@@ -131,6 +162,8 @@ if (isFeatureReview(input)) {
   trigger = "feature-review";
 } else if (mergerFixLanded()) {
   trigger = "merger-fix";
+} else if (waveComplete()) {
+  trigger = "wave-complete";
 }
 if (!trigger) process.exit(0);
 

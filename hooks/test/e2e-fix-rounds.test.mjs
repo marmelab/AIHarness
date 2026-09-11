@@ -231,6 +231,74 @@ describe("the merger trigger needs all three conditions", () => {
   });
 });
 
+// The suite is the runtime gate, so it must reach a verdict BEFORE the feature review
+// rather than behind it. The trigger is the state the last wave's merger leaves behind:
+// every planned ticket merged. Fire one merge too early and the suite judges a half-built
+// feature; never fire and a skipped feature review means no suite runs at all.
+describe("the wave-complete trigger", () => {
+  const writeTicket = (id, status) => {
+    mkdirSync(SESSION_DIR, { recursive: true });
+    writeFileSync(
+      join(SESSION_DIR, `${id}.json`),
+      JSON.stringify({ id, title: `${id} work`, status }),
+    );
+  };
+
+  test("the merge that leaves every ticket merged runs the suite, with no reviewer", () => {
+    writeTicket("TASK-001", "merged");
+    writeTicket("TASK-002", "merged");
+    expect(mergerStop().status).toBe(0);
+    expect(didRun()).toBe(true);
+    expect(result().trigger).toBe("wave-complete");
+  });
+
+  test("a mid-wave merge runs nothing: one ticket is still open", () => {
+    writeTicket("TASK-001", "merged");
+    writeTicket("TASK-002", "in_progress");
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
+  test("an unreadable ticket is not a merged ticket", () => {
+    writeTicket("TASK-001", "merged");
+    writeFileSync(join(SESSION_DIR, "TASK-002.json"), "{ broken");
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
+  test("a session with no tickets is left to the review trigger", () => {
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
+  test("a verdict already exists: the wave trigger stands down", () => {
+    writeTicket("TASK-001", "merged");
+    seedResult({ status: "passed", sessionSha: headSha() });
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
+  test("only a merger stop counts, not a developer's", () => {
+    writeTicket("TASK-001", "merged");
+    stop("aiharness:developer");
+    expect(didRun()).toBe(false);
+  });
+
+  test("the fix for a red wave-complete suite re-runs it, with no feature review", () => {
+    writeTicket("TASK-001", "merged");
+    mergerStop();
+    expect(result().status).toBe("failed");
+    clearRun();
+
+    writeSmoke(SMOKE_PASS);
+    mergeAFix("spec-fix");
+    expect(mergerStop().status).toBe(0);
+    expect(didRun()).toBe(true);
+    expect(result().trigger).toBe("merger-fix");
+    expect(result().status).toBe("passed");
+  });
+});
+
 describe("the result file is always truthful", () => {
   test("a killed suite leaves `running`, not a stale pass and not nothing", () => {
     approveFeature();

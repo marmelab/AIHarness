@@ -55,6 +55,32 @@ describe("remind-harness-persona", () => {
     expect(run("rewrite the harness docs").context).toBe("");
   });
 
+  // The level is the user's own sizing. Dropped on the way to the dispatch it is
+  // indistinguishable from never having been said, and the orchestrator goes back to
+  // guessing — which is what routed ten single-field runs through the COMPLEX pipeline.
+  test("a level the user named is quoted back verbatim", () => {
+    expect(run("#harness bugfix the sort arrow is inverted").context).toContain(
+      "LEVEL: bugfix",
+    );
+    expect(run("#harness level=small add a birthday field").context).toContain(
+      "LEVEL: small",
+    );
+    expect(
+      run("#technical-harness LEVEL: feature add a deal pipeline").context,
+    ).toContain("LEVEL: feature");
+  });
+
+  test("no level named: the line is offered, never invented", () => {
+    const { context } = run("#harness add an importance field to contacts");
+    expect(context).toContain("LEVEL: <bugfix|small|feature>");
+    expect(context).toContain("optional");
+  });
+
+  test("a word that is not a level is not read as one", () => {
+    const { context } = run("#harness refactor the dashboard");
+    expect(context).not.toMatch(/LEVEL: (bugfix|small|feature)\b/);
+  });
+
   test("it never blocks, whatever it is handed", () => {
     for (const prompt of ["#technical-harness x", "hello", ""])
       expect(run(prompt).status).toBe(0);

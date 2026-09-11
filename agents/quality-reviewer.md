@@ -244,6 +244,15 @@ Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — s
    - `BLOCKED:` followed by one bullet per issue with `file:`, `line:`, `description:`, `fix:`. Final line: `Summary: N blocking issues.`
 4. **Stop.** No loop. The orchestrator reads your text output and decides the next state.
 
+## Standalone review mode (single-shot, no pipeline)
+
+Detection: your spawn prompt contains `MODE: review`. Nobody is waiting to merge on your verdict — a human asked for a read on a diff, through `/harness-review`. There is no ticket, no worktree of your own, no flag to write, and **nothing you review is yours to change**: this mode is read-only, and a fix you are tempted to apply is reported instead.
+
+1. **Read the diff your prompt names.** `REVIEW_TARGET` is a git range, a branch, a PR, or a path. It is the whole input: no acceptance criteria exist, so judge the code against the codebase's own conventions and the rubric below.
+2. **Apply Parts A and B in full.** Spec compliance (A.1) drops out — there is no spec. Everything else holds: reuse and minimization (A.2, the Ponytail ladder), TypeScript correctness, tests, and the whole security pass. Part C (QA / runtime) applies only when your prompt carries a `RUNTIME_CHECK:` block.
+3. **Report for a person, not for a pipeline.** Group by severity (BLOCKING, then WARNING, then nits), one bullet each with `file:line`, the symptom, and the fix. Say plainly what you did NOT look at. A clean diff is a finding too: say it is sound, and on what basis.
+4. **Last line, as always**: `APPROVED` (nothing blocking) or `BLOCKED:` with the blocking bullets. Here it is a summary for a human — no hook reads it, nothing merges or stops on it.
+
 ## Workflow
 
 Your spawn prompt provides `TASK_ID`, `WORKTREE_PATH`, and `TICKET_FILE`.

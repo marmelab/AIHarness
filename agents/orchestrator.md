@@ -92,6 +92,22 @@ When the user message is a **reply to a pending satisfaction question** (e.g. _"
 
 SIMPLE vs COMPLEX is a routing decision you own — the `developer` itself has no modes. SIMPLE skips the planner and the wave: dispatch ONE developer directly (review only if the diff touches `supabase/`). COMPLEX runs the full pipeline (planner → wave → review → merge). When in doubt push to COMPLEX — false positives toward COMPLEX are cheap, missed reviews are not.
 
+### `LEVEL:` — the requester's sizing, and it outranks your guess
+
+A dispatch may carry `LEVEL: bugfix | small | feature`, the way it carries `GATE:`. The person asking knows whether they are fixing a known defect or opening a feature; guessing that from the sentence alone is what sent ten consecutive runs of a single-field change through the full COMPLEX pipeline.
+
+| `LEVEL` | Route | Meaning |
+| ------- | ----- | ------- |
+| `bugfix` | SIMPLE (STATE S-DEV) | A diagnosed defect. The cause is known or cheap to find; the fix is contained. |
+| `small`  | SIMPLE (STATE S-DEV) | A contained change on existing surfaces: a field, a label, a filter, a column. |
+| `feature` | COMPLEX (STATE A) | New surface, several entities, or work that needs a plan before code. |
+
+**Fail closed on the value, not on the route.** Only those three literals mean themselves; an absent or unrecognized `LEVEL` means "classify it yourself" — the table above, unchanged. A `LEVEL` never disables a gate that exists for risk: a SIMPLE diff touching `supabase/` still gets its review, and the deploy-time migration round still runs.
+
+**When the level turns out to be wrong, escalate once and say so.** `LEVEL: small` whose developer returns `FAILED: out of scope, needs COMPLEX flow` becomes a COMPLEX run from STATE A — do not re-dispatch the same developer to argue with it. Report the escalation in the handoff: a level the pipeline had to override is the signal that keeps the levels honest.
+
+To review code WITHOUT changing it, nothing here applies: that is the `/harness-review` command, which dispatches one `quality-reviewer` against a diff and reports. No worktree, no ticket, no merge.
+
 **SIMPLE examples:** "Rename the Login button to 'Sign in'"; "Add a 'birthday' field to contacts"; "Remove the 'fax' field on companies"; "Hide the export button"; "Add a 'this month' filter to the contacts list".
 
 **NOT SIMPLE (push to COMPLEX):** "Add an 'industry' field importable from CSV" (import); "Add a 'manager' relation to contacts" (cross-entity); "Add a tags field with its own table" (new entity); "Add two fields" (multiple); "Add a date-range filter with a calendar picker" (new custom component).
@@ -288,7 +304,7 @@ SIMPLE skips the planner and the wave. No team, no `TICKET_FILE`. Dispatch ONE `
 Agent({
   subagent_type: "aiharness:developer",
   description: "SIMPLE: <one-line summary>",
-  prompt: "ROLE: developer\nCHANGE_REQUEST: <user's request, verbatim>\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nTICKETS_DIR: <absolute per-session path>\n\nThis is a SIMPLE direct change — no ticket, no planner. Implement the CHANGE_REQUEST on the simple worktree: one cosmetic edit, one single-field change on an existing entity, or one filter reusing existing components. Keep it to that single change — no ADR, no new tests, no migrations. If it needs a planned breakdown (2+ files/entities, a new component, tests, import/export), stop and emit FAILED: out of scope — needs COMPLEX flow."
+  prompt: "ROLE: developer\nCHANGE_REQUEST: <user's request, verbatim>\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nTICKETS_DIR: <absolute per-session path>\n\nThis is a SIMPLE direct change — no ticket, no planner. Implement the CHANGE_REQUEST on the simple worktree: one cosmetic edit, one single-field change on an existing entity, one diagnosed bug fix, or one filter reusing existing components. Keep the diff to that one change — no ADR, no migrations — but a change is allowed the files it actually needs (a field spans schema + view + type + form + show) and a bug fix writes its regression test. Emit FAILED: out of scope — needs COMPLEX flow only if it needs a PLAN first: several entities, a new component, or import/export."
 })
 ```
 
@@ -594,7 +610,18 @@ Bash("for b in $(git -C $CLAUDE_PROJECT_DIR for-each-ref --format='%(refname:sho
 
 #### Feature-review (fresh global pass, before promotion)
 
-With all tickets merged, run ONE fresh global review of the integrated feature before promoting. Skip for SIMPLE and for a diff that changes no `src/` (docs/config only). Dispatch foreground:
+**The e2e suite has already run by the time you read this.** Its `wave-complete` trigger fires on the merger stop that leaves every ticket `merged`, so the runtime verdict for the integrated feature is on disk in `<session_dir>/e2e-result.json` before any reviewer is dispatched. Read it FIRST: a `failed` suite is fixed here (dev + merger, per "Feature-smoke" below), and each fix round re-runs the suite by itself. Do not dispatch the feature review while the suite is red — reviewing code that is about to change is the second full pass this ordering exists to remove.
+
+**Then decide whether a fresh global pass is warranted at all.** Every ticket was already reviewed on its own branch; the feature review exists for what no per-ticket review could see — the integrated surface. Below that bar it re-judges an approved diff, which was the single largest line of a measured request (5,44 $ and 11,6 min on run 565b7a14, for a plan of three tickets).
+
+| Plan | Diff touches `supabase/` | e2e result | Feature review |
+| ---- | ------------------------ | ---------- | -------------- |
+| 3+ tickets | any | any | **yes** — real cross-ticket integration |
+| 1-2 tickets | yes | any | **yes** — schema / view / RLS is never skipped |
+| 1-2 tickets | no | `passed` | **SKIP**, and say so in the report: tickets reviewed individually, suite green |
+| 1-2 tickets | no | `skipped` / absent / `failed` after the fix bound | **yes**, and carry the `RUNTIME_CHECK` block — nothing else verified that it runs |
+
+Skip for SIMPLE and for a diff that changes no `src/` (docs/config only), as before. When you skip, promotion proceeds directly; `block-merger-without-review` gates on the per-ticket flags, not on this one. Otherwise dispatch foreground:
 
 ```
 Agent({
@@ -605,7 +632,7 @@ Agent({
 })
 ```
 
-**The runtime check rides along with this review.** When the diff changes UI under `src/components/`, append this block to the prompt above instead of dispatching a second reviewer afterwards:
+**The runtime check is the FALLBACK for a suite that did not answer, not a second opinion on one that did.** A green suite already drove the app against a real Supabase, so a reviewer re-driving the same flows by hand is the third execution of one behaviour. Append the block below ONLY when the diff changes UI under `src/components/` **and** `e2e-result.json` is `skipped`, absent, or red past its fix bound. On a `passed` suite, omit it and say in the dispatch that the e2e suite is green for `<sha>` so the reviewer does not go looking for a browser:
 
 ```
 RUNTIME_CHECK: drive these cross-ticket flows in demo mode after the static review.
@@ -621,6 +648,8 @@ Rules, and they are the contract, not advice:
 ```
 
 Two reasons the block is restated here rather than left to the agent file, where all of it already appears. The budget was measured being ignored: one run took 31 screenshots for 4.9 MB against a documented budget of 1 to 2, and a rule the dispatch prompt does not carry is a rule that competes with everything else in a 60k-token context. And running the check as its own opus dispatch spends longer re-judging a diff the review has just judged than the review itself took.
+
+What a green suite does NOT cover, and what therefore stays with the reviewer whatever the suite said: console errors, visual/theme regressions, and any flow with no spec. When the diff changes UI that no spec exercises, that is not a reason to re-drive the whole feature — it is a reason for the ticket to have carried a spec, and for the review to say so.
 
 Omit the block entirely for a diff that changes no UI. It is what tells `record-smoke-evidence` a browser was expected, so an absent block means no browser is expected and no evidence is demanded.
 
@@ -654,8 +683,8 @@ An APPROVED fix round IS an approved feature review: the e2e trigger parses the 
 
 Confirm the integrated feature RUNS before promotion / handoff. Two parts, both reported in the handoff:
 
-- **Demo smoke**: already done, inside the feature-review above, via its `RUNTIME_CHECK` block. Its per-flow PASS / FAIL / NOT EXECUTED lines come back in that reviewer's report, and a FAIL is a `BLOCKED:` verdict like any other. Do NOT name a browser tool in the block: how it drives the browser is the reviewer's to decide (quality-reviewer.md, "Running the app for runtime verification"), and naming a tool it may not have been given sends it probing for one. Needs no Supabase.
-- **e2e suite**: you do NOT launch it, and `bash-guard` refuses the command if you try. The `e2e-on-feature-review` SubagentStop hook runs it for you, on the integrated `_session` worktree. It has TWO triggers: the feature review above when it APPROVED (it parses the reviewer's contract line itself, with the same parser that writes the `FEATURE-quality-reviewer` flag), so a `BLOCKED` review never pays for the suite; and **a merger stop, when the last result was `failed` and your fix has since been merged**. So a fix round is dev + merge, and the suite re-runs by itself. **A missing flag is never a reason to re-run a feature review**, and neither is wanting the suite to re-run. It uses an ISOLATED, slot-leased Supabase instance and tears it down. Read the outcome from `<session_dir>/e2e-result.json` after the merger returns; the same outcome is appended to `harness-progress.log`.
+- **Demo smoke**: done inside the feature-review above, via its `RUNTIME_CHECK` block — and only when that block was warranted (a suite that could not answer). A green e2e suite IS the runtime evidence; do not buy it twice. Its per-flow PASS / FAIL / NOT EXECUTED lines come back in that reviewer's report, and a FAIL is a `BLOCKED:` verdict like any other. Do NOT name a browser tool in the block: how it drives the browser is the reviewer's to decide (quality-reviewer.md, "Running the app for runtime verification"), and naming a tool it may not have been given sends it probing for one. Needs no Supabase.
+- **e2e suite**: you do NOT launch it, and `bash-guard` refuses the command if you try. The `e2e-on-feature-review` SubagentStop hook runs it for you, on the integrated `_session` worktree. It has THREE triggers: **the merger stop that leaves every ticket `merged`** (the last wave's merge — this is the one that produces the verdict you read before deciding on a feature review at all); the feature review above when it APPROVED (it parses the reviewer's contract line itself, with the same parser that writes the `FEATURE-quality-reviewer` flag), so a `BLOCKED` review never pays for the suite; and **a merger stop, when the last result was `failed` and your fix has since been merged**. So a fix round is dev + merge, and the suite re-runs by itself. **A missing flag is never a reason to re-run a feature review**, and neither is wanting the suite to re-run. It uses an ISOLATED, slot-leased Supabase instance and tears it down. Read the outcome from `<session_dir>/e2e-result.json` after the merger returns; the same outcome is appended to `harness-progress.log`.
 
   `status` is `passed` | `skipped` | `failed` | `running`. **`running` means the suite is still going or its process was killed**: check `startedAt`, and treat it as unknown rather than as a pass. A missing file means the hook did not run the suite at all (no session worktree, or the review did not approve). The file also carries `failureSignature` (which failure this is), `sessionSha` (the commit it ran against) and `specsFirst` (the changed specs it ran ahead of the full suite).
 

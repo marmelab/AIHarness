@@ -51,11 +51,15 @@ per-ticket worktree, alongside sibling developers, peer-reviewed by
 > dispatched directly (no planner) for one small change on the shared
 > `<WORKTREE_BASE>/simple` worktree. Implement exactly that change, following the
 > same workflow below, but: there is no ticket file to read, no planner context,
-> **no rebase** (you have no sibling tickets), **no ADR, and no new tests** — keep
-> the diff to the single change. If it turns
-> out to need a planned breakdown (2+ files/entities, a new component,
-> import/export, tests), stop and emit `FAILED: out of scope — needs COMPLEX flow`
-> so the orchestrator re-routes. Commit with a `simple:` subject prefix.
+> **no rebase** (you have no sibling tickets), **no ADR** — keep the diff to the
+> single change. **File count is not the bound; risk and cohesion are.** One
+> coherent change routinely spans several files (a field is schema + view + type +
+> form + show), and a fix for a defect writes the regression test that proves it.
+> Emit `FAILED: out of scope — needs COMPLEX flow` only when the work genuinely
+> needs a PLAN before code: several entities, a new component, import/export, or a
+> change whose shape you cannot state before starting. Bailing on a change you
+> could have made is not caution — it re-routes a 10-minute fix through the full
+> pipeline. Commit with a `simple:` subject prefix.
 
 > **A dispatch may instead point you at a skill.** Some session-level operations
 > are not feature tickets — generating the deploy-time SQL migration, or resolving

@@ -10,11 +10,14 @@
 // main->orchestrator (child=orchestrator) and the fire-and-forget documentator are never
 // touched. Fail-open: any error or unrecognized shape allows the dispatch.
 //
-// ABSENT is accepted. A nested subagent's Agent tool does not expose the parameter in every
-// runtime, and requiring an explicit false there made every pipeline dispatch impossible.
-// See the long note at the decision itself. In such a runtime this hook has nothing left to
-// deny, so it says so ONCE per session rather than on every dispatch: dozens of identical
-// ACCEPT lines bury the log lines that mean something.
+// ABSENT is accepted, and the reason for it has changed. It was "a nested subagent's Agent
+// tool does not expose the parameter", which was true of the runtime that wedged here.
+// Measured on Claude Code 2.1.263: `run_in_background: false` IS accepted at depth 2 and
+// returns inline, so an absent value now means the ORCHESTRATOR omitted it, not that the
+// runtime hid it. Still accepted — a guard a future runtime cannot satisfy is a wedge, not
+// protection, and completion-invariant covers the residual risk — but it is no longer
+// evidence about the runtime, and the once-per-session note says so instead of declaring
+// the guard inert.
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,12 +51,14 @@ export function check(input, ctx) {
     // are genuinely different here.
     //
     // ABSENT is ACCEPTED, and that is a correction. Requiring an explicit false deadlocked
-    // the harness in a runtime where a nested subagent's Agent tool does not expose the
+    // the harness in a runtime where a nested subagent's Agent tool did not expose the
     // parameter at all (schema: description, isolation, model, prompt, subagent_type, with
     // additionalProperties:false). The orchestrator then cannot comply no matter what it
     // does: observed as five consecutive `BLOCK blocked developer rib=absent` over four
     // minutes, with every pipeline dispatch impossible. A guard that cannot be satisfied is
-    // not protection, it is a wedge.
+    // not protection, it is a wedge. That runtime is not the current one — 2.1.263 accepts
+    // `run_in_background: false` at depth 2 — so absence is now the orchestrator's omission
+    // and is accepted for the runtimes where it would not be.
     //
     // What still fires: an EXPLICIT true. A runtime that exposes the parameter lets the
     // orchestrator choose, orchestrator.md tells it to choose false, and choosing true for a
@@ -69,13 +74,14 @@ export function check(input, ctx) {
     if (!isExplicitlyBackgrounded(input)) {
       if (rib === false)
         return ctx.allow(`${childRole} foreground (explicit false)`);
-      // The parameter is absent, so this guard cannot fire in this runtime at all. Worth
-      // knowing once; worth nothing repeated per dispatch.
+      // Worth knowing once; worth nothing repeated per dispatch.
       if (noteInertnessOnce(ctx))
         return ctx.allow(
-          `${childRole} accepted: this runtime exposes no run_in_background to a nested subagent, ` +
-            `so this guard is inert for the rest of the session. A background dispatch here is ` +
-            `not a dead end: the orchestrator IS re-woken by the child's task-notification.`,
+          `${childRole} accepted with run_in_background absent. Measured on 2.1.263 the parameter ` +
+            `IS accepted at depth 2, so this is the orchestrator omitting the explicit false its ` +
+            `own file asks for, not the runtime withholding it. Accepted anyway (a runtime that ` +
+            `withholds it must not be wedged), and a background dispatch is not a dead end: the ` +
+            `orchestrator IS re-woken by the child's task-notification.`,
         );
       return;
     }
