@@ -304,6 +304,12 @@ pass and reviewers check the same line:
   _"New labels have i18n keys in both `englishCrmMessages.ts` and `frenchCrmMessages.ts`"_
 - Ticket touches `supabase/schemas/01_tables.sql` → add:
   _"The new column is exposed in the matching `03_views.sql` view"_
+- Ticket adds a column to a view in `supabase/schemas/03_views.sql` → add:
+  _"The new column is APPENDED at the END of the view's select list, existing
+  columns left in place and in order"_. `CREATE OR REPLACE VIEW` cannot move,
+  rename or retype an existing column (PostgreSQL 42P16), so a column inserted
+  mid-list fails at DEPLOY time while every local check passes. A hook flags it
+  after the write; the ticket saying it first is what keeps that flag rare.
 
 Make each criterion specific and testable — one line the developer marks `[PASS]`
 against the diff and a reviewer checks independently. These are implied by project
