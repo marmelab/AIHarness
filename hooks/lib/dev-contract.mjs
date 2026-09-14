@@ -5,7 +5,7 @@
 // parser blocks on stdin forever. Same reason parseVerdict lives in verdict.mjs.
 
 /**
- * Parse the developer's output contract (rules/agent-output-format.md):
+ * Parse the developer's output contract (developer.md, OUTPUT CONTRACT):
  *   `DONE: branch=<b> commit=<sha> files=[<paths>]`
  *   `FAILED: <one-line reason>`
  *

@@ -77,10 +77,10 @@ This repo's own [harness.config.json](harness.config.json) is a working referenc
 only if its block is present.** Omit one and the feature is simply off, with no warning,
 which is the failure mode worth knowing about before you go looking for a bug.
 
-| Block | Present | Absent |
-| --- | --- | --- |
-| `app` | the reviewer boots your app and verifies the feature at runtime; the developer can self-check in a browser | no runtime verification anywhere in the pipeline |
-| `deploy` | the deploy-time migration round runs, gated by its own review | no migration round |
+| Block    | Present                                                                                                    | Absent                                           |
+| -------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `app`    | the reviewer boots your app and verifies the feature at runtime; the developer can self-check in a browser | no runtime verification anywhere in the pipeline |
+| `deploy` | the deploy-time migration round runs, gated by its own review                                              | no migration round                               |
 
 `app` takes `smokeCommand`, `portBase`, and optionally `portArg`, `strictPortArg`,
 `hashRouting`, `demoMode`. `deploy` takes `relevantGlobs` (required when the block is
@@ -90,32 +90,32 @@ present).
 
 **Read by hooks.** These change what the harness enforces.
 
-| Key | Effect |
-| --- | --- |
-| `validation.steps` | the chain run on every developer stop, and the commands `bash-guard` then forbids agents from running by hand. Per step: `id`, `kind`, `command` (or `runner: "vitest"` + `config` + `projects`), `changedScoped`, `extensions`, `condition.pathExists`, `formatter`, `autoCommit` |
-| `validation.extraForbidden` | extra command tokens agents may not run (e.g. `build`, `e2e`) |
-| `containers.allow` | container images an agent may start. `[]` blocks every launch |
-| `roles.<role>.pipeline` | whether the role takes part in the ticket pipeline |
-| `roles.<role>.debounce` | whether a duplicate dispatch of the role is refused |
-| `roles.<role>.validate` | whether the validation chain runs on the role's stop |
-| `roles` (the key names) | must cover every `SubagentStop` matcher; `check-config-sync` fails otherwise |
-| `layout.src` / `.e2e` / `.adr` | where the harness looks for source, specs and ADRs |
-| `worktree.provision` | how a task worktree gets its dependencies (default `npm-link`) |
-| `launcher.*` | four extension points for a managed launcher; each consuming hook is inert when its key is unset. See [rules/launcher-interface.md](rules/launcher-interface.md) |
+| Key                            | Effect                                                                                                                                                                                                                                                                             |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validation.steps`             | the chain run on every developer stop, and the commands `bash-guard` then forbids agents from running by hand. Per step: `id`, `kind`, `command` (or `runner: "vitest"` + `config` + `projects`), `changedScoped`, `extensions`, `condition.pathExists`, `formatter`, `autoCommit` |
+| `validation.extraForbidden`    | extra command tokens agents may not run (e.g. `build`, `e2e`)                                                                                                                                                                                                                      |
+| `containers.allow`             | container images an agent may start. `[]` blocks every launch                                                                                                                                                                                                                      |
+| `roles.<role>.pipeline`        | whether the role takes part in the ticket pipeline                                                                                                                                                                                                                                 |
+| `roles.<role>.debounce`        | whether a duplicate dispatch of the role is refused                                                                                                                                                                                                                                |
+| `roles.<role>.validate`        | whether the validation chain runs on the role's stop                                                                                                                                                                                                                               |
+| `roles` (the key names)        | must cover every `SubagentStop` matcher; `check-config-sync` fails otherwise                                                                                                                                                                                                       |
+| `layout.src` / `.e2e` / `.adr` | where the harness looks for source, specs and ADRs                                                                                                                                                                                                                                 |
+| `worktree.provision`           | how a task worktree gets its dependencies (default `npm-link`)                                                                                                                                                                                                                     |
+| `launcher.*`                   | four extension points for a managed launcher; each consuming hook is inert when its key is unset. See [rules/launcher-interface.md](rules/launcher-interface.md)                                                                                                                   |
 
 **Read by agent prompts.** Instructions, not enforcement: an agent can ignore them.
 
-| Key | Effect |
-| --- | --- |
+| Key     | Effect                                                       |
+| ------- | ------------------------------------------------------------ |
 | `app.*` | how the developer and the reviewer launch and drive your app |
 
 **Declarative.** Validated or defaulted, but nothing reads them. Setting them changes
 nothing today.
 
-| Key | Note |
-| --- | --- |
-| `roles.<role>.model` | **required** (a role without a non-empty `model` string fails config loading) yet read only by tests. The model actually used comes from the agent's own frontmatter, plus the explicit `model:` the orchestrator passes on some dispatches |
-| `name`, `skills.developerMenu`, `documentator.author` | no consumer; the documentator's git identity is pinned in its prompt and in `restrict-documentator-bash`, not read from here |
+| Key                                                   | Note                                                                                                                                                                                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roles.<role>.model`                                  | **required** (a role without a non-empty `model` string fails config loading) yet read only by tests. The model actually used comes from the agent's own frontmatter, plus the explicit `model:` the orchestrator passes on some dispatches |
+| `name`, `skills.developerMenu`, `documentator.author` | no consumer; the documentator's git identity is pinned in its prompt and in `restrict-documentator-bash`, not read from here                                                                                                                |
 
 The harness is **opt-in per request**: nothing routes through it until you ask, with
 `#harness` or "use the agent team".
@@ -135,7 +135,7 @@ workaround is the foreground dispatch a nested subagent cannot request. Measured
 full run: 21 agents, 0 LSP calls, 357 Bash calls.
 
 So they answer symbol questions with [`scripts/ts-symbols.mjs`](scripts/ts-symbols.mjs),
-which reaches the same TypeScript program from Bash, and [`rules/lsp-usage.md`](rules/lsp-usage.md)
+which reaches the same TypeScript program from Bash, and [`rules/code-search.md`](rules/code-search.md)
 tells them not to spend a turn probing for the tool. **There is nothing to configure for
 the pipeline.** The rest of this section is about your own interactive sessions.
 
@@ -188,10 +188,16 @@ devDependency.
 
 ## Also usable without the plugin system
 
-Copy `hooks/`, `agents/`, `rules/`, `skills/`, `commands/` and `scripts/` into your
-project's `.claude/`, and merge `hooks/hooks.json` into your `.claude/settings.json`
-(replacing `${CLAUDE_PLUGIN_ROOT}` with `$CLAUDE_PROJECT_DIR/.claude`). The core resolves
-its own files in either layout.
+Copy `hooks/`, `agents/`, `skills/`, `commands/` and `scripts/` into your project's
+`.claude/`, and merge `hooks/hooks.json` into your `.claude/settings.json` (replacing
+`${CLAUDE_PLUGIN_ROOT}` with `$CLAUDE_PROJECT_DIR/.claude`). The core resolves its own
+files in either layout.
+
+`rules/` is the one directory to copy SELECTIVELY rather than wholesale — see
+[rules/README.md](rules/README.md) for which files an agent benefits from and which are
+documentation for whoever works on the harness. Unlike the rest, a project's
+`.claude/rules/*.md` is delivered to every one of its subagents, so what you copy there is
+paid on every dispatch.
 
 One thing does not carry over: the browser tools. A plugin exposes an MCP server as
 `mcp__plugin_aiharness_<server>__<tool>`, which is the name the developer and the

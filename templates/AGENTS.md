@@ -32,7 +32,7 @@
 ## Non-negotiable rules
 
 - Code, comments and commits in English. Avoid the "—" character.
-- Never introduce `any` or a workaround equivalent (`$TSFixMe`, `@ts-ignore` without a comment), see `rules/typescript.md`.
+- Never introduce `any` or a workaround equivalent (`$TSFixMe`, `@ts-ignore` without a comment) — the `check-typescript-shortcuts` hook flags it on the diff you write.
 - On a non-trivial task: propose a plan, ask clarifying questions in prose (never a multiple-choice menu), wait for validation, then implement in small steps.
 - One step, one review. Don't chain several unreviewed steps.
 - Never commit, push or open a PR without explicit validation, see `rules/git-policy.md`.

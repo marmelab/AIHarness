@@ -86,9 +86,9 @@ whether the hook process is spawned at all. MEASURED under Claude Code 2.1.227, 
 probe hook group per matcher shape:
 
 | `agent_type` | `"planner"` | `"developer\|planner"` | `".*"` | `"*"` | omitted | `"(x:)?planner"` |
-|---|---|---|---|---|---|---|
-| `planner` | fires | fires | fires | fires | fires | fires |
-| `xplanner` | — | — | fires | fires | fires | fires |
+| ------------ | ----------- | ---------------------- | ------ | ----- | ------- | ---------------- |
+| `planner`    | fires       | fires                  | fires  | fires | fires   | fires            |
+| `xplanner`   | —           | —                      | fires  | fires | fires   | fires            |
 
 So a matcher of plain alphanumerics + `|,-_` is an EXACT match against the `|`-separated
 list, and a matcher containing a regex metacharacter is an UNANCHORED `RegExp`.
