@@ -76,8 +76,6 @@ per-ticket worktree, alongside sibling developers, peer-reviewed by
 
 Your spawn prompt provides: `TASK_ID`, `WORKTREE_PATH`, `BRANCH_NAME`, `TICKET_FILE`.
 
-Output format: `.claude/rules/agent-output-format.md`.
-
 ## END OF TURN: HARD PRECONDITION
 
 **Your stop is invalid while `git status --porcelain` is non-empty. Commit before ending ANY
@@ -175,7 +173,7 @@ genuinely missing, that is a real infrastructure failure — stop and report
 `FAILED: worktree not found at <WORKTREE_PATH>` (do not improvise a worktree).
 
 Every subsequent Read / Edit / Write / Bash runs inside the worktree, not in
-`$CLAUDE_PROJECT_DIR`. See `.claude/rules/worktree-scope.md`.
+`$CLAUDE_PROJECT_DIR`.
 
 Domain skills — load on demand with `Skill({skill: "..."})` when your task needs the detail they contain:
 
@@ -213,7 +211,7 @@ Bash writes bypass the harness's edit tracking and reach reviewers unformatted. 
 
 ## Validation commands — DO NOT RUN MANUALLY
 
-See `.claude/rules/validation-commands.md` for the full list and rationale. Short version: typecheck / prettier / unit / e2e / lint / build are blocked by `bash-guard`. After implementation + commit, emit the OUTPUT CONTRACT line and stop — the SubagentStop validation chain (typecheck + prettier + lint + unit) runs automatically before your stop is accepted. If validation fails, fix the issues, commit, and stop again.
+The list, and why: typecheck / prettier / unit / e2e / lint / build are blocked by `bash-guard`. After implementation + commit, emit the OUTPUT CONTRACT line and stop — the SubagentStop validation chain (typecheck + prettier + lint + unit) runs automatically before your stop is accepted. If validation fails, fix the issues, commit, and stop again.
 
 **Escalate a harness/infra defect, do NOT work around it.** If a stop fails on something that is NOT your diff (a validation step referencing a config the repo does not define, a port already in use, a missing tool, a stale shared fixture), do NOT edit shared config (`vitest.config.ts`, `.claude/settings.json`, root `.env`, build config) from your worktree to make it pass. That pollutes every other ticket. Emit `FAILED: harness config gap: <what broke>` so it is fixed centrally. Your worktree-local code and tests are yours to fix; the shared harness plumbing is not.
 
@@ -300,7 +298,8 @@ No `PRIOR_WORK` block means there is nothing merged yet (you are in wave 1), not
 cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs <file> <line> <col>
 ```
 
-`refs` before changing a signature (text search misses re-exports and aliased imports, and answers for every same-named symbol at once), `def` for where a symbol is really declared, `sym` to locate one by name. Positions are 1-based. Reserve `grep`/`rg` for what it is genuinely good at: text and domain-word sweeps (deleting every mention of a resource), database column/view names, and non-TS files (`.sql`, `.md`, `.json`, `.css`). See `.claude/rules/lsp-usage.md`.
+`refs` before changing a signature (text search misses re-exports and aliased imports, and answers for every same-named symbol at once), `def` for where a symbol is really declared, `sym` to locate one by name. Positions are 1-based. Reserve `grep`/`rg` for what it is genuinely good at: text and domain-word sweeps (deleting every mention of a resource), database column/view names, and non-TS files (`.sql`, `.md`, `.json`, `.css`).
+**Read files with `Read`, search with `Grep`.** A `sed -n`/`cat` file read through Bash is refused by `bash-guard` and costs a wasted turn (15 of them in one measured run), and `grep -rn` through Bash pays a per-call shell toll the `Grep` tool does not — same run: 123 Bash greps, 0 `Grep` calls. Bash stays right for pipelines, git, and anything a file tool cannot express.
 
 ## Plan format
 
@@ -329,7 +328,7 @@ e2e tests:
 (or: not required — reason from acceptance_criteria)
 ```
 
-**Keep files small — extract, don't grow.** When a change would push a file past the ~400-line typical ceiling (`coding-style.md`), create a new focused module and import it instead of appending to the existing file. Splitting a large file you already have to touch is in-scope, not scope creep.
+**Keep files small — extract, don't grow.** When a change would push a file past the ~400-line typical ceiling , create a new focused module and import it instead of appending to the existing file. Splitting a large file you already have to touch is in-scope, not scope creep.
 
 ---
 
@@ -342,7 +341,7 @@ Implement the plan. Stick to ticket scope.
 - Atomic commits per logical step. Every subject includes `TASK-XXX`: `feat(TASK-XXX): <what>`.
 - TypeScript strict: no `any`, no `@ts-ignore` without JSDoc.
 - JSDoc on every non-trivial exported function.
-- No features outside ticket scope. An adjacent problem you notice (a nearby bug, a tempting refactor) is REPORTED in your final message, never fixed silently in this diff (`coding-style.md` scope discipline).
+- No features outside ticket scope. An adjacent problem you notice (a nearby bug, a tempting refactor) is REPORTED in your final message, never fixed silently in this diff .
 - e2e tests in `e2e/` if ticket touches UI/filters/forms/interactions, unless acceptance criteria say otherwise. Call `Skill({skill: "e2e-conventions"})` and `Skill({skill: "playwright-testing"})` before writing e2e tests. Don't run them — ship the spec, CI executes.
 - Silent mode: Playwright without `--headed` / `--ui` / `--debug` (headless is its default), Vite without `--open`, Vitest without `browser.ui`.
 - **Self-verification in the browser (optional, before commit).** See "Running the app for self-verification" below. This is for your own confidence; the quality-reviewer re-verifies in its Part C. It does **not** replace the required e2e spec.

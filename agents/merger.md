@@ -55,7 +55,7 @@ The orchestrator parses this line by regex. Any other format is treated as `FAIL
 | `TICKETS_DIR`      | wave only                               | Directory holding ticket JSON files; absent in SIMPLE / migration / rollback flow.                                                                                                                                                                                                           |
 | `APPROVAL_TRAILER` | MIGRATION only                          | One-line `Approved-by-user: ...` provenance the orchestrator built from the user's migration approval. When present, append it to the migration merge commit (Stage A) so the approval trail lives in git history. Absent = no trailer.                                                      |
 
-`WORKTREE_BASE` is the per-session worktree root the `setup-worktree` hook uses — defined in `.claude/rules/worktree-scope.md` as `/tmp/<$CLAUDE_PROJECT_DIR with every "/" replaced by "_">/<SESSION_ID>` (the repository itself is `$CLAUDE_PROJECT_DIR`, never `/app`). The integration worktree is `<WORKTREE_BASE>/_session`.
+`WORKTREE_BASE` is the per-session worktree root the `setup-worktree` hook uses — `/tmp/<$CLAUDE_PROJECT_DIR with every "/" replaced by "_">/<SESSION_ID>` (the repository itself is `$CLAUDE_PROJECT_DIR`, never `/app`). The integration worktree is `<WORKTREE_BASE>/_session`.
 
 ### Mode selection (first action — no tool call needed)
 

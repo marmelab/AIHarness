@@ -6,6 +6,12 @@ This repo IS the harness. It ships as a Claude Code plugin: `hooks/`, `agents/`,
 - `.claude-plugin/plugin.json` + `marketplace.json` — the repo is its own marketplace.
 - `hooks/hooks.json` — the hook registrations, paths via `${CLAUDE_PLUGIN_ROOT}`.
 - `harness.config.json` — this repo's own contract, and the reference a consumer copies.
+- `rules/` — documentation for maintainers, NOT runtime. A plugin has no rules component
+  (`claude plugin details` lists skills, agents, hooks, MCP and LSP servers, and nothing
+  else), and a consuming project has no `.claude/rules/` of ours to load: measured on a
+  full run, no rule text reached any of the 20 agents. So an agent prompt must never cite
+  a `.claude/rules/...` path — what an agent must know goes inline in its own file, and
+  what it needs only sometimes goes in a skill.
 - `HARNESS-SPLIT.md` — what belongs to the core, to an adapter, or to a project, and the
   measurements that decision rests on. Read it before moving anything between layers.
 - `templates/` — the `CLAUDE.md` / `AGENTS.md` a consuming project starts from.
