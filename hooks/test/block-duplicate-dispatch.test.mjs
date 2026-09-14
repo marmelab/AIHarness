@@ -516,3 +516,75 @@ describe("block-duplicate-dispatch: a rejected dispatch is not a launched agent"
     expect(run(p, "aiharness:planner", C).blocked).toBe(true);
   });
 });
+
+// A marker records an ATTEMPT. When the runtime refuses the call it was written for — the
+// auto-mode classifier denied a merger dispatch on one run — the marker outlives an agent
+// that never existed, and the legitimate retry 65s later was refused as its duplicate. The
+// runtime writes agent-<id>.meta.json at spawn, so "is anything actually in flight" is a
+// question with an answer on disk.
+describe("block-duplicate-dispatch: a marker for a dispatch nothing came of", () => {
+  let spawnDir;
+  let transcript;
+
+  // A payload that names a transcript, so the hook can resolve the session's spawn records.
+  const runWithTranscript = (prompt, subagentType) => {
+    const r = spawnSync("node", [HOOK], {
+      input: JSON.stringify({
+        session_id: SESSION_ID,
+        agent_id: CALLER,
+        transcript_path: transcript,
+        tool_input: {
+          subagent_type: subagentType,
+          prompt,
+          run_in_background: false,
+        },
+      }),
+      env,
+      encoding: "utf8",
+    });
+    return { blocked: /"decision":"block"/.test(r.stdout || "") };
+  };
+
+  const spawnRecord = (id, secondsAgo) => {
+    const p = join(spawnDir, `agent-${id}.meta.json`);
+    writeFileSync(p, JSON.stringify({ agentType: "aiharness:merger" }));
+    const when = Date.now() / 1000 - secondsAgo;
+    utimesSync(p, when, when);
+  };
+
+  beforeAll(() => {
+    spawnDir = join(TMP, "transcripts", SESSION_ID, "subagents");
+    mkdirSync(spawnDir, { recursive: true });
+    transcript = join(TMP, "transcripts", `${SESSION_ID}.jsonl`);
+    writeFileSync(transcript, "");
+  });
+
+  test("nothing spawned since the marker: the retry is allowed", () => {
+    const p = "ROLE: merger\nTASK_ID: TASK-042\n";
+    spawnRecord("earlier", 300); // an agent from before this dispatch
+    expect(runWithTranscript(p, "merger").blocked).toBe(false);
+    ageMarkers(60); // past the grace period, still inside the debounce window
+    expect(runWithTranscript(p, "merger").blocked).toBe(false);
+  });
+
+  test("an agent DID spawn after the marker: the duplicate is still blocked", () => {
+    const p = "ROLE: merger\nTASK_ID: TASK-043\n";
+    expect(runWithTranscript(p, "merger").blocked).toBe(false);
+    ageMarkers(60);
+    spawnRecord("the-merger", 5); // it launched, and is still working
+    expect(runWithTranscript(p, "merger").blocked).toBe(true);
+  });
+
+  test("spawn records unreadable: the guard fails closed and blocks", () => {
+    const p = "ROLE: merger\nTASK_ID: TASK-044\n";
+    expect(run(p, "merger").blocked).toBe(false); // no transcript in this payload
+    ageMarkers(60);
+    expect(run(p, "merger").blocked).toBe(true);
+  });
+
+  test("inside the grace period, an echo is still a duplicate", () => {
+    const p = "ROLE: merger\nTASK_ID: TASK-045\n";
+    expect(runWithTranscript(p, "merger").blocked).toBe(false);
+    expect(runWithTranscript(p, "merger").blocked).toBe(true);
+  });
+});

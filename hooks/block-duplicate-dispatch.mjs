@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
+import { newestAgentSpawnMs } from "./lib/agent-meta.mjs";
 import { pipelineRoleSet, debounceRoleSet } from "./lib/teams.mjs";
 import { isExplicitlyBackgrounded } from "./lib/dispatch-parse.mjs";
 
@@ -34,6 +35,9 @@ import { isExplicitlyBackgrounded } from "./lib/dispatch-parse.mjs";
 const DEBOUNCE_ROLES = debounceRoleSet();
 const PIPELINE_ROLES = pipelineRoleSet();
 const DEBOUNCE_WINDOW_MS = 90 * 1000;
+// How long to presume a just-marked dispatch is materialising before its absence from the
+// spawn records is read as "it never launched".
+const NOTHING_LAUNCHED_GRACE_MS = 30 * 1000;
 const PLANNER_STALE_MS = 60 * 60 * 1000;
 // How long a dispatched planner is presumed to still be working. An opus planner takes
 // several minutes to explore and write its tickets, so anything inside this window with no
@@ -124,7 +128,7 @@ export function check(input, ctx) {
   if (d.subagentType === "planner")
     return checkPlanner(ctx, d, { prompt, caller, markerDir, rawType });
   if (DEBOUNCE_ROLES.has(d.subagentType))
-    return checkDebounce(ctx, d, { prompt, caller, markerDir, rawType });
+    return checkDebounce(ctx, d, { prompt, caller, markerDir, rawType, input });
 }
 
 // ---- Concern 1: at most one planner per request -------------------------------
@@ -244,7 +248,7 @@ function checkPlanner(ctx, d, { prompt, caller, markerDir, rawType }) {
 }
 
 // ---- Concern 2: debounce duplicate developer/reviewer/merger dispatches -------
-function checkDebounce(ctx, d, { prompt, caller, markerDir, rawType }) {
+function checkDebounce(ctx, d, { prompt, caller, markerDir, rawType, input }) {
   // Key on the ticket identity AND the prompt content. The async-ack duplicate
   // re-issues the IDENTICAL dispatch prompt, so an identical (caller, role,
   // ticket, prompt) inside the window collides and is blocked. A genuine retry
@@ -284,10 +288,34 @@ function checkDebounce(ctx, d, { prompt, caller, markerDir, rawType }) {
       );
     }
     let ageMs = Infinity;
+    let markerMs = 0;
     try {
-      ageMs = Date.now() - statSync(marker).mtimeMs;
+      markerMs = statSync(marker).mtimeMs;
+      ageMs = Date.now() - markerMs;
     } catch {
       // unreadable mtime → treat as stale, fall through to refresh + allow
+    }
+    // "Still in flight" is an assumption, and once it was wrong: the auto-mode classifier
+    // denied a merger dispatch this hook had already marked, the orchestrator read the
+    // denial as an async ack, and its retry 65s later was refused as a duplicate of an
+    // agent that never existed. Four minutes, two orchestrator instances, and a merge that
+    // had to be verified by hand. The runtime writes `agent-<id>.meta.json` at spawn, so
+    // the assumption is checkable: nothing spawned since the marker means nothing was
+    // launched, whatever refused it. Gated on a grace period, because a real agent needs a
+    // moment to materialise while the echo this guard exists to catch arrives in seconds.
+    // Fail CLOSED on ignorance: a session whose spawn records cannot be read (0) proves
+    // nothing, and "I cannot see it" must not read as "it never ran".
+    const lastSpawnMs = newestAgentSpawnMs(input);
+    if (
+      ageMs >= NOTHING_LAUNCHED_GRACE_MS &&
+      markerMs &&
+      lastSpawnMs &&
+      lastSpawnMs < markerMs
+    ) {
+      writeMarker(marker, `${caller} ${d.subagentType} ${idPart}`, rawType);
+      return ctx.allow(
+        `${d.subagentType} retry allowed: the dispatch marked ${Math.round(ageMs / 1000)}s ago spawned no agent, so nothing is in flight (key=${idPart})`,
+      );
     }
     if (ageMs < DEBOUNCE_WINDOW_MS) {
       ctx.block({
