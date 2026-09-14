@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SubagentStop - the ONLY place the e2e suite is launched. Three triggers.
+// SubagentStop - the ONLY place the e2e suite is launched. Four triggers.
 //
 // 0. WAVE COMPLETE. The merger stop that leaves every ticket `merged` — the last wave's
 //    merge. The suite is the runtime gate, so it runs BEFORE the feature review instead
@@ -13,7 +13,7 @@
 //    that review APPROVED, so a BLOCKED review that sends the work back to a developer
 //    never pays for a 10-minute suite. Still needed after trigger 0: a review can be the
 //    thing that moved the code, and a session whose tickets the wave trigger could not
-//    read (SIMPLE, an unreadable ticket) has no other way in.
+//    read (an unreadable ticket) has no other way in.
 //
 //    The gate is the reviewer's VERDICT, parsed through lib/verdict.mjs, the same parser
 //    record-review-verdict uses to write the flag. Reading the verdict rather than waiting
@@ -33,6 +33,12 @@
 //    need, and the fix-round budget was spent on paying for re-runs instead of on bugs. A
 //    feature review is now only re-run when the fix plausibly invalidates the review
 //    itself, which is a judgement the orchestrator makes, not a mechanical requirement.
+//
+// 3. SIMPLE COMPLETE. The SIMPLE flow's merge, when that session changed a spec. It has no
+//    tickets and runs no feature review, so neither of the triggers above can ever fire for
+//    it, and the validation chain excludes e2e: a spec written by a SIMPLE developer used to
+//    run exactly zero times. Harmless while SIMPLE meant one cosmetic file; `LEVEL` routes
+//    real work there, so the net follows.
 //
 // The suite runs on the INTEGRATED session worktree (never $REPO, which sits on the base
 // branch), via the deploy adapter's e2e-smoke.sh: isolated slot-leased Supabase,
@@ -100,6 +106,26 @@ if (isPhantomStop(input)) process.exit(0);
 const sessionRef = sessionBranch(ctx);
 const headSha = () => git(["rev-parse", sessionRef]).stdout.trim();
 
+// --- run the changed specs first ----------------------------------------------------
+// The specs this session added or touched, against the branch it forked from. e2e-smoke.sh
+// runs these before the full suite inside ONE stack boot, so a broken new spec surfaces
+// right after boot instead of after everything else has run. Best-effort: an empty list
+// just means "full suite", which is the previous behaviour.
+const changedSpecs = () => {
+  const base = sessionBaseBranch(ctx);
+  const range =
+    git(["show-ref", "--verify", "--quiet", `refs/heads/${base}`]).status === 0
+      ? `${base}...${sessionRef}`
+      : "";
+  if (!range) return [];
+  const r = git(["diff", "--name-only", range, "--", "e2e/"]);
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((f) => /\.spec\.[cm]?[jt]sx?$/.test(f));
+};
+
 // --- which trigger, if any ----------------------------------------------------------
 // Read the previous result BEFORE anything is deleted: trigger 2 is a decision about it.
 const previous = readE2eResult(ctx);
@@ -136,12 +162,17 @@ const isMergerStop = () => {
 
 const waveIsOver = () => allTicketsMerged(readTickets(ctx));
 
+// A SIMPLE session has neither tickets nor a feature flag to prove it is past a first
+// judgement, so its own verdict is the proof.
+const afterSimpleSuite = () => previous?.trigger === "simple-complete";
+
 const mergerFixLanded = () => {
   if (!isMergerStop()) return false;
-  // Mid-wave merges run nothing: the code is not whole yet. An approved feature review
-  // and a complete wave are the two ways this session can be past that point — before
-  // trigger 0 existed, the flag was the only one, and a result on disk then implied it.
-  if (!featureFlag() && !waveIsOver()) return false;
+  // Mid-wave merges run nothing: the code is not whole yet. An approved feature review,
+  // a complete wave, and a SIMPLE suite that already ran are the three ways this session
+  // can be past that point — before trigger 0 existed, the flag was the only one, and a
+  // result on disk then implied it.
+  if (!featureFlag() && !waveIsOver() && !afterSimpleSuite()) return false;
   if (!previous || !supersedable(previous)) return false;
   const head = headSha();
   return Boolean(head && previous.sessionSha && previous.sessionSha !== head);
@@ -157,6 +188,22 @@ const waveComplete = () => {
   return waveIsOver();
 };
 
+// The SIMPLE flow's merge. It has no tickets, so `wave-complete` can never fire for it,
+// and it runs no feature review, so neither can that trigger: a spec written by a SIMPLE
+// developer was therefore never executed once, by anything. The validation chain does not
+// close the gap — e2e is in `validation.extraForbidden`, and this hook is its only
+// launcher. That was tolerable while SIMPLE meant one cosmetic file; `LEVEL: bugfix|small`
+// deliberately routes real work there, so the safety net has to follow it.
+//
+// Narrow on purpose: only when the session actually changed something under `e2e/`. A
+// SIMPLE change with no spec has nothing for the suite to say that the unit steps did not.
+const simpleComplete = () => {
+  if (!isMergerStop()) return false;
+  if (featureFlag() || previous) return false;
+  if (readTickets(ctx).length) return false; // a wave session: waveComplete owns it
+  return changedSpecs().length > 0;
+};
+
 let trigger = "";
 if (isFeatureReview(input)) {
   trigger = "feature-review";
@@ -164,6 +211,8 @@ if (isFeatureReview(input)) {
   trigger = "merger-fix";
 } else if (waveComplete()) {
   trigger = "wave-complete";
+} else if (simpleComplete()) {
+  trigger = "simple-complete";
 }
 if (!trigger) process.exit(0);
 
@@ -220,26 +269,6 @@ const script = harnessFile("scripts", "e2e-smoke.sh");
 if (!existsSync(src))
   ctx.accept(`no session worktree at ${src} -> e2e skipped`);
 if (!existsSync(script)) ctx.accept(`no ${script} -> e2e skipped`);
-
-// --- run the changed specs first ----------------------------------------------------
-// The specs this session added or touched, against the branch it forked from. e2e-smoke.sh
-// runs these before the full suite inside ONE stack boot, so a broken new spec surfaces
-// right after boot instead of after everything else has run. Best-effort: an empty list
-// just means "full suite", which is the previous behaviour.
-const changedSpecs = () => {
-  const base = sessionBaseBranch(ctx);
-  const range =
-    git(["show-ref", "--verify", "--quiet", `refs/heads/${base}`]).status === 0
-      ? `${base}...${sessionRef}`
-      : "";
-  if (!range) return [];
-  const r = git(["diff", "--name-only", range, "--", "e2e/"]);
-  if (r.status !== 0) return [];
-  return r.stdout
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((f) => /\.spec\.[cm]?[jt]sx?$/.test(f));
-};
 
 const specs = changedSpecs();
 

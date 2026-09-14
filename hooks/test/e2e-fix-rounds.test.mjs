@@ -355,6 +355,65 @@ describe("the result file is always truthful", () => {
   });
 });
 
+// A SIMPLE session has no tickets and runs no feature review, so before this trigger its
+// specs were executed exactly zero times: the validation chain excludes e2e, and this hook
+// is its only launcher. Harmless while SIMPLE meant one cosmetic file; LEVEL routes real
+// work there, so a spec it writes has to run.
+describe("the simple-complete trigger", () => {
+  const commitSpec = (name) => {
+    mkdirSync(join(APP_DIR, "e2e"), { recursive: true });
+    writeFileSync(join(APP_DIR, "e2e", `${name}.spec.ts`), "// spec\n");
+    g(APP_DIR, "add", "-A");
+    g(APP_DIR, "commit", "-q", "-m", `test: ${name}`);
+  };
+
+  test("a SIMPLE merge that touched a spec runs the suite", () => {
+    commitSpec("importance");
+    expect(mergerStop().status).toBe(0);
+    expect(didRun()).toBe(true);
+    expect(result().trigger).toBe("simple-complete");
+  });
+
+  test("a SIMPLE merge with no spec runs nothing: the unit steps already covered it", () => {
+    writeFileSync(join(APP_DIR, "label.ts"), "export const l = 'Sign in';\n");
+    g(APP_DIR, "add", "-A");
+    g(APP_DIR, "commit", "-q", "-m", "feat: rename");
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
+  test("a wave session is left to wave-complete, even with a spec", () => {
+    mkdirSync(SESSION_DIR, { recursive: true });
+    writeFileSync(
+      join(SESSION_DIR, "TASK-001.json"),
+      JSON.stringify({ id: "TASK-001", status: "in_progress" }),
+    );
+    commitSpec("importance");
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+
+  test("the fix for a red SIMPLE suite re-runs it", () => {
+    commitSpec("importance");
+    mergerStop();
+    expect(result().status).toBe("failed");
+    clearRun();
+
+    writeSmoke(SMOKE_PASS);
+    mergeAFix("spec-fix");
+    expect(mergerStop().status).toBe(0);
+    expect(result().trigger).toBe("merger-fix");
+    expect(result().status).toBe("passed");
+  });
+
+  test("a stale result from another flow does not license a SIMPLE re-run", () => {
+    seedResult({ status: "failed", sessionSha: "0000000" });
+    commitSpec("importance");
+    mergerStop();
+    expect(didRun()).toBe(false);
+  });
+});
+
 describe("changed specs are handed to the suite", () => {
   test("specs the session touched are passed through, and recorded", () => {
     approveFeature();
