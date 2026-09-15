@@ -35,40 +35,47 @@ const cleanup = () => {
 };
 
 /**
- * A worktree with a `session/ab12cd34` branch AND a `session-base/ab12cd34` anchor at the
- * seed commit, and `files` more files (of `lines` lines each) plus every path in `paths`
- * (one line each) committed on top, for the diff-driven tier tests. The simple flow forks
- * from the anchor, the per-ticket flow from the session branch, so both refs must exist.
+ * The session topology setup-worktree really builds, in one directory: the anchor
+ * `session-base/ab12cd34` at the fork point, then any `alreadyOnSession` commits that
+ * earlier waves merged, then `session/ab12cd34` on top of those (every worktree, the
+ * simple one included, is cut from the session branch), and finally this worktree's own
+ * work: `files` files of `lines` lines each plus every path in `paths`.
+ *
+ * The range under review is therefore the worktree's own commits, and `alreadyOnSession`
+ * is what separates the two candidate bases: it is inside the anchor's range and outside
+ * the session branch's.
  */
 const gitRepo = (
   dir,
-  { files = 1, lines = 1, paths = [], simpleMerged } = {},
+  { files = 1, lines = 1, paths = [], alreadyOnSession } = {},
 ) => {
   const g = (...a) => spawnSync("git", ["-C", dir, ...a], { encoding: "utf8" });
+  const write = (rel, n) => {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(
+      join(dir, rel),
+      Array.from({ length: n }, (_, k) => `l${k}`).join("\n") + "\n",
+    );
+  };
   g("init", "-q", "-b", "main");
   g("config", "user.email", "t@t");
   g("config", "user.name", "t");
   writeFileSync(join(dir, "seed.txt"), "seed\n");
   g("add", "-A");
   g("commit", "-qm", "seed");
-  g("branch", "session/ab12cd34");
   g("branch", "session-base/ab12cd34");
-  for (let i = 0; i < files; i++) {
-    writeFileSync(
-      join(dir, `f${i}.txt`),
-      Array.from({ length: lines }, (_, k) => `l${k}`).join("\n") + "\n",
-    );
+  if (alreadyOnSession) {
+    for (let i = 0; i < (alreadyOnSession.files ?? 0); i++)
+      write(`wave${i}.txt`, alreadyOnSession.lines ?? 1);
+    for (const rel of alreadyOnSession.paths ?? []) write(rel, 1);
+    g("add", "-A");
+    g("commit", "-qm", "an earlier wave");
   }
-  for (const rel of paths) {
-    mkdirSync(dirname(join(dir, rel)), { recursive: true });
-    writeFileSync(join(dir, rel), "x\n");
-  }
+  g("branch", "session/ab12cd34");
+  for (let i = 0; i < files; i++) write(`f${i}.txt`, lines);
+  for (const rel of paths) write(rel, 1);
   g("add", "-A");
   g("commit", "-qm", "work");
-  // A second SIMPLE request in the same session: the first one's commits are already on
-  // the session branch, so a three-dot diff against it starts at the simple tip and reads
-  // as empty, while the anchor still sees the whole simple branch.
-  if (simpleMerged) g("branch", "-f", "session/ab12cd34", "HEAD");
 };
 
 /**
@@ -451,13 +458,11 @@ describe("route-review-model", () => {
       cleanup();
     });
 
-    test("a SIMPLE review, which has no ticket, is tiered from its diff against the anchor", () => {
-      // The simple worktree forks from session-base/<short>, not from session/<short>:
-      // measured against the session branch the diff would carry every merged ticket.
+    test("a SIMPLE review, which has no ticket, is tiered from its own diff", () => {
       const r = run({
         omitTicketFile: true,
         simple: true,
-        diff: { files: 9, lines: 9, simpleMerged: true },
+        diff: { files: 9, lines: 9 },
       });
       expect(r.updated).not.toHaveProperty("model");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
@@ -468,7 +473,31 @@ describe("route-review-model", () => {
       const r = run({
         omitTicketFile: true,
         simple: true,
-        diff: { files: 1, lines: 2, simpleMerged: true },
+        diff: { files: 1, lines: 2 },
+      });
+      expect(r.updated.model).toBe("sonnet");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);
+      cleanup();
+    });
+
+    test("a SIMPLE review is tiered from the session branch, not from the anchor behind it", () => {
+      // Every worktree, the simple one included, is cut from session/<short>, so the
+      // range under review is its own work. Tiering from session-base/<short> instead
+      // would charge this one-file change for every wave the session had already merged,
+      // and any supabase/ path among them would pin it to hard for the rest of the
+      // session.
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        model: "sonnet",
+        diff: {
+          files: 1,
+          lines: 1,
+          alreadyOnSession: {
+            files: 9,
+            paths: ["supabase/schemas/01_tables.sql"],
+          },
+        },
       });
       expect(r.updated.model).toBe("sonnet");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);
@@ -482,12 +511,7 @@ describe("route-review-model", () => {
         omitTicketFile: true,
         simple: true,
         model: "sonnet",
-        diff: {
-          files: 1,
-          lines: 1,
-          paths: ["supabase/schemas/01_tables.sql"],
-          simpleMerged: true,
-        },
+        diff: { files: 1, lines: 1, paths: ["supabase/schemas/01_tables.sql"] },
       });
       expect(r.updated).not.toHaveProperty("model");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
@@ -499,12 +523,7 @@ describe("route-review-model", () => {
         omitTicketFile: true,
         simple: true,
         model: "sonnet",
-        diff: {
-          files: 1,
-          lines: 1,
-          paths: ["src/lib/x.tsx"],
-          simpleMerged: true,
-        },
+        diff: { files: 1, lines: 1, paths: ["src/lib/x.tsx"] },
       });
       expect(r.updated.model).toBe("sonnet");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);

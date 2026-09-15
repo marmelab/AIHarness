@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { isQualityReviewer } from "./lib/teams.mjs";
-import { sessionBaseBranch, sessionBranch } from "./lib/topology.mjs";
+import { sessionBranch } from "./lib/topology.mjs";
 import { loadConfig, reviewTierModel } from "./lib/config.mjs";
 import {
   TIERS,
@@ -97,21 +97,22 @@ export function check(input, ctx) {
   }
 
   const fromScorecard = tierFromScorecard(ticket?.scorecard);
-  // The fork point, and the two flows do not share one. A ticket branch forks from the
-  // session branch; the simple branch forks from the session ANCHOR and is reused by every
-  // SIMPLE request in the session, so once one of them has merged, a diff taken against
-  // the session branch starts at the simple tip and reads as empty. The anchor is also the
-  // base the reviewer itself diffs against, so the tier sizes the diff it will read.
+  // One base for every reviewer dispatch: the session branch. setup-worktree cuts EVERY
+  // worktree from it, the simple one included (`worktree add -b <branch> session/<short>`),
+  // so the three-dot range against it is that worktree's own work and nothing else. The
+  // anchor is the wrong base here: it sits behind whatever earlier waves merged into the
+  // session branch, so a diff taken from it bills a one-file change for the whole session,
+  // and one supabase/ path anywhere in that history would pin every later review to hard.
+  //
   // The dispatch's own BRANCH_NAME is only a fallback for the short id: the orchestrator's
   // per-ticket reviewer dispatch does not carry that line, and a base read from it alone
   // would leave the diff unread.
-  const simple = /\/simple$/.test(d.branchName);
   let base = "";
   try {
-    base = simple ? sessionBaseBranch(ctx) : sessionBranch(ctx);
+    base = sessionBranch(ctx);
   } catch {
     const m = d.branchName.match(/^([^/]+)\//);
-    if (m) base = `${simple ? "session-base" : "session"}/${m[1]}`;
+    if (m) base = `session/${m[1]}`;
   }
   let stats = null;
   if (d.worktreePath && base) stats = diffStats(d.worktreePath, base);
