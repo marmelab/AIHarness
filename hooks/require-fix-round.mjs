@@ -21,8 +21,14 @@ import { isQualityReviewer } from "./lib/teams.mjs";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 
 // The whole-feature and migration passes have their own templates and narrowing block.
+//
+// UNANCHORED on purpose. The orchestrator writes the feature review's mode INSIDE its
+// ROLE line ("ROLE: quality-reviewer (MODE: feature-review)"), not on a line of its own,
+// so a pattern anchored to line start reads no mode at all and refuses a pass that has no
+// narrowing block to add. Matching too much only costs one redundant re-read; matching
+// too little wedges the pass.
 const WHOLE_FEATURE_MODE =
-  /^MODE:\s*(feature-review|feature-smoke|migration-review)/m;
+  /\bMODE:\s*(feature-review|feature-smoke|migration-review)\b/;
 
 export const dispatchCountFile = (ctx, taskId) =>
   join(
