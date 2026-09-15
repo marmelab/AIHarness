@@ -65,6 +65,9 @@ describe("tierFromDiff", () => {
     expect(tierFromDiff({ files: 3, lines: 30 })).toBe("normal");
     expect(tierFromDiff({ files: 2, lines: 31 })).toBe("normal");
   });
+  test("null on an empty diff: no change is no signal, not a small one", () => {
+    expect(tierFromDiff({ files: 0, lines: 0 })).toBeNull();
+  });
 });
 
 describe("maxTier", () => {
@@ -100,6 +103,15 @@ describe("diffStats", () => {
   test("counts files and changed lines between a base ref and HEAD", () => {
     expect(diffStats(repo, "base")).toEqual({ files: 2, lines: 3 });
   });
+  test("counts from the merge base, so a sibling branch's work is not this branch's", () => {
+    git("checkout", "-q", "-b", "other", "base");
+    writeFileSync(join(repo, "sibling.txt"), "sibling\n");
+    git("add", "-A");
+    git("commit", "-qm", "sibling");
+    git("checkout", "-q", "main");
+    expect(diffStats(repo, "other")).toEqual({ files: 2, lines: 3 });
+  });
+
   test("null when the ref does not exist or the dir is not a repo", () => {
     expect(diffStats(repo, "nope")).toBeNull();
     expect(diffStats(tmpdir(), "base")).toBeNull();

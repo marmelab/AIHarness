@@ -31,9 +31,12 @@ export function tierFromScorecard(sc) {
 
 /**
  * @param {{files: number, lines: number}} stats
- * @returns {string}
+ * @returns {string | null}  null on an empty diff, which is no signal at all.
  */
 export function tierFromDiff({ files, lines }) {
+  // Nothing has landed yet, so the diff must never read as "small change" and pull the
+  // tier down toward trivial.
+  if (!files) return null;
   if (files >= 8 || lines >= 150) return "hard";
   if (files <= 2 && lines <= 30) return "trivial";
   return "normal";
@@ -55,8 +58,11 @@ export function maxTier(...tiers) {
 }
 
 /**
- * Files and changed lines (insertions + deletions) between `baseRef` and HEAD in
- * `worktree`. Two git calls, both read-only.
+ * Files and changed lines (insertions + deletions) on HEAD's side since it forked from
+ * `baseRef`, in `worktree`. Three-dot, so it is the merge base that is compared, not the
+ * two tips: sibling work merged into the base branch since the fork is not this ticket's
+ * diff, and counting it would escalate every ticket reviewed late in a session. Two git
+ * calls, both read-only.
  * @param {string} worktree
  * @param {string} baseRef
  * @returns {{files: number, lines: number} | null}  null when git cannot answer.
@@ -67,7 +73,7 @@ export function diffStats(worktree, baseRef) {
     worktree,
     "diff",
     "--name-only",
-    `${baseRef}..HEAD`,
+    `${baseRef}...HEAD`,
   ]);
   if (names.status !== 0) return null;
   const files = names.stdout.split("\n").filter((l) => l.trim()).length;
@@ -76,7 +82,7 @@ export function diffStats(worktree, baseRef) {
     worktree,
     "diff",
     "--numstat",
-    `${baseRef}..HEAD`,
+    `${baseRef}...HEAD`,
   ]);
   if (num.status !== 0) return null;
   let lines = 0;
