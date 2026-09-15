@@ -51,15 +51,20 @@ const UNTOUCHED_MODE =
  * `deploy.relevantGlobs`: the project names its own deploy-relevant paths, the hook holds
  * no vendor name. A project with no deploy block declares no such path, so nothing
  * escalates on a path alone there, and a ticket's own `schema_sensitive` flag stays the
- * way to say so. An unreadable config yields the same empty matcher, and the model then
- * falls back to "default" anyway, which is the expensive direction.
+ * way to say so.
+ *
+ * A config that cannot be read at all is the opposite case, and it matches EVERY path. The
+ * model is not enough on its own: `reviewTierModel` throws with it and the dispatch keeps
+ * the strong model, but the depth the reviewer applies comes from the `REVIEW_TIER:` line,
+ * so an empty matcher would stamp `normal` on a schema change while paying for opus. Both
+ * halves fail in the same expensive direction instead.
  * @returns {RegExp}
  */
 export function schemaPathRegex() {
   try {
     return relevanceRegex(deployGlobs(loadConfig()));
   } catch {
-    return relevanceRegex([]);
+    return /^/; // unreadable config: every path is treated as schema-relevant
   }
 }
 

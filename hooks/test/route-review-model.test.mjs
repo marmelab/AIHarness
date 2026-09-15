@@ -96,6 +96,8 @@ const run = ({
   // What this project calls deploy-relevant. null = no deploy block at all, the state of
   // a project that declares no deploy adapter.
   deployGlobs = ["**/supabase/**"],
+  // Raw config text, for the config that cannot be read at all.
+  configText,
   sessionId = "ab12cd34-0000-0000-0000-000000000000",
 } = {}) => {
   const dir = tmp();
@@ -103,11 +105,12 @@ const run = ({
   const appDir = tmp();
   writeFileSync(
     join(appDir, "harness.config.json"),
-    JSON.stringify(
-      deployGlobs
-        ? { deploy: { adapter: "test", relevantGlobs: deployGlobs } }
-        : {},
-    ),
+    configText ??
+      JSON.stringify(
+        deployGlobs
+          ? { deploy: { adapter: "test", relevantGlobs: deployGlobs } }
+          : {},
+      ),
   );
   const ticketFile = join(dir, `${taskId}.json`);
   if (ticket !== undefined) writeFileSync(ticketFile, JSON.stringify(ticket));
@@ -603,6 +606,21 @@ describe("route-review-model", () => {
       const r = run({ ticket: FLAGGED, model: "sonnet", deployGlobs: null });
       expect(r.updated).not.toHaveProperty("model");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      cleanup();
+    });
+
+    test("a config that cannot be read escalates, it does not lose the schema check", () => {
+      // The model already falls back to the strong one when the config throws, but the
+      // DEPTH comes from the REVIEW_TIER line, not from the model: a matcher that matches
+      // nothing would hand a schema change a normal review. Every changed path counts
+      // instead, so the tier fails in the same expensive direction as the model.
+      const r = run({
+        ticket: ORDINARY,
+        model: "sonnet",
+        configText: "{ not json",
+      });
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      expect(r.updated).not.toHaveProperty("model");
       cleanup();
     });
 

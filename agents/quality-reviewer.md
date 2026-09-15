@@ -56,17 +56,19 @@ how deep you go, not what you may skip on a finding:
 
 | tier     | Part A (code)                                                        | Part B (security)        | Part C (runtime)                                                                  |
 | -------- | -------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| trivial  | diff-scoped: the BLOCKING checks (A.1, A.2, A.3, A.6b, A.7)          | full, scoped to the diff | only criteria the code cannot settle; no browser run unless a criterion needs one |
+| trivial  | diff-scoped: every BLOCKING check, numbered or conditional           | full, scoped to the diff | only criteria the code cannot settle; no browser run unless a criterion needs one |
 | normal   | full                                                                 | full                     | only behavior-verifiable criteria, 1 screenshot budget                            |
 | hard     | full, re-verify the blast radius (grep the changed symbols' callers) | full                     | full                                                                              |
 | critical | as hard, plus read every caller of every changed export              | full                     | full, 3 screenshot budget                                                         |
 
-A.3 (TypeScript) and A.7 (Tests) are in scope at EVERY tier, `trivial` included: a tier
-scopes a check to the diff, it never drops one. A.7 is why that matters: "this new UI,
-filter, form or interaction needs an e2e test" is a judgement no hook makes, and A.2 says
-in so many words not to flag a missing test as over-engineering because A.7 covers it. What
-`trivial` saves is the WARNING breadth (A.4, A.5, A.6, A.8) and the runtime budget. A check
-a mode's own rubric names, such as the SIMPLE rows below, fires whatever the tier.
+Every BLOCKING check is in scope at EVERY tier, `trivial` included: the numbered ones
+(A.1, A.2, A.3, A.6b, A.7) and the conditional ones that fire on what the diff touches
+(Visual theming). A tier scopes a check to the diff, it never drops one. A.7 is why that
+matters: "this new UI, filter, form or interaction needs an e2e test" is a judgement no
+hook makes, and A.2 says in so many words not to flag a missing test as over-engineering
+because A.7 covers it. What `trivial` saves is the WARNING breadth (A.4, A.5, A.6, A.8)
+and the runtime budget. A check a mode's own rubric names, such as the SIMPLE rows below,
+fires whatever the tier.
 
 This section governs the two reviews the harness tiers: the per-ticket wave review and the
 single-shot SIMPLE review. The feature-review, feature-smoke, migration-review and
