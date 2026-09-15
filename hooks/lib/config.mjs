@@ -170,6 +170,40 @@ export const validationSteps = (cfg) => cfg.validation?.steps ?? [];
 export const extraForbidden = (cfg) => cfg.validation?.extraForbidden ?? [];
 export const isDeployEnabled = (cfg) => isObject(cfg.deploy);
 export const deployGlobs = (cfg) => cfg.deploy?.relevantGlobs ?? [];
+
+/**
+ * Convert a deploy-relevant glob (config.deploy.relevantGlobs) into an anchored regex
+ * source. `**\/` -> optional dir prefix, `**` -> any, `*` -> non-slash. The git diff paths
+ * are repo-relative, so anchor at the start.
+ * @param {string} glob
+ * @returns {string}
+ */
+export function globToRegexSource(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  // Placeholder the glob operators FIRST, expand `*` last, then swap the placeholders in.
+  // Otherwise the `.*` inserted for `**` would be re-mangled by the single-`*` ->
+  // `[^/]*` pass.
+  const body = escaped
+    .replace(/\*\*\//g, "\0DS\0")
+    .replace(/\*\*/g, "\0D\0")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\0DS\0/g, "(?:.*/)?")
+    .replace(/\0D\0/g, ".*");
+  return `^${body}`;
+}
+
+/**
+ * The single deploy-relevance matcher, built from config.deploy.relevantGlobs: one
+ * definition shared by the deploy round (scripts/pending-deploys.mjs) and the review
+ * router's schema escalation. Empty globs match nothing, so a project that declares no
+ * deploy adapter has no deploy-relevant path.
+ * @param {string[]} globs
+ * @returns {RegExp}
+ */
+export function relevanceRegex(globs) {
+  if (!globs.length) return /a^/; // never matches
+  return new RegExp(globs.map(globToRegexSource).join("|"));
+}
 export const isAppSmokeEnabled = (cfg) => isObject(cfg.app);
 export const worktreeProvision = (cfg) => cfg.worktree?.provision ?? "npm-link";
 export const roleNames = (cfg) => Object.keys(cfg.roles ?? {});

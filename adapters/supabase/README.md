@@ -15,8 +15,8 @@ under the optionality model:
 ## Deploy-relevance
 
 `config.deploy.relevantGlobs` (`supabase/**`) is the single definition of a
-deploy-relevant path, shared by `pending-deploys.mjs`, the orchestrator's
-SIMPLE-review gate, and the planner's schema wording. A real migration always
+deploy-relevant path, shared by `pending-deploys.mjs`, the review router's schema
+escalation (`route-review-model.mjs`), and the planner's schema wording. A real migration always
 requires a change under these globs (that is where the declarative DDL lives, and
 `supabase db diff` only fires on it), so the globs are both necessary and
 sufficient to decide whether to offer the migration round.

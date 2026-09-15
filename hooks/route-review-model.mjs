@@ -19,7 +19,12 @@ import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { isQualityReviewer } from "./lib/teams.mjs";
 import { sessionBranch } from "./lib/topology.mjs";
-import { loadConfig, reviewTierModel } from "./lib/config.mjs";
+import {
+  deployGlobs,
+  loadConfig,
+  relevanceRegex,
+  reviewTierModel,
+} from "./lib/config.mjs";
 import {
   TIERS,
   diffStats,
@@ -41,27 +46,45 @@ import {
 const UNTOUCHED_MODE =
   /\bMODE:\s*(feature-review|feature-smoke|migration-review|review)\b/;
 
-// A changed path whose blast radius reaches the database. Read from the ticket when there
-// is one, and from the diff itself when there is not.
-const SCHEMA_PATH = /(^|\/)supabase\//;
+/**
+ * The matcher for a path whose blast radius reaches the database, read from
+ * `deploy.relevantGlobs`: the project names its own deploy-relevant paths, the hook holds
+ * no vendor name. A project with no deploy block declares no such path, so nothing
+ * escalates on a path alone there, and a ticket's own `schema_sensitive` flag stays the
+ * way to say so. An unreadable config yields the same empty matcher, and the model then
+ * falls back to "default" anyway, which is the expensive direction.
+ * @returns {RegExp}
+ */
+export function schemaPathRegex() {
+  try {
+    return relevanceRegex(deployGlobs(loadConfig()));
+  } catch {
+    return relevanceRegex([]);
+  }
+}
 
-/** Does this ticket's blast radius reach the database? */
-export function isSchemaSensitive(ticket) {
+/**
+ * Does this ticket's blast radius reach the database?
+ * @param {unknown} ticket
+ * @param {RegExp} re  the project's deploy-relevance matcher
+ */
+export function isSchemaSensitive(ticket, re) {
   if (!ticket || typeof ticket !== "object") return null;
   if (ticket.schema_sensitive === true) return true;
   const files = Array.isArray(ticket.files_to_modify)
     ? ticket.files_to_modify
     : [];
-  return files.some((f) => SCHEMA_PATH.test(String(f)));
+  return files.some((f) => re.test(String(f)));
 }
 
 /**
  * Does this diff reach the database? The SIMPLE review carries no ticket, so without the
  * diff's own paths a one-file RLS or schema change would tier as trivial.
  * @param {string[] | undefined} paths
+ * @param {RegExp} re  the project's deploy-relevance matcher
  */
-export const isSchemaSensitiveDiff = (paths) =>
-  Array.isArray(paths) && paths.some((f) => SCHEMA_PATH.test(String(f)));
+export const isSchemaSensitiveDiff = (paths, re) =>
+  Array.isArray(paths) && paths.some((f) => re.test(String(f)));
 
 // Global: every existing line goes, so a dispatch that already carries two of them cannot
 // leave a stale tier behind the fresh one for the reviewer to read first.
@@ -129,9 +152,10 @@ export function check(input, ctx) {
   const diffLabel =
     stats === null ? "none" : stats.files === 0 ? "empty" : fromDiff;
   // The ticket declares its blast radius; a ticket-less review has only the diff's paths.
+  const schemaRe = schemaPathRegex();
   const schema = ticket
-    ? isSchemaSensitive(ticket) === true
-    : isSchemaSensitiveDiff(stats?.paths);
+    ? isSchemaSensitive(ticket, schemaRe) === true
+    : isSchemaSensitiveDiff(stats?.paths, schemaRe);
   const stored = ticket && TIERS.includes(ticket.tier) ? ticket.tier : null;
   // A ticket dispatch expects both inputs, so an ABSENT one is floored at `normal` rather
   // than ignored: a missing scorecard, an unreadable diff or an empty one is not evidence

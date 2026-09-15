@@ -1,14 +1,14 @@
 // Tests for .claude/scripts/pending-deploys.mjs: decides whether a session has
 // deploy-relevant changes worth a migration round. Config-driven:
 // the round exists iff config.deploy is present, and relevance comes from
-// config.deploy.relevantGlobs (one definition, unified with the orchestrator's
-// SIMPLE-review gate).
+// config.deploy.relevantGlobs (one definition, shared with the review router's
+// schema escalation; the matcher itself lives in hooks/lib/config.mjs).
 import { describe, test, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { globToRegexSource, relevanceRegex } from "../pending-deploys.mjs";
+import { globToRegexSource, relevanceRegex } from "../../hooks/lib/config.mjs";
 
 const SCRIPT = new URL("../pending-deploys.mjs", import.meta.url).pathname;
 

@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REPO, TMP_ROOT, sanitizePath } from "../lib/paths.mjs";
+import { TMP_ROOT, sanitizePath } from "../lib/paths.mjs";
 
 const HOOK = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -93,9 +93,22 @@ const run = ({
   simple,
   diff,
   extraLines = [],
+  // What this project calls deploy-relevant. null = no deploy block at all, the state of
+  // a project that declares no deploy adapter.
+  deployGlobs = ["**/supabase/**"],
   sessionId = "ab12cd34-0000-0000-0000-000000000000",
 } = {}) => {
   const dir = tmp();
+  // A repo root of its own, so the hook reads THIS config and not the harness's.
+  const appDir = tmp();
+  writeFileSync(
+    join(appDir, "harness.config.json"),
+    JSON.stringify(
+      deployGlobs
+        ? { deploy: { adapter: "test", relevantGlobs: deployGlobs } }
+        : {},
+    ),
+  );
   const ticketFile = join(dir, `${taskId}.json`);
   if (ticket !== undefined) writeFileSync(ticketFile, JSON.stringify(ticket));
   if (diff) gitRepo(dir, diff);
@@ -129,6 +142,7 @@ const run = ({
   const r = spawnSync("node", [HOOK], {
     input: JSON.stringify(payload),
     encoding: "utf8",
+    env: { ...process.env, APP_DIR: appDir },
   });
   const updated = r.stdout.trim()
     ? JSON.parse(r.stdout).hookSpecificOutput.updatedInput
@@ -139,7 +153,7 @@ const run = ({
     stdout: r.stdout,
     stderr: r.stderr,
     ticketFile,
-    logFile: join(TMP_ROOT, sanitizePath(REPO), sessionId, "hooks.log"),
+    logFile: join(TMP_ROOT, sanitizePath(appDir), sessionId, "hooks.log"),
   };
 };
 
@@ -545,6 +559,50 @@ describe("route-review-model", () => {
       });
       expect(r.updated.model).toBe("sonnet");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);
+      cleanup();
+    });
+
+    test("a declared deploy glob makes a matching diff path schema-relevant", () => {
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        model: "sonnet",
+        deployGlobs: ["supabase/"],
+        diff: { files: 1, lines: 1, paths: ["supabase/schemas/01_tables.sql"] },
+      });
+      expect(r.updated).not.toHaveProperty("model");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      cleanup();
+    });
+
+    test("with no deploy block declared, the same diff path escalates nothing", () => {
+      // A project with no deploy adapter has no schema to protect, and the hook holds no
+      // vendor name of its own to guess one from.
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        model: "sonnet",
+        deployGlobs: null,
+        diff: { files: 1, lines: 1, paths: ["supabase/schemas/01_tables.sql"] },
+      });
+      expect(r.updated.model).toBe("sonnet");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);
+      cleanup();
+    });
+
+    test("with no deploy block declared, a ticket's declared path escalates nothing either", () => {
+      const r = run({ ticket: TOUCHES_SUPABASE, deployGlobs: null });
+      expect(r.updated.model).toBe("sonnet");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: normal$/m);
+      cleanup();
+    });
+
+    test("schema_sensitive: true still forces hard with no deploy block", () => {
+      // The flag is the ticket's own judgement, not a path match, so no config is needed
+      // to honour it.
+      const r = run({ ticket: FLAGGED, model: "sonnet", deployGlobs: null });
+      expect(r.updated).not.toHaveProperty("model");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
       cleanup();
     });
 
