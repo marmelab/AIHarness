@@ -133,7 +133,16 @@ export function check(input, ctx) {
     ? isSchemaSensitive(ticket) === true
     : isSchemaSensitiveDiff(stats?.paths);
   const stored = ticket && TIERS.includes(ticket.tier) ? ticket.tier : null;
-  const tier = maxTier(fromScorecard, fromDiff, schema ? "hard" : null, stored);
+  // A ticket dispatch expects both inputs, so an ABSENT one is floored at `normal` rather
+  // than ignored: a missing scorecard, an unreadable diff or an empty one is not evidence
+  // of an easy ticket, and `maxTier`'s null-skipping would otherwise let a small diff or a
+  // lone good scorecard carry the whole dispatch down to `trivial`, a weaker review than
+  // the untiered one it replaced, invisible in the log because trivial and normal share a
+  // model. The ticket-less SIMPLE path keeps the nulls: there, no scorecard is the normal
+  // state and `trivial` is the intended saving.
+  const scorecardTier = ticket ? (fromScorecard ?? "normal") : fromScorecard;
+  const diffTier = ticket ? (fromDiff ?? "normal") : fromDiff;
+  const tier = maxTier(scorecardTier, diffTier, schema ? "hard" : null, stored);
 
   if (ticket && ticket.tier !== tier) {
     try {

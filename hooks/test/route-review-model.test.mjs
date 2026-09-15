@@ -367,6 +367,24 @@ describe("route-review-model", () => {
       cleanup();
     });
 
+    test("a ticket with no scorecard is normal, never trivial", () => {
+      // A missing input is not evidence of an easy ticket. Floored at normal, the review
+      // is no weaker than the untiered one it replaced, and the floor is invisible in the
+      // routing log because trivial and normal share a model.
+      const r = run({ ticket: ORDINARY, diff: { files: 1, lines: 3 } });
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: normal$/m);
+      cleanup();
+    });
+
+    test("a ticket whose diff cannot be computed is normal, never trivial", () => {
+      // exec() maps a signal-killed git to status 0, so an unanswerable diff can reach
+      // here as {files: 0} rather than as an error; either way the signal is absent, and
+      // an absent signal must not buy the cheapest review.
+      const r = run({ ticket: { ...ORDINARY, scorecard: TRIVIAL_SC } });
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: normal$/m);
+      cleanup();
+    });
+
     test("a hard scorecard removes the model even on a tiny diff", () => {
       const r = run({
         ticket: { ...ORDINARY, scorecard: HARD_SC },
