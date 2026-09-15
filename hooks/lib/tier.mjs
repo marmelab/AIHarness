@@ -58,14 +58,17 @@ export function maxTier(...tiers) {
 }
 
 /**
- * Files and changed lines (insertions + deletions) on HEAD's side since it forked from
- * `baseRef`, in `worktree`. Three-dot, so it is the merge base that is compared, not the
- * two tips: sibling work merged into the base branch since the fork is not this ticket's
- * diff, and counting it would escalate every ticket reviewed late in a session. Two git
- * calls, both read-only.
+ * Files, changed lines (insertions + deletions) and changed paths on HEAD's side since it
+ * forked from `baseRef`, in `worktree`. Three-dot, so it is the merge base that is
+ * compared, not the two tips: sibling work merged into the base branch since the fork is
+ * not this ticket's diff, and counting it would escalate every ticket reviewed late in a
+ * session. Two git calls, both read-only.
+ *
+ * The paths are returned, not just counted: a review with no ticket has no declared file
+ * list, so the diff's own paths are the only place its blast radius can be read from.
  * @param {string} worktree
  * @param {string} baseRef
- * @returns {{files: number, lines: number} | null}  null when git cannot answer.
+ * @returns {{files: number, lines: number, paths: string[]} | null}  null when git cannot answer.
  */
 export function diffStats(worktree, baseRef) {
   const names = exec("git", [
@@ -76,7 +79,7 @@ export function diffStats(worktree, baseRef) {
     `${baseRef}...HEAD`,
   ]);
   if (names.status !== 0) return null;
-  const files = names.stdout.split("\n").filter((l) => l.trim()).length;
+  const paths = names.stdout.split("\n").filter((l) => l.trim());
   const num = exec("git", [
     "-C",
     worktree,
@@ -90,5 +93,5 @@ export function diffStats(worktree, baseRef) {
     const [add, del] = row.split("\t");
     lines += (parseInt(add, 10) || 0) + (parseInt(del, 10) || 0);
   }
-  return { files, lines };
+  return { files: paths.length, lines, paths };
 }

@@ -101,7 +101,14 @@ describe("diffStats", () => {
   afterAll(() => rmSync(repo, { recursive: true, force: true }));
 
   test("counts files and changed lines between a base ref and HEAD", () => {
-    expect(diffStats(repo, "base")).toEqual({ files: 2, lines: 3 });
+    expect(diffStats(repo, "base")).toEqual({
+      files: 2,
+      lines: 3,
+      paths: ["a.txt", "b.txt"],
+    });
+  });
+  test("returns the changed paths, the only schema signal a ticket-less review has", () => {
+    expect(diffStats(repo, "base").paths).toEqual(["a.txt", "b.txt"]);
   });
   test("counts from the merge base, so a sibling branch's work is not this branch's", () => {
     git("checkout", "-q", "-b", "other", "base");
@@ -109,7 +116,11 @@ describe("diffStats", () => {
     git("add", "-A");
     git("commit", "-qm", "sibling");
     git("checkout", "-q", "main");
-    expect(diffStats(repo, "other")).toEqual({ files: 2, lines: 3 });
+    expect(diffStats(repo, "other")).toEqual({
+      files: 2,
+      lines: 3,
+      paths: ["a.txt", "b.txt"],
+    });
   });
 
   test("null when the ref does not exist or the dir is not a repo", () => {

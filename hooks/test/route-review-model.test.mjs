@@ -6,7 +6,13 @@
 
 import { describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,10 +35,15 @@ const cleanup = () => {
 };
 
 /**
- * A worktree with a `session/ab12cd34` branch at the seed commit, and `files` more
- * files (of `lines` lines each) committed on top, for the diff-driven tier tests.
+ * A worktree with a `session/ab12cd34` branch AND a `session-base/ab12cd34` anchor at the
+ * seed commit, and `files` more files (of `lines` lines each) plus every path in `paths`
+ * (one line each) committed on top, for the diff-driven tier tests. The simple flow forks
+ * from the anchor, the per-ticket flow from the session branch, so both refs must exist.
  */
-const gitRepo = (dir, { files = 1, lines = 1 } = {}) => {
+const gitRepo = (
+  dir,
+  { files = 1, lines = 1, paths = [], simpleMerged } = {},
+) => {
   const g = (...a) => spawnSync("git", ["-C", dir, ...a], { encoding: "utf8" });
   g("init", "-q", "-b", "main");
   g("config", "user.email", "t@t");
@@ -41,14 +52,23 @@ const gitRepo = (dir, { files = 1, lines = 1 } = {}) => {
   g("add", "-A");
   g("commit", "-qm", "seed");
   g("branch", "session/ab12cd34");
+  g("branch", "session-base/ab12cd34");
   for (let i = 0; i < files; i++) {
     writeFileSync(
       join(dir, `f${i}.txt`),
       Array.from({ length: lines }, (_, k) => `l${k}`).join("\n") + "\n",
     );
   }
+  for (const rel of paths) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), "x\n");
+  }
   g("add", "-A");
   g("commit", "-qm", "work");
+  // A second SIMPLE request in the same session: the first one's commits are already on
+  // the session branch, so a three-dot diff against it starts at the simple tip and reads
+  // as empty, while the anchor still sees the whole simple branch.
+  if (simpleMerged) g("branch", "-f", "session/ab12cd34", "HEAD");
 };
 
 /**
@@ -59,9 +79,11 @@ const run = ({
   ticket,
   model,
   mode,
+  inlineMode,
   taskId = "TASK-001",
   omitTicketFile,
   omitBranchName,
+  simple,
   diff,
   extraLines = [],
   sessionId = "ab12cd34-0000-0000-0000-000000000000",
@@ -70,12 +92,19 @@ const run = ({
   const ticketFile = join(dir, `${taskId}.json`);
   if (ticket !== undefined) writeFileSync(ticketFile, JSON.stringify(ticket));
   if (diff) gitRepo(dir, diff);
+  const branchLine = simple
+    ? ["BRANCH_NAME: ab12cd34/simple"]
+    : diff && !omitBranchName
+      ? ["BRANCH_NAME: ab12cd34/TASK-001"]
+      : [];
   const lines = [
-    "ROLE: quality-reviewer",
+    inlineMode
+      ? `ROLE: quality-reviewer (MODE: ${inlineMode})`
+      : "ROLE: quality-reviewer",
     `TASK_ID: ${taskId}`,
     ...(omitTicketFile ? [] : [`TICKET_FILE: ${ticketFile}`]),
     `WORKTREE_PATH: ${dir}`,
-    ...(diff && !omitBranchName ? ["BRANCH_NAME: ab12cd34/TASK-001"] : []),
+    ...branchLine,
     ...(mode ? [`MODE: ${mode}`] : []),
     ...extraLines,
   ];
@@ -198,6 +227,16 @@ describe("route-review-model", () => {
       expect(r.stdout).toBe("");
       cleanup();
     });
+
+    test("the feature review's own dispatch shape, where MODE: is inline, is left as dispatched", () => {
+      // The orchestrator writes the mode inside the ROLE line, not on one of its own, so
+      // a guard anchored to line start reads no mode at all and downgrades the pass it
+      // exists to protect.
+      const r = run({ ticket: ORDINARY, inlineMode: "feature-review" });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("");
+      cleanup();
+    });
   });
 
   describe("fails open, in the expensive direction", () => {
@@ -212,6 +251,19 @@ describe("route-review-model", () => {
       // With neither input there is nothing to tier from, and the reviewer reads a
       // missing REVIEW_TIER line as hard: stamping one here would invent a difficulty.
       const r = run({ ticket: ORDINARY, omitTicketFile: true });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("");
+      cleanup();
+    });
+
+    test("a ticket-less dispatch whose diff is empty is left as dispatched", () => {
+      // An empty diff is no signal, exactly as a missing one is: with no ticket beside
+      // it there is still nothing to tier from, and `normal` would be invented.
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        diff: { files: 0, lines: 0 },
+      });
       expect(r.status).toBe(0);
       expect(r.stdout).toBe("");
       cleanup();
@@ -396,6 +448,66 @@ describe("route-review-model", () => {
       });
       expect(r.updated).not.toHaveProperty("model");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      cleanup();
+    });
+
+    test("a SIMPLE review, which has no ticket, is tiered from its diff against the anchor", () => {
+      // The simple worktree forks from session-base/<short>, not from session/<short>:
+      // measured against the session branch the diff would carry every merged ticket.
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        diff: { files: 9, lines: 9, simpleMerged: true },
+      });
+      expect(r.updated).not.toHaveProperty("model");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      cleanup();
+    });
+
+    test("a small SIMPLE review is trivial and goes to sonnet", () => {
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        diff: { files: 1, lines: 2, simpleMerged: true },
+      });
+      expect(r.updated.model).toBe("sonnet");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);
+      cleanup();
+    });
+
+    test("a SIMPLE diff touching supabase/ is at least hard, with no ticket to say so", () => {
+      // isSchemaSensitive reads the ticket's files_to_modify, and a SIMPLE review has no
+      // ticket, so without the diff's own paths a one-file RLS change would tier trivial.
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        model: "sonnet",
+        diff: {
+          files: 1,
+          lines: 1,
+          paths: ["supabase/schemas/01_tables.sql"],
+          simpleMerged: true,
+        },
+      });
+      expect(r.updated).not.toHaveProperty("model");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      cleanup();
+    });
+
+    test("the same two-file SIMPLE diff without a supabase/ path stays trivial", () => {
+      const r = run({
+        omitTicketFile: true,
+        simple: true,
+        model: "sonnet",
+        diff: {
+          files: 1,
+          lines: 1,
+          paths: ["src/lib/x.tsx"],
+          simpleMerged: true,
+        },
+      });
+      expect(r.updated.model).toBe("sonnet");
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: trivial$/m);
       cleanup();
     });
 
