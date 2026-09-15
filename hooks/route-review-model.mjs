@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// PreToolUse(Agent): set the per-ticket review model from the ticket, by rewriting the
-// dispatch rather than asking the orchestrator to remember the rule.
+// PreToolUse(Agent): set the per-ticket review model from the ticket's difficulty tier:
+// the planner's scorecard, the real diff, the schema sensitivity, the stored tier, the
+// highest wins, by rewriting the dispatch rather than asking the orchestrator to
+// remember the rule.
 //
 // Two directions, and they are NOT symmetric:
 //
@@ -12,10 +14,18 @@
 // spending too much, never reviewing too weakly. Fail-open goes the same way: anything
 // unreadable leaves the dispatch as dispatched, which is usually opus.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { isQualityReviewer } from "./lib/teams.mjs";
+import { loadConfig, reviewTierModel } from "./lib/config.mjs";
+import {
+  TIERS,
+  diffStats,
+  maxTier,
+  tierFromDiff,
+  tierFromScorecard,
+} from "./lib/tier.mjs";
 
 // A miss in these has nothing downstream to catch it, so they are never downgraded.
 const WHOLE_FEATURE_MODE =
@@ -31,6 +41,15 @@ export function isSchemaSensitive(ticket) {
   return files.some((f) => /(^|\/)supabase\//.test(String(f)));
 }
 
+const TIER_LINE = /^REVIEW_TIER:.*$/m;
+
+function withTierLine(prompt, tier) {
+  const line = `REVIEW_TIER: ${tier}`;
+  return TIER_LINE.test(prompt)
+    ? prompt.replace(TIER_LINE, line)
+    : `${prompt}\n${line}`;
+}
+
 export function check(input, ctx) {
   const d = parseDispatch(input);
   if (!isQualityReviewer(d.subagentType)) return;
@@ -39,41 +58,61 @@ export function check(input, ctx) {
   if (WHOLE_FEATURE_MODE.test(prompt))
     return ctx.allow("whole-feature or migration review: never downgraded");
 
-  if (!d.ticketFile)
-    return ctx.allow("no TICKET_FILE in the dispatch: left as dispatched");
-
-  let ticket;
-  try {
-    ticket = JSON.parse(readFileSync(d.ticketFile, "utf8"));
-  } catch {
-    return ctx.allow(
-      `ticket unreadable (${d.ticketFile}): left as dispatched, which keeps the stronger model`,
-    );
-  }
-
-  const sensitive = isSchemaSensitive(ticket);
-  if (sensitive === null)
-    return ctx.allow("ticket is not an object: left as dispatched");
-
-  const asked = input?.tool_input?.model;
-  if (sensitive) {
-    if (asked === undefined)
+  // Inputs, each optional: a missing one is logged as such and simply does not lower the tier.
+  let ticket = null;
+  if (d.ticketFile) {
+    try {
+      ticket = JSON.parse(readFileSync(d.ticketFile, "utf8"));
+    } catch {
       return ctx.allow(
-        `${d.taskId || "?"} schema-sensitive, already on the default`,
+        `ticket unreadable (${d.ticketFile}): left as dispatched, which keeps the stronger model`,
       );
-    return ctx.rewriteInput(
-      { model: undefined },
-      { log: `${d.taskId || "?"} schema-sensitive: dropped model=${asked}` },
-    );
+    }
+    if (!ticket || typeof ticket !== "object")
+      return ctx.allow("ticket is not an object: left as dispatched");
   }
-  if (asked === "sonnet")
-    return ctx.allow(`${d.taskId || "?"} ordinary, already on sonnet`);
-  return ctx.rewriteInput(
-    { model: "sonnet" },
-    {
-      log: `${d.taskId || "?"} ordinary ticket: model=${asked ?? "(absent)"} -> sonnet`,
-    },
-  );
+
+  const fromScorecard = tierFromScorecard(ticket?.scorecard);
+  let stats = null;
+  const m = d.branchName.match(/^([^/]+)\//);
+  if (d.worktreePath && m) stats = diffStats(d.worktreePath, `session/${m[1]}`);
+  // An empty committed diff is not a signal: nothing has landed since the session branch,
+  // so it must never read as "small change" and pull the tier down toward trivial.
+  const fromDiff = stats && stats.files > 0 ? tierFromDiff(stats) : null;
+  const diffLabel =
+    stats === null ? "none" : stats.files === 0 ? "empty" : fromDiff;
+  const schema = ticket ? isSchemaSensitive(ticket) === true : false;
+  const stored = ticket && TIERS.includes(ticket.tier) ? ticket.tier : null;
+  const tier = maxTier(fromScorecard, fromDiff, schema ? "hard" : null, stored);
+
+  if (ticket && ticket.tier !== tier) {
+    try {
+      writeFileSync(
+        d.ticketFile,
+        JSON.stringify({ ...ticket, tier }, null, 2) + "\n",
+      );
+    } catch {
+      // the ticket is a convenience copy of the decision; the dispatch below is the decision
+    }
+  }
+
+  let model;
+  try {
+    model = reviewTierModel(loadConfig(), tier);
+  } catch {
+    model = "default"; // unreadable config: the expensive direction
+  }
+  const asked = input?.tool_input?.model;
+  const detail =
+    `${d.taskId || "?"} tier=${tier} (scorecard=${fromScorecard ?? "none"} diff=${diffLabel} ` +
+    `schema=${schema ? "yes" : "no"} stored=${stored ?? "none"}) model=${model}`;
+  const patch = { prompt: withTierLine(prompt, tier) };
+  if (model === "default") {
+    if (asked !== undefined) patch.model = undefined;
+  } else if (asked !== model) {
+    patch.model = model;
+  }
+  return ctx.rewriteInput(patch, { log: detail });
 }
 
 runStandalone(import.meta.url, "route-review-model", check);
