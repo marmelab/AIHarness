@@ -51,10 +51,17 @@ if (!sessionId) {
 
 const projectDir = join(CONFIG_DIR, "projects", slug);
 const mainTranscript = join(projectDir, `${sessionId}.jsonl`);
-if (!existsSync(mainTranscript)) {
-  console.error(`no transcript at ${mainTranscript}`);
-  process.exit(1);
-}
+// A missing main transcript is not a missing session. Claude Code prunes transcripts
+// after cleanupPeriodDays (30 by default), and the main thread is one file while the
+// subagent directory can outlive it — exactly the shape an older benchmark run has when
+// it is re-costed. The agent totals are what the report exists for, so name the gap and
+// carry on instead of refusing the whole run.
+const hasMain = existsSync(mainTranscript);
+if (!hasMain)
+  console.error(
+    `no main transcript at ${mainTranscript}\n` +
+      "(reporting subagents only: the main thread's own cost is missing from the totals)",
+  );
 
 const read = (file) => {
   try {

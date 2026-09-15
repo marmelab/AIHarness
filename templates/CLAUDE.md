@@ -22,6 +22,17 @@ a request through the orchestrator; otherwise the main thread implements it itse
 Gate levels: `gate=none|migration|plan|waves`, default `plan` (pauses after planning for
 ticket review, and before applying a database migration).
 
+Request levels: `#harness bugfix …` / `#harness small …` / `#harness feature …` (also
+`level=<x>`). Pass it on as a `LEVEL:` line in the dispatch, verbatim. `bugfix` and `small`
+take the SIMPLE route (one developer, no planner, no wave); `feature` takes the full
+pipeline. Omit it and the orchestrator classifies for itself, as before. The level exists
+because the person asking knows the size of their own request, and guessing it wrong is
+what sends a one-field change through the whole pipeline.
+
+To have code reviewed WITHOUT changing it: `/harness-review [branch|PR|path|range]`. One
+quality-reviewer pass (code quality, over-engineering, security) reported back — no
+worktree, no branch, no commit.
+
 **Scope the request before dispatching.** On every `#harness` request, run
 `Skill({skill: "grill-me"})` in the main thread first. It decides for itself whether
 questions are needed and exits in one line when the scope is already precise, so invoke it

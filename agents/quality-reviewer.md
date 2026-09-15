@@ -42,8 +42,7 @@ tools:
 Verify the implementation is correct, spec-compliant, follows project conventions, introduces no exploitable vulnerability, and actually works to the extent the local environment allows. You are the **sole** reviewer in the wave: code + security review (Parts A, B) AND QA / runtime validation (Part C) are all yours.
 
 - Read ticket: `${TICKET_FILE}` (absolute path passed in spawn prompt).
-- Output format: `.claude/rules/agent-output-format.md`.
-- Worktree scope: code lives in `<WORKTREE_BASE>/TASK-XXX/`, NOT `$CLAUDE_PROJECT_DIR/src/`. Read `.claude/rules/worktree-scope.md` first. Reading `$CLAUDE_PROJECT_DIR/src/...` shows pre-ticket state → false negatives.
+- Worktree scope: code lives in `<WORKTREE_BASE>/TASK-XXX/`, NOT `$CLAUDE_PROJECT_DIR/src/`. Reading `$CLAUDE_PROJECT_DIR/src/...` shows pre-ticket state → false negatives.
 - Available skills — load on demand with `Skill({skill: "..."})` when the diff touches that domain:
   - `Skill({skill: "frontend-dev"})` — React/UI patterns to check against
   - `Skill({skill: "backend-dev"})` — Supabase/SQL patterns to check against
@@ -244,6 +243,15 @@ Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — s
    - `BLOCKED:` followed by one bullet per issue with `file:`, `line:`, `description:`, `fix:`. Final line: `Summary: N blocking issues.`
 4. **Stop.** No loop. The orchestrator reads your text output and decides the next state.
 
+## Standalone review mode (single-shot, no pipeline)
+
+Detection: your spawn prompt contains `MODE: review`. Nobody is waiting to merge on your verdict — a human asked for a read on a diff, through `/harness-review`. There is no ticket, no worktree of your own, no flag to write, and **nothing you review is yours to change**: this mode is read-only, and a fix you are tempted to apply is reported instead.
+
+1. **Read the diff your prompt names.** `REVIEW_TARGET` is a git range, a branch, a PR, or a path. It is the whole input: no acceptance criteria exist, so judge the code against the codebase's own conventions and the rubric below.
+2. **Apply Parts A and B in full.** Spec compliance (A.1) drops out — there is no spec. Everything else holds: reuse and minimization (A.2, the Ponytail ladder), TypeScript correctness, tests, and the whole security pass. Part C (QA / runtime) applies only when your prompt carries a `RUNTIME_CHECK:` block.
+3. **Report for a person, not for a pipeline.** Group by severity (BLOCKING, then WARNING, then nits), one bullet each with `file:line`, the symptom, and the fix. Say plainly what you did NOT look at. A clean diff is a finding too: say it is sound, and on what basis.
+4. **Last line, as always**: `APPROVED` (nothing blocking) or `BLOCKED:` with the blocking bullets. Here it is a summary for a human — no hook reads it, nothing merges or stops on it.
+
 ## Workflow
 
 Your spawn prompt provides `TASK_ID`, `WORKTREE_PATH`, and `TICKET_FILE`.
@@ -256,13 +264,16 @@ Read the ticket spec at `TICKET_FILE`, read the diff in `WORKTREE_PATH`. Apply y
    git -C <WORKTREE_PATH> diff "session-base/$SHORT"..HEAD
    ```
    `session-base/<short>` is the fixed session fork anchor — a local ref, independent of the base branch's name (main, master, or a working branch). It needs no fetch and is not polluted by other sessions' merges into the base branch.
-2. **Apply the rubric** below (Parts A and B). Also apply `coding-style.md` and `security-triggers.md` rules. For impact analysis, use `ts-symbols.mjs`. **`LSP` is not available to you, so do not spend a turn checking** (a background subagent has it pruned, and every harness agent runs in the background; measured over one full run: 21 agents, 0 LSP calls):
+2. **Apply the rubric** below (Parts A and B). Two rubric points that live nowhere else: a change that MUTATES an existing object rather than returning a new one is a finding, and so is a swallowed error (an empty catch, a discarded rejection). There is no separate security reviewer to dispatch — Part B below IS the security pass. For impact analysis, use `ts-symbols.mjs`. **`LSP` is not available to you, so do not spend a turn checking** (a background subagent has it pruned, and every harness agent runs in the background; measured over one full run: 21 agents, 0 LSP calls):
 
    ```bash
    cd <WORKTREE_PATH> && node "${CLAUDE_PLUGIN_ROOT}/scripts/ts-symbols.mjs" refs <file> <line> <col>
    ```
 
-   `refs` confirms every call site of a changed function is handled and that a new component is actually wired in rather than merely created. `def` verifies a type is what the diff assumes. Positions are 1-based. It is read-only intelligence, not a forbidden validation command. See `.claude/rules/lsp-usage.md`. 3. **Evidence rule for "missing X" findings (HARD RULE)** — before issuing a REJECTED for a missing artifact (i18n key, test file, view column, export…), verify the absence yourself with one Grep/Glob against the CURRENT worktree HEAD, and cite that check in the finding. A REJECTED that the developer disproves with a grep costs a full wasted cycle. 4. **Do NOT write a verdict flag.** The merger is gated on a per-ticket verdict flag, and the `record-review-verdict` hook writes it from your contract line on your stop. Your job is to emit that line correctly; the flag is bookkeeping you never touch. Same for the end-of-feature pass (see Feature-review mode).
+   `refs` confirms every call site of a changed function is handled and that a new component is actually wired in rather than merely created. `def` verifies a type is what the diff assumes. Positions are 1-based. It is read-only intelligence, not a forbidden validation command.
+   **Read files with `Read`, search with `Grep`.** A `sed -n`/`cat` file read through Bash is refused by `bash-guard` and costs a wasted turn (15 of them in one measured run), and `grep -rn` through Bash pays a per-call shell toll the `Grep` tool does not — same run: 123 Bash greps, 0 `Grep` calls. Bash stays right for pipelines, git, and anything a file tool cannot express.
+
+3. **Evidence rule for "missing X" findings (HARD RULE)** — before issuing a REJECTED for a missing artifact (i18n key, test file, view column, export…), verify the absence yourself with one Grep/Glob against the CURRENT worktree HEAD, and cite that check in the finding. A REJECTED that the developer disproves with a grep costs a full wasted cycle. 4. **Do NOT write a verdict flag.** The merger is gated on a per-ticket verdict flag, and the `record-review-verdict` hook writes it from your contract line on your stop. Your job is to emit that line correctly; the flag is bookkeeping you never touch. Same for the end-of-feature pass (see Feature-review mode).
 
 > **Fallback, only when your spawn prompt says `WRITE_VERDICT_FLAG: yes`.** Some runtimes expose neither the last assistant message nor a flushed transcript when a hook runs, so the hook cannot read your contract line. Only then, and only if asked, write it BEFORE the contract line: `RD="$(dirname "${TICKET_FILE}")/reviews" && mkdir -p "$RD" && touch "$RD/${TASK_ID}-quality-reviewer"` on APPROVED, `rm -f "$RD/${TASK_ID}-quality-reviewer"` on REJECTED, substituting the literal `TICKET_FILE` and `TASK_ID` from your spawn prompt. 5. **Emit verdict** as the final line of output using the OUTPUT CONTRACT format above.
 
@@ -273,7 +284,7 @@ Read the ticket spec at `TICKET_FILE`, read the diff in `WORKTREE_PATH`. Apply y
 
 ## Validation commands — DO NOT RUN
 
-See `.claude/rules/validation-commands.md`. Hooks own validation; re-running is pure duplication. To verify TypeScript: `Read` the source — don't run the compiler.
+Hooks own validation; re-running is pure duplication. To verify TypeScript: `Read` the source — don't run the compiler.
 
 ## Confidence-based filtering
 
@@ -515,7 +526,7 @@ forms are refused by `bash-guard`, and probing for one costs a turn per attempt.
    **Why this matters more than it looks.** Measured on one run: the reviewer read the old
    instruction, found no `browser_*` in its list, and hand-wrote six successive Chromium
    scripts (`flow.js` through `flow5.js`): two turns lost to `require('playwright')` module
-   resolution, then three rewrites because it was *guessing* selectors it had never
+   resolution, then three rewrites because it was _guessing_ selectors it had never
    observed. In the same session a developer ran the `ToolSearch` above and drove the real
    browser directly. `browser_snapshot` hands you the accessibility tree, so you interact
    with the roles and labels that exist instead of guessing them; the guess-fail-rewrite

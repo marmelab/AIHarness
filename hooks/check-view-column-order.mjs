@@ -141,9 +141,6 @@ for (const [view, nowCols] of newViews) {
 if (!problems.length) process.exit(0);
 
 const ctx = createHookContext(input, "check-view-column-order");
-ctx.log(
-  `FLAG ${filePath} ${problems.map((p) => `${p.view}(+${p.added.join(",")})`).join(" ")}`,
-);
 ctx.flag(
   problems
     .map(

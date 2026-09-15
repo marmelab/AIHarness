@@ -39,7 +39,8 @@ if (isPhantomStop(input)) process.exit(0);
 // orchestrator's summary able to forge a developer milestone.
 const meta = readAgentMeta(input);
 const identity =
-  [ctx.agentName, ctx.agentType, meta ? meta.agentType : ""].find(Boolean) || "";
+  [ctx.agentName, ctx.agentType, meta ? meta.agentType : ""].find(Boolean) ||
+  "";
 if (!identity || !isDeveloper(identity)) process.exit(0);
 
 // The ticket: the suffixed agent identity (`developer-TASK-003`), else the spawn meta's
@@ -64,7 +65,9 @@ if (!contract) {
   // No contract line yet (transcript not flushed, or the agent stopped mid-turn). The
   // orchestrator still learns the result from the dispatch's return value, so a missing
   // feed line costs nothing and must not be guessed at.
-  ctx.log(`role=developer task=${task || "simple"} contract=UNPARSEABLE, nothing logged`);
+  ctx.log(
+    `role=developer task=${task || "simple"} contract=UNPARSEABLE, nothing logged`,
+  );
   process.exit(0);
 }
 

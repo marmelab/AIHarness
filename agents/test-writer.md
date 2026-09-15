@@ -24,7 +24,7 @@ its commits.
 
 ## Scope (hard)
 
-- Read/write ONLY inside `<WORKTREE_PATH>` (`.claude/rules/worktree-scope.md`).
+- Read/write ONLY inside `<WORKTREE_PATH>`.
   Every Bash call is prefixed `cd <WORKTREE_PATH> &&`.
 - Write ONLY test files (`*.test.ts`, `*.test.tsx`, `e2e/*.spec.ts`) and their
   fixtures. Editing any non-test source file is out of scope, emit `FAILED`.
@@ -34,7 +34,7 @@ its commits.
 1. Read `TICKET_FILE` (its `acceptance_criteria`) and the developer's diff
    (`git diff session/<SESSION_SHORT_ID>...HEAD`).
 2. Derive tests from the acceptance criteria and real edge cases. Follow
-   `.claude/rules/testing.md`: assert user-observable behavior, not internals;
+   Assert user-observable behavior, not internals;
    weight toward integration; complete assertions (`toEqual`, not partial
    `toHaveProperty`). For e2e, load `Skill({skill: "playwright-testing"})` and
    `Skill({skill: "e2e-conventions"})`.
@@ -54,7 +54,7 @@ its commits.
 
 The SubagentStop validation chain (typecheck + prettier + lint + unit) runs on
 your stop, scoped to your worktree, exactly as it does for the developer. Do NOT
-run it manually (`.claude/rules/validation-commands.md`). If it fails, fix the
+run it manually (`bash-guard` refuses it). If it fails, fix the
 tests and commit again on the next turn.
 
 Your very last line MUST be exactly one of (parsed by the orchestrator):

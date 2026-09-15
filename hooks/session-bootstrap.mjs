@@ -104,9 +104,8 @@ try {
 // live in the USER's settings, where no project change can reach it.
 let lspWarning = "";
 try {
-  const { lspConflicts, conflictReport } = await import(
-    "./lib/lsp-conflict.mjs"
-  );
+  const { lspConflicts, conflictReport } =
+    await import("./lib/lsp-conflict.mjs");
   const manifest = JSON.parse(
     readFileSync(
       new URL("../.claude-plugin/plugin.json", import.meta.url),

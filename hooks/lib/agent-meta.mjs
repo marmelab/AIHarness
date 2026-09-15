@@ -504,3 +504,35 @@ export function agentTranscriptPath(payload) {
   if (!tp || !existsSync(tp) || isMainSessionTranscript(payload)) return "";
   return tp;
 }
+
+/**
+ * When the runtime most recently SPAWNED an agent for this session, in epoch ms, or 0
+ * when it has spawned none it could name.
+ *
+ * A PreToolUse guard cannot see the runtime refuse the call it is about to allow, so a
+ * marker it writes describes an attempt, not an agent. This answers the question that
+ * tells the two apart afterwards: did anything actually start? The runtime writes
+ * `agent-<id>.meta.json` at spawn, so the newest one is the answer, and a marker older
+ * than every meta on disk belonged to a dispatch nothing came of.
+ *
+ * @param {Record<string, unknown>} payload  Any hook payload carrying a transcript path.
+ * @returns {number} epoch ms, 0 when unknown
+ */
+export function newestAgentSpawnMs(payload) {
+  const dir = subagentsDir(payload);
+  if (!dir) return 0;
+  let newest = 0;
+  try {
+    for (const f of readdirSync(dir)) {
+      if (!/^agent-.+\.meta\.json$/.test(f)) continue;
+      try {
+        newest = Math.max(newest, statSync(join(dir, f)).mtimeMs);
+      } catch {
+        // a file that vanished between listing and stat says nothing either way
+      }
+    }
+  } catch {
+    return 0;
+  }
+  return newest;
+}

@@ -12,38 +12,12 @@
 // instead of deleting it). STATE RECOVERY in the orchestrator does the precise
 // re-classification; this only answers "worth resuming, and roughly where".
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { harnessFile, REPO } from "./paths.mjs";
+import { allTicketsMerged, readTickets } from "./tickets.mjs";
 import { exec } from "./process.mjs";
 import { getBaseBranch, git } from "./git.mjs";
 import { sessionBranch } from "./topology.mjs";
-
-const TICKET_RE = /^TASK-\d+\.json$/;
-
-// Tickets live in the session dir itself or a `tickets/` subdir - try both, same
-// as render-status.mjs. Unreadable JSON counts as a ticket (status "unreadable"),
-// so a corrupt file never silently downgrades an in-flight session to "done".
-function readTickets(ctx) {
-  for (const dir of [ctx.ticketsDir, ctx.sessionDir]) {
-    if (!existsSync(dir)) continue;
-    let files;
-    try {
-      files = readdirSync(dir).filter((f) => TICKET_RE.test(f));
-    } catch {
-      continue;
-    }
-    if (!files.length) continue;
-    return files.map((f) => {
-      try {
-        return JSON.parse(readFileSync(join(dir, f), "utf8"));
-      } catch {
-        return { status: "unreadable" };
-      }
-    });
-  }
-  return [];
-}
 
 const verifyRef = (ref) =>
   git(["rev-parse", "--verify", "--quiet", ref]).status === 0;
@@ -87,7 +61,7 @@ export function detectInflight(ctx, { checkDeploy = true } = {}) {
 
     const tickets = readTickets(ctx);
     const hasTickets = tickets.length > 0;
-    const allMerged = hasTickets && tickets.every((t) => t.status === "merged");
+    const allMerged = allTicketsMerged(tickets);
     const sessRef = sessionBranch(ctx); // session/<short>
     const branchExists = verifyRef(`refs/heads/${sessRef}`);
 

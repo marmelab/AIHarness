@@ -7,6 +7,12 @@
 //
 // Non-blocking means ctx.flag, not exit 1: exit 1 reaches the user, not the agent. See
 // lib/io.mjs.
+//
+// It judges WHAT THE TOOL JUST WROTE, never the file around it. Reading the whole file
+// made every edit to a legacy module report that module's existing `any`s as if the agent
+// had just introduced them, so the flag said nothing about the change and the agent
+// learned to ignore it. A pre-existing shortcut is a matter for review, not for the hook
+// that watches a write.
 
 import { readFileSync } from "node:fs";
 import { createHookContext } from "./lib/context.mjs";
@@ -21,12 +27,18 @@ try {
 const filePath = input.tool_input?.file_path || "";
 if (!/\.(ts|tsx)$/.test(filePath)) process.exit(0);
 
-let content;
-try {
-  content = readFileSync(filePath, "utf8");
-} catch {
-  process.exit(0); // file gone / unreadable: nothing to flag
-}
+// Write carries `content`, Edit `new_string`, MultiEdit a list of edits. An input shape
+// with none of them says nothing about what was written, so there is nothing to judge.
+const ti = input.tool_input || {};
+const written = [
+  ti.content,
+  ti.new_string,
+  ...(Array.isArray(ti.edits) ? ti.edits.map((e) => e?.new_string) : []),
+]
+  .filter((s) => typeof s === "string")
+  .join("\n");
+if (!written.trim()) process.exit(0);
+const content = written;
 
 const hits = [];
 
@@ -50,8 +62,8 @@ for (const m of content.matchAll(SUPPRESS)) {
 if (hits.length === 0) process.exit(0);
 
 const ctx = createHookContext(input, "check-typescript-shortcuts");
-ctx.log(`FLAG ${filePath} ${hits.join(", ")}`);
 ctx.flag(
   `${filePath} contains a typing workaround (${[...new Set(hits)].join(", ")}).\n` +
     `Replace it with the correct type instead of bypassing the typecheck.`,
+  { log: `${filePath} ${hits.join(", ")}` },
 );
