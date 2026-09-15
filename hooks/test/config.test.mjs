@@ -18,6 +18,7 @@ import {
   roleModel,
   worktreeProvision,
   prePrSteps,
+  reviewTierModel,
 } from "../lib/config.mjs";
 
 // hooks/test/ -> repo root. Two levels, not three: in a consuming project the harness
@@ -153,5 +154,52 @@ describe("config loader", () => {
     expect(isDeployEnabled(cfg)).toBe(false);
     expect(roleModel(cfg, "quality-reviewer")).toBe("opus");
     expect(pipelineRoles(cfg)).toContain("test-writer");
+  });
+});
+
+describe("review.tiers", () => {
+  test("defaults keep route-review-model's behaviour: sonnet below hard, agent default above", () => {
+    const cfg = loadConfig(makeRepo(undefined));
+    expect(reviewTierModel(cfg, "trivial")).toBe("sonnet");
+    expect(reviewTierModel(cfg, "normal")).toBe("sonnet");
+    expect(reviewTierModel(cfg, "hard")).toBe("default");
+    expect(reviewTierModel(cfg, "critical")).toBe("default");
+  });
+  test("a project overrides one tier and keeps the others", () => {
+    const cfg = loadConfig(
+      makeRepo({
+        validation: { steps: [] },
+        roles: {},
+        review: { tiers: { normal: { model: "opus" } } },
+      }),
+    );
+    expect(reviewTierModel(cfg, "normal")).toBe("opus");
+    expect(reviewTierModel(cfg, "trivial")).toBe("sonnet");
+  });
+  test("an unknown tier name fails closed", () => {
+    expect(() =>
+      loadConfig(
+        makeRepo({
+          validation: { steps: [] },
+          roles: {},
+          review: { tiers: { extreme: { model: "opus" } } },
+        }),
+      ),
+    ).toThrow(/review\.tiers\.extreme/);
+  });
+  test("an empty model fails closed", () => {
+    expect(() =>
+      loadConfig(
+        makeRepo({
+          validation: { steps: [] },
+          roles: {},
+          review: { tiers: { hard: { model: "" } } },
+        }),
+      ),
+    ).toThrow(/review\.tiers\.hard/);
+  });
+  test("an unknown tier asked at runtime resolves to the default model", () => {
+    const cfg = loadConfig(makeRepo(undefined));
+    expect(reviewTierModel(cfg, "bogus")).toBe("default");
   });
 });

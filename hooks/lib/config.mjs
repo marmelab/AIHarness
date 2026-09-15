@@ -10,6 +10,10 @@ import { REPO } from "./paths.mjs";
 
 export const CONFIG_FILENAME = "harness.config.json";
 
+// Duplicated from lib/tier.mjs rather than imported: tier.mjs spawns git to compute the
+// diff, and the config loader must stay free of that dependency.
+const REVIEW_TIERS = ["trivial", "normal", "hard", "critical"];
+
 // Minimal safe baseline. The committed harness.config.json overrides these.
 // Optional capabilities (deploy, app) are ABSENT here on purpose: a capability
 // exists iff its block is present in the config.
@@ -24,6 +28,17 @@ const DEFAULTS = {
   worktree: { provision: "npm-link" },
   skills: { developerMenu: [] },
   roles: {},
+  // The reviewer model per difficulty tier (lib/tier.mjs). "default" removes the dispatch's
+  // `model` so the agent's own frontmatter applies, which is the expensive direction: a
+  // runtime that ignores `model` then reviews with the declared model, never a weaker one.
+  review: {
+    tiers: {
+      trivial: { model: "sonnet" },
+      normal: { model: "sonnet" },
+      hard: { model: "default" },
+      critical: { model: "default" },
+    },
+  },
   launcher: {
     sessionDirEnv: "CHAT_SESSION_DIR",
     turnSentinelDir: null,
@@ -89,6 +104,22 @@ function validate(cfg) {
   for (const [name, role] of Object.entries(cfg.roles)) {
     if (!isObject(role) || typeof role.model !== "string" || !role.model) {
       fail(`roles.${name} needs a non-empty string \`model\``);
+    }
+  }
+
+  if ("review" in cfg && cfg.review !== undefined) {
+    if (!isObject(cfg.review) || !isObject(cfg.review.tiers)) {
+      fail("`review.tiers` must be an object when `review` is present");
+    }
+    for (const [tier, spec] of Object.entries(cfg.review.tiers)) {
+      if (!REVIEW_TIERS.includes(tier)) {
+        fail(
+          `review.tiers.${tier}: unknown tier (expected one of ${REVIEW_TIERS.join(", ")})`,
+        );
+      }
+      if (!isObject(spec) || typeof spec.model !== "string" || !spec.model) {
+        fail(`review.tiers.${tier} needs a non-empty string \`model\``);
+      }
     }
   }
 
@@ -194,3 +225,6 @@ export const prePrSteps = (cfg) =>
   validationSteps(cfg).filter(
     (s) => (s.kind === "typecheck" || s.kind === "lint") && !s.changedScoped,
   );
+// The reviewer model for a tier; "default" when the tier is unknown, the expensive way.
+export const reviewTierModel = (cfg, tier) =>
+  cfg.review?.tiers?.[tier]?.model ?? "default";
