@@ -59,11 +59,11 @@ guard, so they can never drift:
   The forbidden set is DERIVED from `validation.steps`, not hardcoded here.
 - **The e2e category is split by what the command does, because the two halves need
   different audiences:**
-  - *Bringing the stack up or down* (`make …e2e`, `e2e-smoke.sh`) is refused to
+  - _Bringing the stack up or down_ (`make …e2e`, `e2e-smoke.sh`) is refused to
     EVERY caller, a main session included. It destroys state a human may be using
     (`rm -rf` on the e2e database) and it does not terminate (`make start-e2e`
     backgrounds a dev server that holds the pipe open). Never relax this by audience.
-  - *Running the suite* (`npx playwright test`) is refused to every SUBAGENT, the
+  - _Running the suite_ (`npx playwright test`) is refused to every SUBAGENT, the
     orchestrator included, but allowed to a main session acting on a human's direct
     request, against a stack the human has already started. The gate keys on "any
     identified caller", not on the `config.roles` roster, so it needs no roster to be

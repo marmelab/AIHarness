@@ -9,7 +9,7 @@
 // branch. The agent was not leaving anything: it had not finished.
 //
 // What DOES mean "finished" is the thing every harness agent is required to end on: its
-// output-contract line (rules/agent-output-format.md). A stop whose last assistant
+// output-contract line (the OUTPUT CONTRACT section of each agent file). A stop whose last assistant
 // message carries no contract line is a turn break, and the hooks that act on a
 // completed agent have no business acting on it.
 //
@@ -26,7 +26,7 @@
 import { bareRole } from "./teams.mjs";
 import { lastAssistantText } from "./verdict.mjs";
 
-// Per rules/agent-output-format.md, including the two skill-driven developer dispatches
+// Per each agent's OUTPUT CONTRACT, including the two skill-driven developer dispatches
 // (`writing-migrations` emits NO_MIGRATION_NEEDED; `resolving-rollback-conflicts` emits
 // the ordinary DONE:).
 const CONTRACTS = [
