@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { REPO, TMP_ROOT, sanitizePath } from "../lib/paths.mjs";
 
 const HOOK = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -60,6 +61,7 @@ const run = ({
   mode,
   taskId = "TASK-001",
   omitTicketFile,
+  omitBranchName,
   diff,
   extraLines = [],
   sessionId = "ab12cd34-0000-0000-0000-000000000000",
@@ -73,7 +75,7 @@ const run = ({
     `TASK_ID: ${taskId}`,
     ...(omitTicketFile ? [] : [`TICKET_FILE: ${ticketFile}`]),
     `WORKTREE_PATH: ${dir}`,
-    ...(diff ? ["BRANCH_NAME: ab12cd34/TASK-001"] : []),
+    ...(diff && !omitBranchName ? ["BRANCH_NAME: ab12cd34/TASK-001"] : []),
     ...(mode ? [`MODE: ${mode}`] : []),
     ...extraLines,
   ];
@@ -101,6 +103,7 @@ const run = ({
     stdout: r.stdout,
     stderr: r.stderr,
     ticketFile,
+    logFile: join(TMP_ROOT, sanitizePath(REPO), sessionId, "hooks.log"),
   };
 };
 
@@ -185,14 +188,16 @@ describe("route-review-model", () => {
   });
 
   describe("the whole-feature and migration passes are never downgraded", () => {
-    test.each(["feature-review", "feature-smoke", "migration-review"])(
-      "MODE: %s is left as dispatched",
-      (mode) => {
-        const r = run({ ticket: ORDINARY, mode });
-        expect(r.stdout).toBe("");
-        cleanup();
-      },
-    );
+    test.each([
+      "feature-review",
+      "feature-smoke",
+      "migration-review",
+      "review",
+    ])("MODE: %s is left as dispatched", (mode) => {
+      const r = run({ ticket: ORDINARY, mode });
+      expect(r.stdout).toBe("");
+      cleanup();
+    });
   });
 
   describe("fails open, in the expensive direction", () => {
@@ -203,10 +208,12 @@ describe("route-review-model", () => {
       cleanup();
     });
 
-    test("a dispatch with no TICKET_FILE and no session branch is stamped normal and routed to sonnet", () => {
+    test("a dispatch with no TICKET_FILE and no diff is left as dispatched", () => {
+      // With neither input there is nothing to tier from, and the reviewer reads a
+      // missing REVIEW_TIER line as hard: stamping one here would invent a difficulty.
       const r = run({ ticket: ORDINARY, omitTicketFile: true });
-      expect(r.updated.model).toBe("sonnet");
-      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: normal$/m);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("");
       cleanup();
     });
 
@@ -343,16 +350,41 @@ describe("route-review-model", () => {
     });
 
     test("no scorecard and no git: normal, sonnet, and the log says both were missing", () => {
-      const r = run({ ticket: ORDINARY });
+      const r = run({
+        ticket: ORDINARY,
+        sessionId: "ab12cd34-2222-2222-2222-222222222222",
+      });
       expect(r.updated.model).toBe("sonnet");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: normal$/m);
+      expect(readFileSync(r.logFile, "utf8")).toContain(
+        "scorecard=none diff=none",
+      );
       cleanup();
     });
 
-    test("an empty committed diff does not lower the tier", () => {
-      const r = run({ ticket: ORDINARY, diff: { files: 0, lines: 0 } });
+    test("the diff base comes from the session id, not from BRANCH_NAME", () => {
+      // The orchestrator's per-ticket reviewer dispatch carries no BRANCH_NAME, so a base
+      // read only from that line leaves the diff tiering inert in production.
+      const r = run({
+        ticket: ORDINARY,
+        diff: { files: 9, lines: 9 },
+        omitBranchName: true,
+      });
+      expect(r.updated.prompt).toMatch(/^REVIEW_TIER: hard$/m);
+      cleanup();
+    });
+
+    test("an empty committed diff does not lower the tier, and reads as empty in the log", () => {
+      const r = run({
+        ticket: ORDINARY,
+        diff: { files: 0, lines: 0 },
+        sessionId: "ab12cd34-1111-1111-1111-111111111111",
+      });
       expect(r.updated.model).toBe("sonnet");
       expect(r.updated.prompt).toMatch(/^REVIEW_TIER: normal$/m);
+      // "empty" and "none" are different facts: a diff that was read and was empty
+      // cannot be told from a diff that was never read once the log says "none".
+      expect(readFileSync(r.logFile, "utf8")).toContain("diff=empty");
       cleanup();
     });
 

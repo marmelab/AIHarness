@@ -18,6 +18,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { runStandalone } from "./lib/hook-chain.mjs";
 import { parseDispatch } from "./lib/dispatch-parse.mjs";
 import { isQualityReviewer } from "./lib/teams.mjs";
+import { sessionBranch } from "./lib/topology.mjs";
 import { loadConfig, reviewTierModel } from "./lib/config.mjs";
 import {
   TIERS,
@@ -27,9 +28,11 @@ import {
   tierFromScorecard,
 } from "./lib/tier.mjs";
 
-// A miss in these has nothing downstream to catch it, so they are never downgraded.
-const WHOLE_FEATURE_MODE =
-  /^MODE:\s*(feature-review|feature-smoke|migration-review)/m;
+// A miss in these has nothing downstream to catch it, so they are never downgraded, and
+// `review` (the standalone /harness-review pass) has no ticket and no worktree to tier
+// from at all.
+const UNTOUCHED_MODE =
+  /^MODE:\s*(feature-review|feature-smoke|migration-review|review)\s*$/m;
 
 /** Does this ticket's blast radius reach the database? */
 export function isSchemaSensitive(ticket) {
@@ -41,13 +44,13 @@ export function isSchemaSensitive(ticket) {
   return files.some((f) => /(^|\/)supabase\//.test(String(f)));
 }
 
-const TIER_LINE = /^REVIEW_TIER:.*$/m;
+// Global: every existing line goes, so a dispatch that already carries two of them cannot
+// leave a stale tier behind the fresh one for the reviewer to read first.
+const TIER_LINE = /^REVIEW_TIER:.*\n?/gm;
 
 function withTierLine(prompt, tier) {
-  const line = `REVIEW_TIER: ${tier}`;
-  return TIER_LINE.test(prompt)
-    ? prompt.replace(TIER_LINE, line)
-    : `${prompt}\n${line}`;
+  const stripped = prompt.replace(TIER_LINE, "").replace(/\s+$/, "");
+  return `${stripped}\nREVIEW_TIER: ${tier}`;
 }
 
 export function check(input, ctx) {
@@ -55,8 +58,10 @@ export function check(input, ctx) {
   if (!isQualityReviewer(d.subagentType)) return;
 
   const prompt = String(input?.tool_input?.prompt ?? "");
-  if (WHOLE_FEATURE_MODE.test(prompt))
-    return ctx.allow("whole-feature or migration review: never downgraded");
+  if (UNTOUCHED_MODE.test(prompt))
+    return ctx.allow(
+      "whole-feature, migration or standalone review: not routed",
+    );
 
   // Inputs, each optional: a missing one is logged as such and simply does not lower the tier.
   let ticket = null;
@@ -73,12 +78,26 @@ export function check(input, ctx) {
   }
 
   const fromScorecard = tierFromScorecard(ticket?.scorecard);
+  // The fork point is the session branch, which the session id names. The dispatch's own
+  // BRANCH_NAME is only a fallback: the orchestrator's per-ticket reviewer dispatch does
+  // not carry that line, and a base read from it alone would leave the diff unread.
+  let base = "";
+  try {
+    base = sessionBranch(ctx);
+  } catch {
+    const m = d.branchName.match(/^([^/]+)\//);
+    if (m) base = `session/${m[1]}`;
+  }
   let stats = null;
-  const m = d.branchName.match(/^([^/]+)\//);
-  if (d.worktreePath && m) stats = diffStats(d.worktreePath, `session/${m[1]}`);
-  // An empty committed diff is not a signal: nothing has landed since the session branch,
-  // so it must never read as "small change" and pull the tier down toward trivial.
-  const fromDiff = stats && stats.files > 0 ? tierFromDiff(stats) : null;
+  if (d.worktreePath && base) stats = diffStats(d.worktreePath, base);
+
+  // Neither input: there is no tier to compute, and a REVIEW_TIER line invented here would
+  // read as a real difficulty. A missing line is the reviewer's "hard", so leaving the
+  // dispatch alone keeps the stronger model, the same direction as every other fail-open.
+  if (!ticket && !stats)
+    return ctx.allow("no ticket and no diff: left as dispatched");
+
+  const fromDiff = stats ? tierFromDiff(stats) : null;
   const diffLabel =
     stats === null ? "none" : stats.files === 0 ? "empty" : fromDiff;
   const schema = ticket ? isSchemaSensitive(ticket) === true : false;
