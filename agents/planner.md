@@ -125,6 +125,11 @@ strong one.
 
 `risk_level` stays: `low` for `risk <= 3`, `high` for `risk >= 7`, else `medium`.
 
+**`tier`**: written into the ticket by the harness (`route-review-model`) when it routes
+the review, never by you. Do not set it and do not remove it: a tier you write is read back
+as a decision the harness made, and removing one drops the ratchet that stops a review from
+getting cheaper on a later pass.
+
 **`dependencies`**: ticket IDs that MUST be merged before this ticket starts. Tickets in the same wave (no dep between them) run in parallel in separate worktrees.
 
 **`parallel_safe`**: `false` only when the ticket modifies shared infrastructure that would race:
