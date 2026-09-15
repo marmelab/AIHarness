@@ -248,10 +248,10 @@ Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — s
    ```
    git -C <WORKTREE_PATH> log -p -1
    ```
-   For a multi-commit branch, diff against the session fork anchor `session-base/<short>` (a local ref, independent of the base branch's name — main, master, or a working branch), not `$CLAUDE_PROJECT_DIR`'s HEAD:
+   For a multi-commit branch, diff against the session branch `session/<short>` (the branch this worktree was cut from, and the same base `route-review-model` tiers against), not `$CLAUDE_PROJECT_DIR`'s HEAD:
    ```
    SHORT=$(git -C <WORKTREE_PATH> rev-parse --abbrev-ref HEAD | cut -d/ -f1)
-   git -C <WORKTREE_PATH> diff "session-base/$SHORT"..HEAD
+   git -C <WORKTREE_PATH> diff "session/$SHORT"...HEAD
    ```
 2. **Apply the rubric the diff earns.** The rows below fire when the diff touches the paths they name; a SIMPLE diff that touches none of them is an ordinary diff, and Parts A and B apply to it at the depth the `REVIEW_TIER:` line sets:
    - **A.6b (schema changes)**, when the diff touches `supabase/schemas/`: no `supabase/migrations/*.sql` in the diff (off-limits to SIMPLE); schema files in `supabase/schemas/*.sql` only; new column appended at the end of the `03_views.sql` SELECT, no ordinal shift.
