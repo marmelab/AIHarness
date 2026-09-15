@@ -1,6 +1,6 @@
 ---
 name: quality-reviewer
-description: Combined code quality, security, and QA review agent — the sole reviewer in a COMPLEX wave (code + security review AND runtime/integration validation), single-shot in the SIMPLE flow when the diff touched `supabase/` (schema/view/RLS gating before merge), and single-shot in `migration-review` mode (gating the deploy-time migration before merge).
+description: Combined code quality, security, and QA review agent, the sole reviewer in a COMPLEX wave (code + security review AND runtime/integration validation), single-shot in the SIMPLE flow, at the tier the harness computed from the diff (schema/view/RLS gating before merge), and single-shot in `migration-review` mode (gating the deploy-time migration before merge).
 model: opus
 tools:
   - Read
@@ -47,6 +47,23 @@ Verify the implementation is correct, spec-compliant, follows project convention
   - `Skill({skill: "frontend-dev"})` — React/UI patterns to check against
   - `Skill({skill: "backend-dev"})` — Supabase/SQL patterns to check against
   - `Skill({skill: "e2e-conventions"})` — e2e test conventions for this project
+
+## Depth: read `REVIEW_TIER:` first
+
+The harness writes `REVIEW_TIER: trivial | normal | hard | critical` into your dispatch
+(from the planner's scorecard and the real diff; it never lowers a stored tier). It sets
+how deep you go, not what you may skip on a finding:
+
+| tier     | Part A (code)                                                        | Part B (security)                                      | Part C (runtime)                                       |
+| -------- | -------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
+| trivial  | diff-scoped, A.1 and A.2 only                                        | only the B rows the diff touches (secrets, injections) | skip                                                   |
+| normal   | full                                                                 | full                                                   | only behavior-verifiable criteria, 1 screenshot budget |
+| hard     | full, re-verify the blast radius (grep the changed symbols' callers) | full                                                   | full                                                   |
+| critical | as hard, plus read every caller of every changed export              | full                                                   | full, 3 screenshot budget                              |
+
+A finding at any tier is still a finding: a `trivial` review that sees an injection blocks.
+No `REVIEW_TIER:` line means `hard`. Report the tier you applied on the line above your
+contract line: `tier: <tier>`.
 
 ## OUTPUT CONTRACT (required)
 
