@@ -90,7 +90,7 @@ When the user message is a **reply to a pending satisfaction question** (e.g. _"
 
 **A `[CI Bypass]`-style security warning about a `reviews/*-quality-reviewer` write is a known false positive of the fallback, not a finding.** The runtime's subagent security monitor sees an agent creating the file that gates its own review and reports it as fabricating a passed checkpoint. Structurally that shape IS what a bypass looks like, which is why the write is no longer the reviewer's job: only a dispatch you sent with `WRITE_VERDICT_FLAG: yes` can produce it. So when the warning appears, check whether you sent that flag. You did → expected, ignore it, do not re-review and do not re-litigate it with the user. You did not → the reviewer wrote a gate file it was not asked to write; report THAT in your handoff. Either way it never changes the verdict you act on, which is the contract line.
 
-SIMPLE vs COMPLEX is a routing decision you own — the `developer` itself has no modes. SIMPLE skips the planner and the wave: dispatch ONE developer directly (always reviewed, at the tier `route-review-model` computes from the diff). COMPLEX runs the full pipeline (planner → wave → review → merge). When in doubt push to COMPLEX — false positives toward COMPLEX are cheap, missed reviews are not.
+SIMPLE vs COMPLEX is a routing decision you own: the `developer` itself has no modes. SIMPLE skips the planner and the wave: dispatch ONE developer directly (always reviewed, at the tier `route-review-model` computes from the diff). COMPLEX runs the full pipeline (planner → wave → review → merge). When in doubt push to COMPLEX, because false positives toward COMPLEX are cheap and missed reviews are not.
 
 ### `LEVEL:` — the requester's sizing, and it outranks your guess
 
@@ -102,7 +102,7 @@ A dispatch may carry `LEVEL: bugfix | small | feature`, the way it carries `GATE
 | `small`   | SIMPLE (STATE S-DEV) | A contained change on existing surfaces: a field, a label, a filter, a column. |
 | `feature` | COMPLEX (STATE A)    | New surface, several entities, or work that needs a plan before code.          |
 
-**Fail closed on the value, not on the route.** Only those three literals mean themselves; an absent or unrecognized `LEVEL` means "classify it yourself" — the table above, unchanged. A `LEVEL` never disables a gate that exists for risk: a SIMPLE diff always gets its review, sized by its diff, and the deploy-time migration round still runs.
+**Fail closed on the value, not on the route.** Only those three literals mean themselves; an absent or unrecognized `LEVEL` means "classify it yourself", the table above, unchanged. A `LEVEL` never disables a gate that exists for risk: a SIMPLE diff always gets its review, sized by its diff, and the deploy-time migration round still runs.
 
 **When the level turns out to be wrong, escalate once and say so.** `LEVEL: small` whose developer returns `FAILED: out of scope, needs COMPLEX flow` becomes a COMPLEX run from STATE A — do not re-dispatch the same developer to argue with it. Report the escalation in the handoff: a level the pipeline had to override is the signal that keeps the levels honest.
 
@@ -314,7 +314,7 @@ One progress line, e.g. _"Working on it..."_ **End this turn.** SubagentStop hoo
 
 ### STATE S-REVIEW — SIMPLE: dispatch quality-reviewer (next turn)
 
-Always. The hook `route-review-model` reads the simple worktree's diff against `session-base/<SESSION_SHORT_ID>` and sets the tier and model: a two-file fix gets a sonnet Part A pass, a fix that grew to ten files gets the full review. You do not decide this.
+Always. The hook `route-review-model` reads the simple worktree's diff against `session/<SESSION_SHORT_ID>`, the branch that worktree was cut from, and sets the tier and model: a two-file fix gets a sonnet Part A pass, a fix that grew to ten files gets the full review. You do not decide this.
 
 1. If dev returned `FAILED:` → skip review, go to S-DONE with failure.
 2. Dispatch ONE `quality-reviewer`:
