@@ -22,6 +22,9 @@ a request through the orchestrator; otherwise the main thread implements it itse
 Gate levels: `gate=none|migration|plan|waves`, default `plan` (pauses after planning for
 ticket review, and before applying a database migration).
 
+Reviews are tiered (`trivial`/`normal`/`hard`/`critical`) from the plan and the diff; set
+the reviewer model per tier in `harness.config.json`'s `review.tiers.<tier>.model`.
+
 Request levels: `#harness bugfix …` / `#harness small …` / `#harness feature …` (also
 `level=<x>`). Pass it on as a `LEVEL:` line in the dispatch, verbatim. `bugfix` and `small`
 take the SIMPLE route (one developer, no planner, no wave); `feature` takes the full

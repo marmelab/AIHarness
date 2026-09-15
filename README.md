@@ -24,6 +24,8 @@ Around that, hooks:
   reject the orchestrator's stop if it tries to finish while that suite is red
 - block the commands that would make the pipeline look healthy while being broken:
   merging outside the merger, launching arbitrary containers, opening a headed browser
+- size each review by a difficulty tier computed from the plan and the diff, so a
+  two-file fix pays a sonnet pass and a schema change pays opus
 
 A test suite covers those hooks, and CI runs it on every push. That coverage is the
 product: an untested guard fails silently, and one of them had been inert for months
@@ -64,6 +66,14 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
     "developer": { "model": "sonnet", "pipeline": true },
     "quality-reviewer": { "model": "opus", "pipeline": true },
     "merger": { "model": "haiku", "pipeline": true }
+  },
+  "review": {
+    "tiers": {
+      "trivial": { "model": "sonnet" },
+      "normal": { "model": "sonnet" },
+      "hard": { "model": "default" },
+      "critical": { "model": "default" }
+    }
   }
 }
 ```
@@ -99,6 +109,7 @@ present).
 | `roles.<role>.debounce`        | whether a duplicate dispatch of the role is refused                                                                                                                                                                                                                                |
 | `roles.<role>.validate`        | whether the validation chain runs on the role's stop                                                                                                                                                                                                                               |
 | `roles` (the key names)        | must cover every `SubagentStop` matcher; `check-config-sync` fails otherwise                                                                                                                                                                                                       |
+| `review.tiers.<tier>.model`    | the reviewer model per difficulty tier (`trivial`, `normal`, `hard`, `critical`); `"default"` removes the dispatch's `model` so the agent's own frontmatter applies                                                                                                                |
 | `layout.src` / `.e2e` / `.adr` | where the harness looks for source, specs and ADRs                                                                                                                                                                                                                                 |
 | `worktree.provision`           | how a task worktree gets its dependencies (default `npm-link`)                                                                                                                                                                                                                     |
 | `launcher.*`                   | four extension points for a managed launcher; each consuming hook is inert when its key is unset. See [rules/launcher-interface.md](rules/launcher-interface.md)                                                                                                                   |

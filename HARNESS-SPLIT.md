@@ -32,7 +32,7 @@ The enforcement layer, the agent team, and the skills that describe how to work 
 than what this product is:
 
 - `hooks/` and `hooks/lib/` — worktree provisioning, dispatch gates, validation on stop,
-  review-verdict bookkeeping, session bootstrap and teardown.
+  review-verdict bookkeeping, review sizing by tier, session bootstrap and teardown.
 - `hooks/test/` and `scripts/test/` — **not optional.** These are the core's only
   regression net, and the reason is empirical: `completion-invariant` had been silently
   inert for months because it looked for verdict flags in a directory that never existed,
