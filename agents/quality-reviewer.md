@@ -242,7 +242,7 @@ Files to review are listed in the spawn prompt. Read them in
 
 ## SIMPLE mode (single-shot, no team)
 
-Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — single-shot, no team)`. No `COUNTERPART`, no `TEAM_LEAD`, no `TASK_ID`. A `developer` running the SIMPLE flow has already committed on the `<short>/simple` worktree; the orchestrator dispatches you only because the diff touched `supabase/` and the SIMPLE flow has no other reviewer. Act immediately — there is no peer to wait for.
+Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — single-shot, no team)`. No `COUNTERPART`, no `TEAM_LEAD`, no `TASK_ID`. A `developer` running the SIMPLE flow has already committed on the `<short>/simple` worktree; the orchestrator dispatches you for EVERY SIMPLE change, because the SIMPLE flow has no other reviewer. How deep you go is not its decision either: the harness stamps a `REVIEW_TIER:` line from the same diff you are about to read (see the Depth section). Act immediately, there is no peer to wait for.
 
 1. **Read the worktree diff** — the developer typically produced a single commit:
    ```
@@ -253,13 +253,13 @@ Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — s
    SHORT=$(git -C <WORKTREE_PATH> rev-parse --abbrev-ref HEAD | cut -d/ -f1)
    git -C <WORKTREE_PATH> diff "session-base/$SHORT"..HEAD
    ```
-2. **Apply the scope-relevant rubric only** — SIMPLE diffs are small and schema-focused:
-   - **A.6b (schema changes)** — no `supabase/migrations/*.sql` in the diff (off-limits to SIMPLE); schema files in `supabase/schemas/*.sql` only; new column appended at the end of the `03_views.sql` SELECT, no ordinal shift.
-   - **B.1 (RLS)** — RLS enabled, policies cover required ops, no `USING (true)`.
+2. **Apply the rubric the diff earns.** The rows below fire when the diff touches the paths they name; a SIMPLE diff that touches none of them is an ordinary diff, and Parts A and B apply to it at the depth the `REVIEW_TIER:` line sets:
+   - **A.6b (schema changes)**, when the diff touches `supabase/schemas/` — no `supabase/migrations/*.sql` in the diff (off-limits to SIMPLE); schema files in `supabase/schemas/*.sql` only; new column appended at the end of the `03_views.sql` SELECT, no ordinal shift.
+   - **B.1 (RLS)**, when the diff touches a policy — RLS enabled, policies cover required ops, no `USING (true)`.
    - **B.3 (injection)** — no string-concatenated SQL, no `||` of user input.
    - **A.6 (backend patterns)** — input validation, no unbounded queries.
    - **B.2 (secrets)** — no service_role key, no hardcoded tokens.
-     Skip Parts A.1–A.5 (spec compliance, TypeScript, React patterns) and A.7 (tests) — hooks cover them and SIMPLE has no ticket spec.
+     A.1 (spec compliance) always drops out: SIMPLE has no ticket spec, so judge the change against the request in the developer's dispatch and against the codebase's own conventions.
 3. **Return text only — no SendMessage**:
    - `APPROVED` — zero blocking issues. Exactly that one word on its own line.
    - `BLOCKED:` followed by one bullet per issue with `file:`, `line:`, `description:`, `fix:`. Final line: `Summary: N blocking issues.`
