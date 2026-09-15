@@ -86,6 +86,7 @@ Rules:
   "description": "What needs to be done and why",
   "type": "feature|fix|config",
   "risk_level": "low|medium|high",
+  "scorecard": { "risk": 3, "coupling": 2, "confidence": 8, "testability": 2 },
   "acceptance_criteria": ["specific, testable", "..."],
   "non_functional_requirements": {
     "performance": "e.g. list loads in <200ms",
@@ -107,6 +108,22 @@ Rules:
 ```
 
 ### Field semantics (critical for orchestrator and developer)
+
+**`scorecard`**: four integers, 1 to 10, that size the REVIEW of this ticket (the harness
+derives a tier from them and from the real diff; the tier only ever escalates). Score
+honestly; an optimistic scorecard buys a weaker review of exactly the ticket that needed a
+strong one.
+
+- `risk`: what breaks if this is wrong. 1 = a label; 5 = one screen misbehaves; 8 = data
+  written wrong or a permission bypass; 10 = money, deletion, auth.
+- `coupling`: how many other places depend on what changes. 1 = leaf component; 5 = a
+  shared type or view; 8 = a schema column or a function every screen calls.
+- `confidence`: how sure you are the plan is right. 10 = the code was read and the change
+  is obvious; 5 = one open question; 3 = the approach itself is a guess.
+- `testability`: how hard it is to PROVE, not to test. 1 = a unit test; 5 = an e2e flow;
+  8 = needs a human or production data to verify.
+
+`risk_level` stays: `low` for `risk <= 3`, `high` for `risk >= 7`, else `medium`.
 
 **`dependencies`**: ticket IDs that MUST be merged before this ticket starts. Tickets in the same wave (no dep between them) run in parallel in separate worktrees.
 
