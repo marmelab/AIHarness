@@ -54,7 +54,7 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
       {
         "id": "unit",
         "kind": "unit",
-        "runner": "vitest",
+        "command": "npm test",
         "changedScoped": true
       }
     ],

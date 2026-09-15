@@ -2,7 +2,7 @@
 // over the built-in defaults, validates the shape (fail-closed on malformed),
 // and degrades to defaults when the file is missing.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,6 +154,24 @@ describe("config loader", () => {
     expect(isDeployEnabled(cfg)).toBe(false);
     expect(roleModel(cfg, "quality-reviewer")).toBe("opus");
     expect(pipelineRoles(cfg)).toContain("test-writer");
+  });
+
+  // README's "minimum" install example is a config a newcomer copies verbatim. If it
+  // does not load, the README is giving bad advice. Extracts the one ```json fence in
+  // README.md (the install example) and feeds it through the real loader, the same way
+  // a consumer's first `harness.config.json` would be read.
+  test("the README install example loads", () => {
+    const readme = readFileSync(join(REPO_ROOT, "README.md"), "utf8");
+    const match = readme.match(/```json\n([\s\S]*?)```/);
+    expect(
+      match,
+      "README.md must contain a ```json install example",
+    ).not.toBeNull();
+    const dir = makeRepo(undefined); // empty repo dir, we write the config ourselves below
+    writeFileSync(join(dir, CONFIG_FILENAME), match[1]);
+    clearConfigCache();
+    const cfg = loadConfig(dir);
+    expect(cfg.name).toBe("myapp");
   });
 });
 
