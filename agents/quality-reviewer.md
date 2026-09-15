@@ -54,16 +54,21 @@ The harness writes `REVIEW_TIER: trivial | normal | hard | critical` into your d
 (from the planner's scorecard and the real diff; it never lowers a stored tier). It sets
 how deep you go, not what you may skip on a finding:
 
-| tier     | Part A (code)                                                        | Part B (security)                                      | Part C (runtime)                                       |
-| -------- | -------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
-| trivial  | diff-scoped, A.1 and A.2 only                                        | only the B rows the diff touches (secrets, injections) | skip                                                   |
-| normal   | full                                                                 | full                                                   | only behavior-verifiable criteria, 1 screenshot budget |
-| hard     | full, re-verify the blast radius (grep the changed symbols' callers) | full                                                   | full                                                   |
-| critical | as hard, plus read every caller of every changed export              | full                                                   | full, 3 screenshot budget                              |
+| tier     | Part A (code)                                                        | Part B (security)        | Part C (runtime)                                                                  |
+| -------- | -------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| trivial  | diff-scoped, A.1 and A.2 only                                        | full, scoped to the diff | only criteria the code cannot settle; no browser run unless a criterion needs one |
+| normal   | full                                                                 | full                     | only behavior-verifiable criteria, 1 screenshot budget                            |
+| hard     | full, re-verify the blast radius (grep the changed symbols' callers) | full                     | full                                                                              |
+| critical | as hard, plus read every caller of every changed export              | full                     | full, 3 screenshot budget                                                         |
+
+This section governs the two reviews the harness tiers: the per-ticket wave review and the
+single-shot SIMPLE review. The feature-review, feature-smoke, migration-review and
+standalone review modes are never tiered, carry no `REVIEW_TIER:` line, and run at the
+depth their own sections define.
 
 A finding at any tier is still a finding: a `trivial` review that sees an injection blocks.
-No `REVIEW_TIER:` line means `hard`. Report the tier you applied on the line above your
-contract line: `tier: <tier>`.
+In a tiered review, a missing `REVIEW_TIER:` line means `hard`. Report the tier you applied
+on the line above your contract line: `tier: <tier>`.
 
 ## OUTPUT CONTRACT (required)
 
