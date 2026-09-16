@@ -4,6 +4,9 @@
 // normalisation that guesses wrong either interrogates the human about a settled point or
 // lets an invented criterion through unasked.
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
   GRADES,
@@ -13,6 +16,8 @@ import {
   readGrill,
   readOpenQuestions,
 } from "../lib/acceptance.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 describe("readCriteria", () => {
   test("a table of objects keeps each text and source", () => {
@@ -223,5 +228,41 @@ describe("readGrill", () => {
       ],
     });
     expect(g.map((r) => r.id)).toEqual(["Q1", "Q1-2"]);
+  });
+});
+
+// The planner prompt is the only producer of these fields and this module is the only
+// consumer, and nothing links the two files. So the example the planner is told to emit is
+// read from the prompt itself rather than copied into a fixture: a copy would pin the copy,
+// and the drift worth catching is the prompt documenting a shape the reader does not read.
+describe("the planner's documented ticket example", () => {
+  const planner = readFileSync(
+    join(HERE, "..", "..", "agents", "planner.md"),
+    "utf8",
+  );
+  const block = planner.match(
+    /### Ticket format\s*\n+```json\n([\s\S]*?)\n```/,
+  );
+
+  test("is still where the reader can find it", () => {
+    // A failure here means planner.md moved or renamed its ticket-format block, not that
+    // the block is wrong: re-anchor this match on the new heading.
+    expect(block).not.toBeNull();
+  });
+
+  test("parses as a grillable ticket", () => {
+    const t = JSON.parse(block[1]);
+    const r = readCriteria(t);
+    expect(r.shape).toBe("table");
+    expect(r.dropped).toBe(0);
+    expect(r.criteria.some((c) => c.source === "derived")).toBe(true);
+    const q = readOpenQuestions(t);
+    expect(q.length).toBeGreaterThan(0);
+    expect(q.every((x) => GRADES.includes(x.grade) && x.recommended)).toBe(
+      true,
+    );
+    expect(derivedCount(t)).toBe(
+      r.criteria.filter((c) => c.source === "derived").length + q.length,
+    );
   });
 });
