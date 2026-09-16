@@ -26,8 +26,8 @@ From each ticket take exactly two things:
 
 Nothing else. A `request` criterion is not up for discussion: it comes from the user's own
 words. A row whose `source` is missing or unrecognised counts as `derived`. A ticket whose
-criteria are plain strings is an old-shape ticket: it derived nothing, so it contributes
-nothing.
+criteria are plain strings is an old-shape ticket: its CRITERIA contribute nothing. Its
+`open_questions` still count, they are read the same way on every ticket.
 
 If the set is empty across all tickets, say `nothing derived, nothing to grill` in one line
 and hand back immediately.
@@ -47,7 +47,8 @@ grill · 7 questions · 2 arch · 4 behavior · 1 pref
 ---
 ```
 
-Omit a grade whose count is zero.
+Omit a grade whose count is zero. Above 10 rows, add one line under the rule: answering
+"go" at any point takes every remaining recommendation.
 
 ## 5. Order and rhythm
 
@@ -65,6 +66,9 @@ question, the recommendation.
 Should a merged contact keep the oldest created_at?
 Recommended: yes, the oldest, so the timeline stays truthful.
 ```
+
+Ask, then stop and wait for the answer. Never answer for the human, and never move to the
+next question or the next grade before their answer has arrived.
 
 ## 6. Fold the answers
 
@@ -88,24 +92,29 @@ The human ends the grill at any point with "done", "go" or "ship it". Ask nothin
 record what was left:
 
 - unasked `derived` criteria stay `derived`: unconfirmed is the honest record,
-- unasked `pref`: the recommendation becomes the answer, `status: "answered"`,
-- unasked `behavior`: the recommendation is recorded as a provisional answer,
-  `status: "open"`,
-- unasked `arch`: `status: "open"`, and the summary names it. This is the one case where
-  the human has to know exactly what they deferred.
+- unasked `pref`: the recommendation becomes the answer, folded as `status: "answered"`,
+- unasked `behavior`: left open, its `recommended` standing as the provisional answer,
+- unasked `arch`: left open, and the summary names it. This is the one case where the human
+  has to know exactly what they deferred.
 
-Only an answered question leaves `open_questions`; a row recorded `open` stays there, so
-what was deferred is still visible downstream.
+A question with an empty `recommended` is never taken as accepted, `pref` included: there
+is nothing to accept, so it is left open.
+
+Answered and open never overlap: an answered question is added to `grill` AND removed from
+`open_questions`; an open one is left exactly where it is, untouched in `open_questions`,
+with NO `grill` entry. `open_questions` means still open, `grill` means decided, and
+nothing else on the ticket is edited.
 
 ## 8. Ceiling
 
 More than 5 `arch` questions across all tickets means the plan is vague, not that the human
 should be questioned longer. Ask the first 5, fold those answers, then stop and tell the
 human that re-dispatching the planner with those answers beats carrying on. Recommend it;
-do not do it yourself.
+do not do it yourself. The stop records everything still unasked exactly as an early exit
+does.
 
 ## 9. Hand back
 
 Two lines: how many criteria were confirmed, modified and dropped; how many questions were
 answered and how many stay open, naming any open `arch`. Then hand back to the coordinator,
-which resumes its plan-gate relay. You approve nothing and you dispatch nothing.
+which resumes its plan-gate relay, asks for the approval and dispatches what follows.
