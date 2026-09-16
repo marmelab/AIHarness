@@ -1,4 +1,4 @@
-// A ticket's acceptance criteria and open questions, read in ONE place.
+// A ticket's acceptance criteria, open questions and gate decisions, read in ONE place.
 //
 // The planner marks each criterion `request` (the user need states it) or `derived` (its
 // own judgement), and lists the decisions the need does not settle under `open_questions`.
@@ -10,11 +10,27 @@
 // human's attention while a question wrongly skipped ships an invented requirement. A
 // legacy ticket, whose criteria are plain strings, reads as all-`request` and therefore
 // asks nothing at all.
+//
+// What the grill decided is read back from `grill`, so a decision the human made at the
+// gate reaches the board, the developer and the reviewer instead of staying in the chat.
 
 export const SOURCES = ["request", "derived"];
 export const GRADES = ["arch", "behavior", "pref"];
 
 const text = (v) => (typeof v === "string" ? v.trim() : "");
+
+// Answers are keyed by question id, so a collision (two rows landing on the same id,
+// explicit or positional) must not happen: the first occurrence keeps it plain, a later
+// one is disambiguated by its position.
+const idReader = () => {
+  const used = new Set();
+  return (row, i) => {
+    let id = text(row && row.id) || `Q${i + 1}`;
+    if (used.has(id)) id = `${id}-${i + 1}`;
+    used.add(id);
+    return id;
+  };
+};
 
 /**
  * @param {unknown} ticket  Parsed ticket JSON (null tolerated).
@@ -64,22 +80,37 @@ export function readOpenQuestions(ticket) {
     ticket && typeof ticket === "object" ? ticket.open_questions : undefined;
   if (!Array.isArray(raw)) return [];
   const out = [];
-  const usedIds = new Set();
+  const nextId = idReader();
   raw.forEach((row, i) => {
     const question = text(row && row.question);
     if (!question) return;
-    let id = text(row.id) || `Q${i + 1}`;
-    // The skill keys answers by id, so a collision (two rows landing on the same id,
-    // explicit or positional) must not happen: the first occurrence keeps it plain, a
-    // later one is disambiguated by its position.
-    if (usedIds.has(id)) id = `${id}-${i + 1}`;
-    usedIds.add(id);
     out.push({
-      id,
+      id: nextId(row, i),
       question,
       recommended: text(row.recommended),
       grade: GRADES.includes(row.grade) ? row.grade : "behavior",
     });
+  });
+  return out;
+}
+
+/**
+ * The questions the human already decided at the plan gate. The grill moves a question
+ * here and out of `open_questions` when it is answered, so membership alone says decided
+ * and an entry missing either half of the decision says nothing at all.
+ * @param {unknown} ticket
+ * @returns {Array<{id: string, question: string, answer: string}>}
+ */
+export function readGrill(ticket) {
+  const raw = ticket && typeof ticket === "object" ? ticket.grill : undefined;
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const nextId = idReader();
+  raw.forEach((row, i) => {
+    const question = text(row && row.question);
+    const answer = text(row && row.answer);
+    if (!question || !answer) return;
+    out.push({ id: nextId(row, i), question, answer });
   });
   return out;
 }

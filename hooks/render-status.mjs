@@ -24,7 +24,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { readCriteria, readOpenQuestions } from "./lib/acceptance.mjs";
+import {
+  readCriteria,
+  readGrill,
+  readOpenQuestions,
+} from "./lib/acceptance.mjs";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
@@ -173,6 +177,7 @@ function readTickets() {
           status: t.status || "planned",
           acceptanceCriteria: t.acceptance_criteria || [],
           openQuestions: t.open_questions || [],
+          grill: t.grill || [],
           files: t.files_to_modify || [],
           dependencies: t.dependencies || [],
         };
@@ -342,6 +347,7 @@ function build() {
       const questions = readOpenQuestions({
         open_questions: t.openQuestions,
       });
+      const decided = readGrill({ grill: t.grill });
       return [
         `## ${t.id} · ${t.title}`,
         `- **Status:** ${t.status}${approved(t.id) ? " (reviewed ✅)" : ""}`,
@@ -363,6 +369,15 @@ function build() {
           ? [
               "  open questions:",
               ...questions.map((q) => `  - [${q.grade}] ${q.question}`),
+            ]
+          : []),
+        // The gate's decisions, after the questions still open: the two blocks are
+        // disjoint by construction, and a decision reached in the chat is otherwise lost
+        // to everyone downstream.
+        ...(decided.length
+          ? [
+              "  decided at the gate:",
+              ...decided.map((d) => `  - ${d.question} -> ${d.answer}`),
             ]
           : []),
         "",

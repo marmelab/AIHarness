@@ -10,6 +10,7 @@ import {
   SOURCES,
   derivedCount,
   readCriteria,
+  readGrill,
   readOpenQuestions,
 } from "../lib/acceptance.mjs";
 
@@ -177,5 +178,50 @@ describe("derivedCount", () => {
 
   test("a legacy ticket asks nothing", () => {
     expect(derivedCount({ acceptance_criteria: ["a", "b"] })).toBe(0);
+  });
+});
+
+describe("readGrill", () => {
+  test("keeps id, question and answer", () => {
+    const g = readGrill({
+      grill: [
+        { id: "Q1", question: "persist?", answer: "no", status: "answered" },
+      ],
+    });
+    expect(g).toEqual([{ id: "Q1", question: "persist?", answer: "no" }]);
+  });
+
+  test("an entry with no answer is dropped, nothing was decided", () => {
+    expect(readGrill({ grill: [{ id: "Q1", question: "persist?" }] })).toEqual(
+      [],
+    );
+    expect(
+      readGrill({ grill: [{ id: "Q1", question: "persist?", answer: "  " }] }),
+    ).toEqual([]);
+  });
+
+  test("an entry with no question is dropped, there is nothing to show", () => {
+    expect(readGrill({ grill: [{ id: "Q1", answer: "no" }] })).toEqual([]);
+  });
+
+  test("a missing id is positional", () => {
+    const g = readGrill({ grill: [{ question: "x", answer: "y" }] });
+    expect(g[0]).toEqual({ id: "Q1", question: "x", answer: "y" });
+  });
+
+  test("absent or malformed grill reads as none", () => {
+    expect(readGrill({})).toEqual([]);
+    expect(readGrill({ grill: "x" })).toEqual([]);
+    expect(readGrill(null)).toEqual([]);
+  });
+
+  test("colliding ids are disambiguated, as in open_questions", () => {
+    const g = readGrill({
+      grill: [
+        { question: "a", answer: "yes" },
+        { id: "Q1", question: "b", answer: "no" },
+      ],
+    });
+    expect(g.map((r) => r.id)).toEqual(["Q1", "Q1-2"]);
   });
 });

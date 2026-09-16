@@ -320,6 +320,76 @@ describe("render-status", () => {
         /^ {2}- 2 criteria row\(s\) unreadable, check the ticket JSON$/m,
       );
     });
+
+    // What the human decided at the gate is the one thing on the board nobody else can
+    // reconstruct: without it the decision lives only in the chat the developer and the
+    // reviewer never read.
+    test("questions decided at the gate are rendered with their answer", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Ticket with a decision",
+          status: "planned",
+          grill: [
+            {
+              id: "Q1",
+              question: "persist?",
+              answer: "no, transient",
+              status: "answered",
+            },
+          ],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(/^ {2}decided at the gate:$/m);
+      expect(tickets).toMatch(/^ {2}- persist\? -> no, transient$/m);
+    });
+
+    test("a ticket with nothing decided renders no decided block", () => {
+      const { outDir, run } = setup();
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).not.toMatch(/decided at the gate/);
+    });
+
+    // The four blocks are what a ticket shows at the gate, and they share one indent
+    // level: read together they must still say which line belongs to which block.
+    test("criteria, drops, open questions and decisions read in that order", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Ticket with everything",
+          status: "planned",
+          acceptance_criteria: [
+            { text: "from the ask", source: "request" },
+            { text: "my judgement", source: "derived" },
+            { source: "derived" },
+          ],
+          open_questions: [
+            { id: "Q2", question: "still open?", grade: "arch" },
+          ],
+          grill: [{ id: "Q1", question: "persist?", answer: "no" }],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      const at = (re) => tickets.search(re);
+      expect(at(/^ {2}- \[derived\] my judgement$/m)).toBeGreaterThan(-1);
+      expect(at(/^ {2}- 1 criteria row\(s\) unreadable/m)).toBeGreaterThan(
+        at(/^ {2}- \[derived\] my judgement$/m),
+      );
+      expect(at(/^ {2}open questions:$/m)).toBeGreaterThan(
+        at(/^ {2}- 1 criteria row\(s\) unreadable/m),
+      );
+      expect(at(/^ {2}decided at the gate:$/m)).toBeGreaterThan(
+        at(/^ {2}- \[arch\] still open\?$/m),
+      );
+    });
   });
 
   test("writes status.json with correct counts and active tasks", () => {
