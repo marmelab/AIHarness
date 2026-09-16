@@ -71,6 +71,46 @@ describe("readCriteria", () => {
     expect(SOURCES).toEqual(["request", "derived"]);
     expect(GRADES).toEqual(["arch", "behavior", "pref"]);
   });
+
+  test("an empty criteria array is shape=missing, not legacy", () => {
+    const r = readCriteria({ acceptance_criteria: [] });
+    expect(r.shape).toBe("missing");
+    expect(r.criteria).toEqual([]);
+  });
+
+  test("non-empty legacy and table tickets keep their own shape", () => {
+    expect(readCriteria({ acceptance_criteria: ["a"] }).shape).toBe("legacy");
+    expect(
+      readCriteria({ acceptance_criteria: [{ text: "a", source: "request" }] })
+        .shape,
+    ).toBe("table");
+  });
+
+  test("rows with no usable text are counted as dropped", () => {
+    const r = readCriteria({
+      acceptance_criteria: [
+        { text: "a", source: "request" },
+        { source: "derived" },
+        { text: "   " },
+      ],
+    });
+    expect(r.criteria).toEqual([{ text: "a", source: "request" }]);
+    expect(r.dropped).toBe(2);
+  });
+
+  test("a clean ticket reports dropped: 0", () => {
+    const r = readCriteria({
+      acceptance_criteria: [{ text: "a", source: "request" }],
+    });
+    expect(r.dropped).toBe(0);
+  });
+
+  test("a legacy ticket with an empty string reports it as dropped", () => {
+    const r = readCriteria({ acceptance_criteria: ["a", "  "] });
+    expect(r.shape).toBe("legacy");
+    expect(r.criteria).toEqual([{ text: "a", source: "request" }]);
+    expect(r.dropped).toBe(1);
+  });
 });
 
 describe("readOpenQuestions", () => {
@@ -112,6 +152,13 @@ describe("readOpenQuestions", () => {
     expect(readOpenQuestions({})).toEqual([]);
     expect(readOpenQuestions({ open_questions: "x" })).toEqual([]);
     expect(readOpenQuestions(null)).toEqual([]);
+  });
+
+  test("colliding ids are disambiguated, explicit ids win their first occurrence", () => {
+    const q = readOpenQuestions({
+      open_questions: [{ question: "a" }, { id: "Q1", question: "b" }],
+    });
+    expect(q.map((r) => r.id)).toEqual(["Q1", "Q1-2"]);
   });
 });
 
