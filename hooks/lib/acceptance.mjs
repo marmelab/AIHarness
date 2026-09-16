@@ -22,11 +22,16 @@ const text = (v) => (typeof v === "string" ? v.trim() : "");
 // Answers are keyed by question id, so a collision (two rows landing on the same id,
 // explicit or positional) must not happen: the first occurrence keeps it plain, a later
 // one is disambiguated by its position.
+//
+// The suffix is re-applied until the id is free, not applied once: a hand-written `Q1-3`
+// is a legal id, so one pass can hand a later `Q1` the very form that row already holds.
+// The loop terminates because each pass makes the id strictly longer and only finitely
+// many ids are taken.
 const idReader = () => {
   const used = new Set();
   return (row, i) => {
     let id = text(row && row.id) || `Q${i + 1}`;
-    if (used.has(id)) id = `${id}-${i + 1}`;
+    while (used.has(id)) id = `${id}-${i + 1}`;
     used.add(id);
     return id;
   };

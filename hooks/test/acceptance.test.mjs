@@ -166,6 +166,32 @@ describe("readOpenQuestions", () => {
     });
     expect(q.map((r) => r.id)).toEqual(["Q1", "Q1-2"]);
   });
+
+  // A single pass appends the position once and stops, so a hand-written id that already
+  // looks like a disambiguated one collides with the form the next row is given.
+  test("a disambiguated id that is itself taken keeps being disambiguated", () => {
+    const q = readOpenQuestions({
+      open_questions: [
+        { id: "Q1", question: "a" },
+        { id: "Q1-3", question: "b" },
+        { id: "Q1", question: "c" },
+      ],
+    });
+    const ids = q.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.slice(0, 2)).toEqual(["Q1", "Q1-3"]);
+  });
+
+  test("several rows with distinct ids are left exactly as written", () => {
+    const q = readOpenQuestions({
+      open_questions: [
+        { id: "Q1", question: "a" },
+        { id: "Q2", question: "b" },
+        { id: "Q3", question: "c" },
+      ],
+    });
+    expect(q.map((r) => r.id)).toEqual(["Q1", "Q2", "Q3"]);
+  });
 });
 
 describe("derivedCount", () => {
@@ -228,6 +254,18 @@ describe("readGrill", () => {
       ],
     });
     expect(g.map((r) => r.id)).toEqual(["Q1", "Q1-2"]);
+  });
+
+  test("a disambiguated id that is itself taken keeps being disambiguated", () => {
+    const g = readGrill({
+      grill: [
+        { id: "Q1", question: "a", answer: "yes" },
+        { id: "Q1-3", question: "b", answer: "no" },
+        { id: "Q1", question: "c", answer: "maybe" },
+      ],
+    });
+    const ids = g.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
