@@ -48,3 +48,7 @@ hypothesis and ask them to confirm rather than silently choosing.
 
 Fold the answers into the orchestrator dispatch prompt: scope-out and acceptance become
 ticket constraints.
+
+This is the grill BEFORE dispatch, on a request that is still vague. The grill AFTER the
+plan is `plan-grill`: it questions what the planner derived, rather than what the user did
+not say.
