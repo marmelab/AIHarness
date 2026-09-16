@@ -50,3 +50,17 @@ Agent({
 ```
 
 Then follow the harness rules already in CLAUDE.md: surface progress while it runs (the status board once planning has produced one, or a `Monitor` on `harness-progress.log`), relay the plan gate by reading the ticket JSONs inline, and relay the final report when the task-notification arrives. An async "Agent launched" acknowledgement means dispatched, not finished.
+
+### 4. Grill the plan before relaying it
+
+When the orchestrator stops at the plan gate (every `GATE` but `none`), run
+`Skill({skill: "plan-grill"})` with this session's `TICKETS_DIR` (`<session_dir>/tickets`)
+BEFORE you ask for the approval, then relay the tickets as the skill left them: it folds the
+answers back into the ticket JSONs, so reading them after it returns is reading the plan the
+user actually approved.
+
+Invoke it unconditionally. It asks only about what the planner marked `derived` or listed in
+`open_questions`, and hands back in one line when there is none of either, so there is no
+condition for you to evaluate first. It runs in the MAIN thread, never in a subagent: an
+agent that asks a question ends its turn, and the answer reaches a fresh agent with no
+memory of asking.

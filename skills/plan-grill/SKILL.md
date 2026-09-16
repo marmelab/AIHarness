@@ -48,7 +48,8 @@ grill · 7 questions · 2 arch · 4 behavior · 1 pref
 ```
 
 Omit a grade whose count is zero. Above 10 rows, add one line under the rule: answering
-"go" at any point takes every remaining recommendation.
+"go" at any point ends the grill, finalising the remaining `pref` recommendations and
+leaving `behavior` and `arch` open with their recommendation standing as provisional (§7).
 
 ## 5. Order and rhythm
 
