@@ -1,7 +1,9 @@
-// The session's tickets, read from disk. Two gates depend on the SAME answer and must
-// not derive it separately: session-state asks "is this session still in flight?" and
-// e2e-on-feature-review asks "was that the last wave's merge?". A ticket file that one
-// reader finds and the other misses turns the second question into "no suite ever runs".
+// The session's tickets, read from disk. Four readers depend on the SAME answer and must
+// not derive it separately: session-state asks "is this session still in flight?",
+// e2e-on-feature-review asks "was that the last wave's merge?", render-status asks what to
+// put on the board, and warn-ungrilled-plan asks whether the approved plan was ever
+// grilled. A ticket file one reader finds and another misses turns each of those questions
+// into its own silent no: no suite ever runs, an empty board, a gate nobody warns about.
 //
 // Unreadable JSON counts as a ticket with status "unreadable", so a corrupt file can
 // never be read as "nothing left to do".
@@ -25,12 +27,15 @@ export const TICKET_RE = /^TASK-\d+\.json$/;
  * One list, because two readers disagreeing about where the tickets are is how a gate
  * turns into a no-op nobody notices.
  * @param {object} ctx hook context
+ * @param {string} [tmp] tmp root holding the claude-<uid> directories
  * @returns {string[]}
  */
-export function ticketDirs(ctx) {
+export function ticketDirs(ctx, tmp) {
   const dirs = [ctx.ticketsDir, ctx.sessionDir];
   try {
-    const pad = scratchpadDir(ctx.sessionId);
+    const pad = tmp
+      ? scratchpadDir(ctx.sessionId, tmp)
+      : scratchpadDir(ctx.sessionId);
     // Tickets sit next to the scratchpad, not inside it.
     if (pad) dirs.push(dirname(pad));
   } catch {
