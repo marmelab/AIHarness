@@ -348,6 +348,28 @@ describe("render-status", () => {
       expect(tickets).toMatch(/^ {2}- persist\? -> no, transient$/m);
     });
 
+    // Half a decision says nothing, and the board is not the place to find that out: this
+    // is what keeps the render on the library's drop discipline rather than on t.grill raw.
+    test("a decision missing its answer stays off the board", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Ticket with half a decision",
+          status: "planned",
+          grill: [
+            { id: "Q1", question: "persist?" },
+            { id: "Q2", question: "case-insensitive?", answer: "yes" },
+          ],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(/^ {2}- case-insensitive\? -> yes$/m);
+      expect(tickets).not.toMatch(/persist\?/);
+    });
+
     test("a ticket with nothing decided renders no decided block", () => {
       const { outDir, run } = setup();
       run();

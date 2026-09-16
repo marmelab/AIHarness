@@ -240,17 +240,26 @@ describe("the planner's documented ticket example", () => {
     join(HERE, "..", "..", "agents", "planner.md"),
     "utf8",
   );
-  const block = planner.match(
-    /### Ticket format\s*\n+```json\n([\s\S]*?)\n```/,
-  );
+  // The section first, then its first json fence: prose is allowed to sit between the
+  // heading and the block, and the search cannot wander into a later section's fence.
+  const ticketFormat = () => {
+    const section = planner
+      .split(/^### /m)
+      .find((part) => part.startsWith("Ticket format\n"));
+    return section?.match(/^```json$\n([\s\S]*?)^```$/m) ?? null;
+  };
 
   test("is still where the reader can find it", () => {
     // A failure here means planner.md moved or renamed its ticket-format block, not that
     // the block is wrong: re-anchor this match on the new heading.
-    expect(block).not.toBeNull();
+    expect(ticketFormat()).not.toBeNull();
   });
 
   test("parses as a grillable ticket", () => {
+    const block = ticketFormat();
+    // Guarded, not assumed: a missing block is the test above's failure, and reading
+    // block[1] through it would bury that one under a TypeError here.
+    expect(block).not.toBeNull();
     const t = JSON.parse(block[1]);
     const r = readCriteria(t);
     expect(r.shape).toBe("table");
