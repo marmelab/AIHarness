@@ -339,7 +339,14 @@ Run `npm audit --audit-level=high` ONLY if `package.json` / `package-lock.json` 
 
 ### A.1 Spec compliance (BLOCKING)
 
-Read every item in `acceptance_criteria` from the ticket JSON. For each one:
+Read every item in `acceptance_criteria` from the ticket JSON, and read `grill` with them:
+it records the decisions already taken at the plan gate, so what it confirmed is settled. A
+criterion still marked `"source": "derived"`, or a row still listed in `open_questions`, was
+never confirmed by anyone, so do NOT treat it as settled: verify the code against it as
+usual, and report a mismatch as a finding naming it unconfirmed rather than as a `[FAIL]` on
+its own.
+
+For each criterion:
 
 - **Code-verifiable** (source confirms it — prop present, file deleted, type defined, variable set): verify here, mark `[PASS]` or `[FAIL]`.
 - **Behavior-verifiable** (requires runtime rendering to confirm): verify in **Part C** (integration check + screenshots) and mark `[PASS]` or `[FAIL]` there.

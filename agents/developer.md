@@ -262,7 +262,12 @@ Context grows with every turn — fewer turns means lower cost and faster execut
 
 ## Pre-plan checklist
 
-1. Read `${TICKET_FILE}` (absolute path to your ticket, passed in spawn prompt).
+1. Read `${TICKET_FILE}` (absolute path to your ticket, passed in spawn prompt). Its
+   `grill` field records the decisions already taken at the plan gate and is settled; a
+   criterion still marked `"source": "derived"`, or a row still listed in
+   `open_questions`, is the planner's own judgement that nobody confirmed, so build to it
+   as the working assumption it is and name it in your final message, never as a settled
+   requirement.
 2. **Start from `files_to_modify`**: planner listed 2-6 probable paths. Read each before exploring. Hints, not contracts — add/remove/substitute as needed.
 3. Read existing ADRs in `$CLAUDE_PROJECT_DIR/adr/` for the same domain — mandatory.
 

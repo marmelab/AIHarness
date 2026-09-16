@@ -12,7 +12,9 @@
 // asks nothing at all.
 //
 // What the grill decided is read back from `grill`, so a decision the human made at the
-// gate reaches the board, the developer and the reviewer instead of staying in the chat.
+// gate reaches the board instead of staying in the chat. The developer and the reviewer
+// read the same field off the ticket itself (their prompts say so), which is what makes a
+// criterion still marked `derived` legible downstream as unconfirmed rather than settled.
 
 export const SOURCES = ["request", "derived"];
 export const GRADES = ["arch", "behavior", "pref"];
