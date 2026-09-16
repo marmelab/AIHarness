@@ -23,7 +23,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   readCriteria,
   readGrill,
@@ -33,7 +33,7 @@ import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
 import { reviewsDir } from "./lib/reviews.mjs";
-import { scratchpadDir } from "./lib/scratchpad.mjs";
+import { ticketDirs } from "./lib/tickets.mjs";
 import { getBaseBranch, git } from "./lib/git.mjs";
 import { sessionBranch } from "./lib/topology.mjs";
 
@@ -92,30 +92,10 @@ const listing = (dir) => {
   }
 };
 
-// Every place a ticket file has been observed. The orchestrator is TOLD the session dir
-// and does not always use it: one run wrote all five tickets into the runtime scratchpad
-// (`/tmp/claude-<uid>/<project>/<id>/`) instead, so a board looking only where the hooks
-// keep their state reported "0/0 merged · no tickets yet" for a session that merged five.
-// The board had never been wrong about this before only because it had never rendered.
-//
-// Reading the scratchpad too is a READ of a directory the session owns, not an endorsement
-// of writing tickets there — the mismatch itself is still a defect worth closing upstream.
-const ticketDirs = () => {
-  const dirs = [ctx.ticketsDir, ctx.sessionDir];
-  try {
-    const pad = scratchpadDir(ctx.sessionId);
-    // Tickets sit next to the scratchpad, not inside it.
-    if (pad) dirs.push(dirname(pad));
-  } catch {
-    // no session id / unreadable /tmp -> the two dirs above still answer
-  }
-  return dirs;
-};
-
 // A ticket's STATUS lives inside its file, so the dir's mtime is not enough.
 const ticketsMtimeMs = () => {
   let newest = 0;
-  for (const dir of ticketDirs()) {
+  for (const dir of ticketDirs(ctx)) {
     try {
       for (const f of readdirSync(dir)) {
         if (TICKET_RE.test(f)) newest = Math.max(newest, mtimeMs(join(dir, f)));
@@ -162,9 +142,9 @@ const lastRenderKey = (() => {
 if (lastRenderKey && renderKey === lastRenderKey) process.exit(0);
 
 // Tickets live in the session dir itself, a `tickets/` subdir, or the scratchpad — see
-// ticketDirs().
+// lib/tickets.mjs ticketDirs().
 function readTickets() {
-  for (const dir of ticketDirs()) {
+  for (const dir of ticketDirs(ctx)) {
     if (!existsSync(dir)) continue;
     const files = readdirSync(dir).filter((f) => TICKET_RE.test(f));
     if (!files.length) continue;

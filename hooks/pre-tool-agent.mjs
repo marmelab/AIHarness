@@ -14,6 +14,11 @@
 //     past the merger gates above it, so a refused merger leaves no marker behind.
 //   - require-fix-round runs BEFORE route-review-model: it may refuse the call, and
 //     routing one that is about to be refused is work thrown away.
+//   - warn-ungrilled-plan runs AFTER setup-worktree, at the very end. Its one verdict is
+//     ctx.flag, which ends the process, so anything below it would be skipped and the
+//     chain's single `updatedInput` emission would be lost. Last, it can skip nothing: it
+//     never refuses, and it fires only on an orchestrator resume, which route-review-model
+//     (the only guard here that rewrites input) never touches.
 
 import { runChain } from "./lib/hook-chain.mjs";
 import { check as openProgressLog } from "./open-progress-log.mjs";
@@ -27,6 +32,7 @@ import { check as requireFixRound } from "./require-fix-round.mjs";
 import { check as routeReviewModel } from "./route-review-model.mjs";
 import { check as forceForeground } from "./force-foreground-orchestrator-dispatch.mjs";
 import { check as setupWorktree } from "./setup-worktree.mjs";
+import { check as warnUngrilledPlan } from "./warn-ungrilled-plan.mjs";
 
 runChain([
   ["open-progress-log", openProgressLog],
@@ -40,4 +46,5 @@ runChain([
   ["route-review-model", routeReviewModel],
   ["force-foreground-orchestrator-dispatch", forceForeground],
   ["setup-worktree", setupWorktree],
+  ["warn-ungrilled-plan", warnUngrilledPlan],
 ]);
