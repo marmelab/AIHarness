@@ -242,6 +242,86 @@ describe("render-status", () => {
     expect(md).toContain("Depends on:** TASK-001");
   });
 
+  describe("criteria and open questions on the plan-gate board", () => {
+    test("a derived criterion is marked on the board, a request one is not", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Mixed criteria",
+          status: "planned",
+          acceptance_criteria: [
+            { text: "from the ask", source: "request" },
+            { text: "my judgement", source: "derived" },
+          ],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(/^ {2}- \[derived\] my judgement$/m);
+      expect(tickets).toMatch(/^ {2}- from the ask$/m);
+    });
+
+    test("open questions are listed with their grade", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Ticket with open questions",
+          status: "planned",
+          open_questions: [{ id: "Q1", question: "persist?", grade: "arch" }],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(/^ {2}open questions:$/m);
+      expect(tickets).toMatch(/^ {2}- \[arch\] persist\?$/m);
+    });
+
+    test("legacy string criteria render unchanged, with no marker", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Legacy ticket",
+          status: "planned",
+          acceptance_criteria: ["plain line"],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(/^ {2}- plain line$/m);
+      expect(tickets).not.toMatch(/\[request\]/);
+    });
+
+    // The count exists so a human sees a malformed ticket at the gate instead of at
+    // merge time, so it must render, not just be tracked internally.
+    test("unreadable criteria rows are surfaced as a drop count", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Ticket with malformed rows",
+          status: "planned",
+          acceptance_criteria: [
+            { text: "keep this", source: "request" },
+            { source: "derived" },
+            "",
+          ],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(
+        /^ {2}- 2 criteria row\(s\) unreadable, check the ticket JSON$/m,
+      );
+    });
+  });
+
   test("writes status.json with correct counts and active tasks", () => {
     const { outDir, run } = setup();
     run();

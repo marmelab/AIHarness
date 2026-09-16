@@ -24,6 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { readCriteria, readOpenQuestions } from "./lib/acceptance.mjs";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
@@ -171,6 +172,7 @@ function readTickets() {
           title: t.title || t.description || "",
           status: t.status || "planned",
           acceptanceCriteria: t.acceptance_criteria || [],
+          openQuestions: t.open_questions || [],
           files: t.files_to_modify || [],
           dependencies: t.dependencies || [],
         };
@@ -333,17 +335,39 @@ function build() {
   const ticketsMd = [
     `# Tickets: session \`${ctx.sessionShort}\``,
     "",
-    ...tickets.flatMap((t) => [
-      `## ${t.id} · ${t.title}`,
-      `- **Status:** ${t.status}${approved(t.id) ? " (reviewed ✅)" : ""}`,
-      `- **Depends on:** ${t.dependencies?.length ? t.dependencies.join(", ") : "(none)"}`,
-      `- **Files:** ${t.files?.length ? t.files.map((f) => `\`${f}\``).join(", ") : "(none)"}`,
-      "- **Acceptance criteria:**",
-      ...(t.acceptanceCriteria?.length
-        ? t.acceptanceCriteria.map((c) => `  - ${c}`)
-        : ["  - (none)"]),
-      "",
-    ]),
+    ...tickets.flatMap((t) => {
+      const { criteria, dropped } = readCriteria({
+        acceptance_criteria: t.acceptanceCriteria,
+      });
+      const questions = readOpenQuestions({
+        open_questions: t.openQuestions,
+      });
+      return [
+        `## ${t.id} · ${t.title}`,
+        `- **Status:** ${t.status}${approved(t.id) ? " (reviewed ✅)" : ""}`,
+        `- **Depends on:** ${t.dependencies?.length ? t.dependencies.join(", ") : "(none)"}`,
+        `- **Files:** ${t.files?.length ? t.files.map((f) => `\`${f}\``).join(", ") : "(none)"}`,
+        "- **Acceptance criteria:**",
+        ...(criteria.length
+          ? criteria.map(
+              (c) =>
+                `  - ${c.source === "derived" ? "[derived] " : ""}${c.text}`,
+            )
+          : ["  - (none)"]),
+        // Counted rather than silently dropped: a human sees a malformed ticket at
+        // the plan gate instead of at merge time.
+        ...(dropped > 0
+          ? [`  - ${dropped} criteria row(s) unreadable, check the ticket JSON`]
+          : []),
+        ...(questions.length
+          ? [
+              "  open questions:",
+              ...questions.map((q) => `  - [${q.grade}] ${q.question}`),
+            ]
+          : []),
+        "",
+      ];
+    }),
   ].join("\n");
 
   // status.json - compact, for the opt-in statusline.
