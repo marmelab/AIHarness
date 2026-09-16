@@ -61,6 +61,8 @@ user actually approved.
 
 Invoke it unconditionally. It asks only about what the planner marked `derived` or listed in
 `open_questions`, and hands back in one line when there is none of either, so there is no
-condition for you to evaluate first. It runs in the MAIN thread, never in a subagent: an
+condition for you to evaluate first. One hand-back is NOT an all-clear: when it reports that
+it found no ticket file, the plan was not grilled at all, so relay that as the warning it is
+and find where the orchestrator actually wrote the tickets before you ask for an approval. It runs in the MAIN thread, never in a subagent: an
 agent that asks a question ends its turn, and the answer reaches a fresh agent with no
 memory of asking.

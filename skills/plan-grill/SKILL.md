@@ -14,8 +14,17 @@ return.
 
 ## 1. Input
 
-`TICKETS_DIR` is the absolute path the coordinator gives you. Read every
-`${TICKETS_DIR}/TASK-*.json`.
+`TICKETS_DIR` is the absolute path the coordinator gives you. Read every `TASK-*.json`
+there. If that finds none, try the next directory and stop at the first one that holds
+ticket files:
+
+1. `${TICKETS_DIR}`
+2. its parent, the session dir itself
+3. the session's runtime scratchpad parent, `/tmp/claude-<uid>/<project>/<session_id>/`
+
+The orchestrator is told the session dir and does not always write there, so "no file under
+`TICKETS_DIR`" is not "no tickets". Remember which directory answered: you name it when you
+hand back.
 
 ## 2. Build the set
 
@@ -29,8 +38,16 @@ words. A row whose `source` is missing or unrecognised counts as `derived`. A ti
 criteria are plain strings is an old-shape ticket: its CRITERIA contribute nothing. Its
 `open_questions` still count, they are read the same way on every ticket.
 
-If the set is empty across all tickets, say `nothing derived, nothing to grill` in one line
-and hand back immediately.
+Two empty cases exist and they must never read alike. Hand back immediately in either, in
+its own wording:
+
+- **No `TASK-*.json` under ANY of the three directories.** Hand back a WARNING: name the
+  three paths you tried, then say that the grill did NOT run and that this plan was NOT
+  grilled. You did not find a plan with nothing to ask about, you failed to find the plan.
+  Never phrase it as an all-clear and never let it pass for one.
+- **Tickets read, and nothing in them is `derived` or open.** Hand back one line: how many
+  tickets you read, the directory they came from, and "nothing derived, nothing to grill".
+  That one IS the all-clear.
 
 ## 3. Grade
 
@@ -47,9 +64,11 @@ grill · 7 questions · 2 arch · 4 behavior · 1 pref
 ---
 ```
 
-Omit a grade whose count is zero. Above 10 rows, add one line under the rule: answering
-"go" at any point ends the grill, finalising the remaining `pref` recommendations and
-leaving `behavior` and `arch` open with their recommendation standing as provisional (§7).
+Omit a grade whose count is zero. Under the rule, whatever the count, add one line:
+answering "go" at any point ends the grill, finalising the remaining `pref` recommendations
+and leaving `behavior` and `arch` open with their recommendation standing as provisional
+(§7). The early exit is the human's, and a rule they are never told about is not one they
+can use.
 
 ## 5. Order and rhythm
 
@@ -73,8 +92,8 @@ plain language in the user's language, one question per message, with no grade t
 counter, no ticket id and no file path. The grades still decide what is asked when; they are
 simply not shown.
 
-Ask, then stop and wait for the answer. Never answer for the human, and never move to the
-next question or the next grade before their answer has arrived.
+Ask, then stop and wait for the answer. Never answer for the human, and never move past
+what you asked before their answer has arrived.
 
 ## 6. Fold the answers
 
@@ -89,6 +108,14 @@ next question or the next grade before their answer has arrived.
 
 A question with no `id` of its own is keyed by its position in `open_questions`: `Q1` for
 the first row.
+
+`grill` is absent from most tickets: the planner never writes it. When the key is not
+there, add it as a new top-level array holding that one entry; when it is, append to it.
+
+After the last edit to a ticket, re-read the file and confirm it still parses as JSON. This
+is the feature's only write path, and a malformed edit surfaces nowhere until the next
+SubagentStop, after the approval, as a failed developer dispatch. If it does not parse,
+restore what you changed and redo the edit.
 
 Never touch code. Never dispatch an agent. Never edit any other field of any ticket.
 
@@ -121,6 +148,7 @@ does.
 
 ## 9. Hand back
 
-Two lines: how many criteria were confirmed, modified and dropped; how many questions were
-answered and how many stay open, naming any open `arch`. Then hand back to the coordinator,
-which resumes its plan-gate relay, asks for the approval and dispatches what follows.
+Two lines: the directory you read and how many criteria were confirmed, modified and
+dropped; how many questions were answered and how many stay open, naming any open `arch`.
+Then hand back to the coordinator, which resumes its plan-gate relay, asks for the approval
+and dispatches what follows.
