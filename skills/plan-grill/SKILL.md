@@ -68,6 +68,11 @@ Should a merged contact keep the oldest created_at?
 Recommended: yes, the oldest, so the timeline stays truthful.
 ```
 
+With no `PERSONA: technical` in the dispatch, keep that order but not that shape: ask in
+plain language in the user's language, one question per message, with no grade tag, no
+counter, no ticket id and no file path. The grades still decide what is asked when; they are
+simply not shown.
+
 Ask, then stop and wait for the answer. Never answer for the human, and never move to the
 next question or the next grade before their answer has arrived.
 
