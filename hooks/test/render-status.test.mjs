@@ -280,6 +280,53 @@ describe("render-status", () => {
       expect(tickets).toMatch(/^ {2}- \[arch\] persist\?$/m);
     });
 
+    // `shape` is the only thing that tells a legacy plan from a clean one, and a
+    // consumer project on an older planner derives nothing it can be asked about. Without
+    // this line the two look identical at the gate and the silence reads as "nothing to
+    // grill" rather than "nothing grillable".
+    test("a legacy ticket says its criteria predate the sources", () => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Legacy ticket",
+          status: "planned",
+          acceptance_criteria: ["plain line", "another line"],
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(tickets).toMatch(
+        /^ {2}legacy ticket: these criteria predate the criteria sources, so nothing here was grillable$/m,
+      );
+    });
+
+    // The base fixture's own tickets are legacy, so a whole-file assertion would pass
+    // for the wrong reason: read only the section of the ticket under test.
+    const sectionOf = (md, id) =>
+      md.split(/^## /m).find((part) => part.startsWith(`${id} `)) ?? "";
+
+    test.each([
+      ["a table ticket", [{ text: "from the ask", source: "request" }]],
+      ["a ticket with no criteria at all", []],
+    ])("%s carries no legacy note", (_label, acceptance_criteria) => {
+      const { base, outDir, run } = setup();
+      writeFileSync(
+        join(base, "tickets", "TASK-003.json"),
+        JSON.stringify({
+          id: "TASK-003",
+          title: "Not a legacy ticket",
+          status: "planned",
+          acceptance_criteria,
+        }),
+      );
+      run();
+      const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      expect(sectionOf(tickets, "TASK-003")).not.toMatch(/legacy ticket:/);
+      expect(sectionOf(tickets, "TASK-003")).not.toBe("");
+    });
+
     test("legacy string criteria render unchanged, with no marker", () => {
       const { base, outDir, run } = setup();
       writeFileSync(
@@ -316,9 +363,12 @@ describe("render-status", () => {
       );
       run();
       const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
+      // Lifted out of the criteria list: with the same bullet and indent as the
+      // criteria around it, a warning reads as one more criterion.
       expect(tickets).toMatch(
-        /^ {2}- 2 criteria row\(s\) unreadable, check the ticket JSON$/m,
+        /^ {2}warning: 2 criteria row\(s\) unreadable, check the ticket JSON$/m,
       );
+      expect(tickets).not.toMatch(/^ {2}- \d+ criteria row\(s\) unreadable/m);
     });
 
     // What the human decided at the gate is the one thing on the board nobody else can
@@ -402,11 +452,11 @@ describe("render-status", () => {
       const tickets = readFileSync(join(outDir, "TICKETS.md"), "utf8");
       const at = (re) => tickets.search(re);
       expect(at(/^ {2}- \[derived\] my judgement$/m)).toBeGreaterThan(-1);
-      expect(at(/^ {2}- 1 criteria row\(s\) unreadable/m)).toBeGreaterThan(
-        at(/^ {2}- \[derived\] my judgement$/m),
-      );
+      expect(
+        at(/^ {2}warning: 1 criteria row\(s\) unreadable/m),
+      ).toBeGreaterThan(at(/^ {2}- \[derived\] my judgement$/m));
       expect(at(/^ {2}open questions:$/m)).toBeGreaterThan(
-        at(/^ {2}- 1 criteria row\(s\) unreadable/m),
+        at(/^ {2}warning: 1 criteria row\(s\) unreadable/m),
       );
       expect(at(/^ {2}decided at the gate:$/m)).toBeGreaterThan(
         at(/^ {2}- \[arch\] still open\?$/m),

@@ -341,7 +341,7 @@ function build() {
     `# Tickets: session \`${ctx.sessionShort}\``,
     "",
     ...tickets.flatMap((t) => {
-      const { criteria, dropped } = readCriteria({
+      const { shape, criteria, dropped } = readCriteria({
         acceptance_criteria: t.acceptanceCriteria,
       });
       const questions = readOpenQuestions({
@@ -360,10 +360,23 @@ function build() {
                 `  - ${c.source === "derived" ? "[derived] " : ""}${c.text}`,
             )
           : ["  - (none)"]),
+        // A legacy ticket has no criteria sources, so nothing on it is grillable. Said
+        // out loud, because otherwise a plan written by an older planner is indis-
+        // tinguishable at the gate from one the grill found nothing to ask about.
+        ...(shape === "legacy"
+          ? [
+              "  legacy ticket: these criteria predate the criteria sources, so " +
+                "nothing here was grillable",
+            ]
+          : []),
         // Counted rather than silently dropped: a human sees a malformed ticket at
-        // the plan gate instead of at merge time.
+        // the plan gate instead of at merge time. Outside the list, not one more bullet
+        // at the criteria's own indent: a warning that looks like a criterion is read as
+        // one.
         ...(dropped > 0
-          ? [`  - ${dropped} criteria row(s) unreadable, check the ticket JSON`]
+          ? [
+              `  warning: ${dropped} criteria row(s) unreadable, check the ticket JSON`,
+            ]
           : []),
         ...(questions.length
           ? [
