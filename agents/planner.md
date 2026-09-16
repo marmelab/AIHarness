@@ -151,6 +151,8 @@ getting cheaper on a later pass.
 `derived` when it is your judgement. Mark honestly and mark generously: a `derived` row
 costs the human one line to confirm at the plan gate, and a wrongly-`request` row ships an
 invented requirement nobody agreed to. If you are unsure which it is, it is `derived`.
+A criterion taken from the "Mandatory acceptance criteria" list below is `request`: a
+written project convention states it, not your judgement.
 
 **`open_questions`**: the decisions the need does not settle and you had to guess. One row
 per decision, never a restatement of a criterion:
