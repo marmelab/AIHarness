@@ -87,7 +87,24 @@ Rules:
   "type": "feature|fix|config",
   "risk_level": "low|medium|high",
   "scorecard": { "risk": 3, "coupling": 2, "confidence": 8, "testability": 2 },
-  "acceptance_criteria": ["specific, testable", "..."],
+  "acceptance_criteria": [
+    {
+      "text": "The contacts list has a 'this month' filter",
+      "source": "request"
+    },
+    {
+      "text": "The filter resets when the user clears the search",
+      "source": "derived"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "Q1",
+      "question": "Should the filter persist across a page reload?",
+      "recommended": "No: it is a transient view filter, like the existing search.",
+      "grade": "behavior"
+    }
+  ],
   "non_functional_requirements": {
     "performance": "e.g. list loads in <200ms",
     "security": "e.g. RLS enforced",
@@ -129,6 +146,26 @@ strong one.
 the review, never by you. Do not set it and do not remove it: a tier you write is read back
 as a decision the harness made, and removing one drops the ratchet that stops a review from
 getting cheaper on a later pass.
+
+**`acceptance_criteria[].source`**: `request` when the user need states the criterion,
+`derived` when it is your judgement. Mark honestly and mark generously: a `derived` row
+costs the human one line to confirm at the plan gate, and a wrongly-`request` row ships an
+invented requirement nobody agreed to. If you are unsure which it is, it is `derived`.
+
+**`open_questions`**: the decisions the need does not settle and you had to guess. One row
+per decision, never a restatement of a criterion:
+
+- `question`: one line, answerable. Never "is this ok?".
+- `recommended`: the answer you would take, so the human can just confirm. Required: a
+  question with no recommendation makes the human do your work.
+- `grade`: `arch` when the answer changes the architecture, the data model or the scope;
+  `behavior` for edge cases, error handling and UX semantics; `pref` for naming, defaults
+  and cosmetics.
+
+Do NOT list a question the plan or the code already answers: read the code first, and when
+it answers, decide it yourself and write it as a `derived` criterion instead. Do not ask a
+question whose answer would not change the plan. Ten questions on one ticket means the
+ticket is not planned, it is deferred: cut the scope or split it.
 
 **`dependencies`**: ticket IDs that MUST be merged before this ticket starts. Tickets in the same wave (no dep between them) run in parallel in separate worktrees.
 
@@ -349,7 +386,9 @@ conventions, not invented criteria.
   size target — a slightly larger ticket that ships one whole flow is fine.
 - `files_to_modify`: 2-6 hints per ticket, not contracts.
 - Don't specify implementation details (algorithms, component choices) — DEVELOPER's job.
-- Don't invent acceptance criteria not implied by the need.
+- Don't invent acceptance criteria not implied by the need. When an inference is
+  unavoidable, write it as a `derived` criterion rather than dropping it: marked, it
+  costs the human one line at the plan gate; dropped, it ships unagreed.
 - Too vague to decompose safely → stop, ask one clarifying question.
 
 ## Output
