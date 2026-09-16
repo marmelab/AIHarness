@@ -15,11 +15,11 @@ export const TICKET_RE = /^TASK-\d+\.json$/;
 /**
  * Every place a ticket file has been observed, in the order a reader should try them.
  *
- * The orchestrator is TOLD the session dir and does not always use it: one run wrote all
- * five tickets into the runtime scratchpad (`/tmp/claude-<uid>/<project>/<id>/`) instead,
- * so a reader looking only where the hooks keep their state saw no tickets for a session
- * that had five. Reading the scratchpad too is a READ of a directory the session owns, not
- * an endorsement of writing tickets there: the mismatch is still a defect worth closing
+ * The orchestrator is TOLD the session dir and does not always use it: tickets also turn
+ * up in the runtime scratchpad (`/tmp/claude-<uid>/<project>/<id>/`), and a reader looking
+ * only where the hooks keep their state then reports no tickets for a session that has
+ * them. Reading the scratchpad too is a READ of a directory the session owns, not an
+ * endorsement of writing tickets there: the mismatch is still a defect worth closing
  * upstream.
  *
  * One list, because two readers disagreeing about where the tickets are is how a gate

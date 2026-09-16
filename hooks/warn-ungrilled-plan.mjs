@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // PreToolUse(Agent): the plan gate was resumed, and nothing was ever grilled.
 //
-// The plan grill is asserted in three prose files and was enforced nowhere, so a
-// coordinator that simply never ran the skill produced a run byte-identical to a plan
-// that invented nothing. That is the failure this repo has already paid for once: a guard
-// that never fires reports nothing, and here there was no guard at all.
+// The plan grill is asserted in prose and, without this, enforced nowhere: a coordinator
+// that never runs the skill produces a run byte-identical to a plan that invented nothing.
+// A guard that never fires reports nothing, and an invariant with no guard at all reports
+// less.
 //
 // A hook cannot see the GATE level, so the moment is inferred from the dispatch instead:
 // `<intent>execute-plan</intent>` means the coordinator is re-dispatching a fresh
