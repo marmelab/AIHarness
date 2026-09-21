@@ -140,15 +140,28 @@ nothing else on the ticket is edited.
 
 ## 8. Ceiling
 
-More than 5 `arch` questions across all tickets means the plan is vague, not that the human
-should be questioned longer. Ask the first 5, fold those answers, then stop and tell the
-human that re-dispatching the planner with those answers beats carrying on. Recommend it;
-do not do it yourself. The stop records everything still unasked exactly as an early exit
-does.
+Two triggers stop the grill and send the plan back to the planner, recommended, never
+re-dispatched by you.
+
+**Volume.** More than 5 `arch` questions across all tickets means the plan is vague, not
+that the human should be questioned longer. Ask the first 5, fold those answers, then stop.
+
+**Impact.** An `arch` criterion MODIFIED or DROPPED, or an `arch` question answered AGAINST
+its recommendation, means the structure (`files_to_modify`, `dependencies`, `parallel_safe`,
+ticket count) may now be stale, ceiling or no ceiling. CONFIRMED, or answered WITH the
+recommendation, needs nothing: the planner guessed right.
+
+Either way: fold every answer collected so far, then stop and tell the human that
+re-dispatching the planner with those answers beats carrying on, naming which answers moved
+the scope and why that leaves the rest of the plan suspect. Recommend it; do not do it
+yourself. The stop records everything still unasked exactly as an early exit does.
 
 ## 9. Hand back
 
 Two lines: the directory you read and how many criteria were confirmed, modified and
 dropped; how many questions were answered and how many stay open, naming any open `arch`.
-Then hand back to the coordinator, which resumes its plan-gate relay, asks for the approval
-and dispatches what follows.
+When §8 fired, add a third line naming which trigger (volume, impact, or both) and, for
+impact, which answers moved the scope: that is what the coordinator acts on. Then hand back
+to the coordinator: when §8 did not fire, it resumes its plan-gate relay and asks for the
+approval; when §8 fired, it re-dispatches the planner instead, and the plan gate happens
+again on the new tickets.

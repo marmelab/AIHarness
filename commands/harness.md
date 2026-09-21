@@ -68,6 +68,11 @@ is, and find where the orchestrator actually wrote the tickets before you ask fo
 approval. It runs in the MAIN thread, never in a subagent: an agent that asks a question
 ends its turn, and the answer reaches a fresh agent with no memory of asking.
 
+A third hand-back recommends re-dispatching the planner instead: the skill's own §8 fired,
+either on volume or on an answer that moved the scope. Do not ask for the approval on that
+one. Re-dispatch the PLANNER with `REPLAN` in the prompt, plus the answers the grill
+collected, and let the plan gate happen again on the new tickets.
+
 On approval, re-dispatch a FRESH orchestrator (a new `Agent` call, never a `SendMessage`)
 whose prompt carries `<intent>execute-plan</intent>` on a line of its own, plus the same
 `LEVEL`, `GATE`, `PERSONA` and `<session_dir>` lines as the first dispatch. The orchestrator
