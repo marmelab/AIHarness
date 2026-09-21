@@ -42,7 +42,8 @@ than what this product is:
 - `rules/` — the mechanics (worktree scope, output contracts, validation commands,
   security triggers) and the team conventions (coding style, testing, English-only).
 - `skills/` — ponytail, ADR writing, e2e conventions, Playwright patterns, grill-me,
-  worktree detection, rollback-conflict resolution, setup interview, PR description.
+  plan-grill, worktree detection, rollback-conflict resolution, setup interview, PR
+  description.
 - `commands/` — `/harness-diff`, `/harness-revert`, `/harness-target`, the ponytail set.
 - `scripts/` — config-sync check, revert, statusline, monitor, Playwright MCP launcher.
 

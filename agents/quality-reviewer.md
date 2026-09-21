@@ -339,7 +339,17 @@ Run `npm audit --audit-level=high` ONLY if `package.json` / `package-lock.json` 
 
 ### A.1 Spec compliance (BLOCKING)
 
-Read every item in `acceptance_criteria` from the ticket JSON. For each one:
+Read every item in `acceptance_criteria` from the ticket JSON, and read `grill` with them:
+it records the decisions already taken at the plan gate, so what it confirmed is settled. A
+criterion still marked `"source": "derived"`, or a row still listed in `open_questions`, was
+never confirmed by anyone, so do NOT treat it as settled.
+
+It is still a criterion, and it is graded exactly like the rest: `[FAIL]` and the
+`REJECTED:` path included. What the label changes is the BULLET, not the severity. Say in it
+that the criterion was unconfirmed at the plan gate, so the developer can push back on a
+planner invention instead of implementing it silently.
+
+For each criterion:
 
 - **Code-verifiable** (source confirms it — prop present, file deleted, type defined, variable set): verify here, mark `[PASS]` or `[FAIL]`.
 - **Behavior-verifiable** (requires runtime rendering to confirm): verify in **Part C** (integration check + screenshots) and mark `[PASS]` or `[FAIL]` there.

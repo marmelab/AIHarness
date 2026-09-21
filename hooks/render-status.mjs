@@ -23,12 +23,17 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import {
+  readCriteria,
+  readGrill,
+  readOpenQuestions,
+} from "./lib/acceptance.mjs";
 import { sessionDirFromEnv } from "./lib/config.mjs";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
 import { reviewsDir } from "./lib/reviews.mjs";
-import { scratchpadDir } from "./lib/scratchpad.mjs";
+import { ticketDirs } from "./lib/tickets.mjs";
 import { getBaseBranch, git } from "./lib/git.mjs";
 import { sessionBranch } from "./lib/topology.mjs";
 
@@ -87,30 +92,10 @@ const listing = (dir) => {
   }
 };
 
-// Every place a ticket file has been observed. The orchestrator is TOLD the session dir
-// and does not always use it: one run wrote all five tickets into the runtime scratchpad
-// (`/tmp/claude-<uid>/<project>/<id>/`) instead, so a board looking only where the hooks
-// keep their state reported "0/0 merged · no tickets yet" for a session that merged five.
-// The board had never been wrong about this before only because it had never rendered.
-//
-// Reading the scratchpad too is a READ of a directory the session owns, not an endorsement
-// of writing tickets there — the mismatch itself is still a defect worth closing upstream.
-const ticketDirs = () => {
-  const dirs = [ctx.ticketsDir, ctx.sessionDir];
-  try {
-    const pad = scratchpadDir(ctx.sessionId);
-    // Tickets sit next to the scratchpad, not inside it.
-    if (pad) dirs.push(dirname(pad));
-  } catch {
-    // no session id / unreadable /tmp -> the two dirs above still answer
-  }
-  return dirs;
-};
-
 // A ticket's STATUS lives inside its file, so the dir's mtime is not enough.
 const ticketsMtimeMs = () => {
   let newest = 0;
-  for (const dir of ticketDirs()) {
+  for (const dir of ticketDirs(ctx)) {
     try {
       for (const f of readdirSync(dir)) {
         if (TICKET_RE.test(f)) newest = Math.max(newest, mtimeMs(join(dir, f)));
@@ -157,9 +142,9 @@ const lastRenderKey = (() => {
 if (lastRenderKey && renderKey === lastRenderKey) process.exit(0);
 
 // Tickets live in the session dir itself, a `tickets/` subdir, or the scratchpad — see
-// ticketDirs().
+// lib/tickets.mjs ticketDirs().
 function readTickets() {
-  for (const dir of ticketDirs()) {
+  for (const dir of ticketDirs(ctx)) {
     if (!existsSync(dir)) continue;
     const files = readdirSync(dir).filter((f) => TICKET_RE.test(f));
     if (!files.length) continue;
@@ -171,6 +156,8 @@ function readTickets() {
           title: t.title || t.description || "",
           status: t.status || "planned",
           acceptanceCriteria: t.acceptance_criteria || [],
+          openQuestions: t.open_questions || [],
+          grill: t.grill || [],
           files: t.files_to_modify || [],
           dependencies: t.dependencies || [],
         };
@@ -333,17 +320,62 @@ function build() {
   const ticketsMd = [
     `# Tickets: session \`${ctx.sessionShort}\``,
     "",
-    ...tickets.flatMap((t) => [
-      `## ${t.id} · ${t.title}`,
-      `- **Status:** ${t.status}${approved(t.id) ? " (reviewed ✅)" : ""}`,
-      `- **Depends on:** ${t.dependencies?.length ? t.dependencies.join(", ") : "(none)"}`,
-      `- **Files:** ${t.files?.length ? t.files.map((f) => `\`${f}\``).join(", ") : "(none)"}`,
-      "- **Acceptance criteria:**",
-      ...(t.acceptanceCriteria?.length
-        ? t.acceptanceCriteria.map((c) => `  - ${c}`)
-        : ["  - (none)"]),
-      "",
-    ]),
+    ...tickets.flatMap((t) => {
+      const { shape, criteria, dropped } = readCriteria({
+        acceptance_criteria: t.acceptanceCriteria,
+      });
+      const questions = readOpenQuestions({
+        open_questions: t.openQuestions,
+      });
+      const decided = readGrill({ grill: t.grill });
+      return [
+        `## ${t.id} · ${t.title}`,
+        `- **Status:** ${t.status}${approved(t.id) ? " (reviewed ✅)" : ""}`,
+        `- **Depends on:** ${t.dependencies?.length ? t.dependencies.join(", ") : "(none)"}`,
+        `- **Files:** ${t.files?.length ? t.files.map((f) => `\`${f}\``).join(", ") : "(none)"}`,
+        "- **Acceptance criteria:**",
+        ...(criteria.length
+          ? criteria.map(
+              (c) =>
+                `  - ${c.source === "derived" ? "[derived] " : ""}${c.text}`,
+            )
+          : ["  - (none)"]),
+        // A legacy ticket has no criteria sources, so nothing on it is grillable. Said
+        // out loud, because otherwise a plan written by an older planner is indis-
+        // tinguishable at the gate from one the grill found nothing to ask about.
+        ...(shape === "legacy"
+          ? [
+              "  legacy ticket: these criteria predate the criteria sources, so " +
+                "nothing here was grillable",
+            ]
+          : []),
+        // Counted rather than silently dropped: a human sees a malformed ticket at
+        // the plan gate instead of at merge time. Outside the list, not one more bullet
+        // at the criteria's own indent: a warning that looks like a criterion is read as
+        // one.
+        ...(dropped > 0
+          ? [
+              `  warning: ${dropped} criteria row(s) unreadable, check the ticket JSON`,
+            ]
+          : []),
+        ...(questions.length
+          ? [
+              "  open questions:",
+              ...questions.map((q) => `  - [${q.grade}] ${q.question}`),
+            ]
+          : []),
+        // The gate's decisions, after the questions still open: the two blocks are
+        // disjoint by construction, and a decision reached in the chat is otherwise lost
+        // to everyone downstream.
+        ...(decided.length
+          ? [
+              "  decided at the gate:",
+              ...decided.map((d) => `  - ${d.question} -> ${d.answer}`),
+            ]
+          : []),
+        "",
+      ];
+    }),
   ].join("\n");
 
   // status.json - compact, for the opt-in statusline.

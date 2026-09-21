@@ -20,7 +20,10 @@ hook enforcement. **Opt-in, off by default**: `#harness` (or "use the agent team
 a request through the orchestrator; otherwise the main thread implements it itself.
 
 Gate levels: `gate=none|migration|plan|waves`, default `plan` (pauses after planning for
-ticket review, and before applying a database migration).
+ticket review, and before applying a database migration). At the plan gate, run
+`Skill({skill: "plan-grill"})` over the session's tickets before approving: it questions the
+criteria the planner derived and the decisions it had to guess, and folds the answers back
+into the tickets.
 
 Reviews are tiered (`trivial`/`normal`/`hard`/`critical`) from the plan and the diff; set
 the reviewer model per tier in `harness.config.json`'s `review.tiers.<tier>.model`.

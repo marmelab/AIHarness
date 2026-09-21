@@ -45,6 +45,7 @@ const AGENT_GUARDS = [
   "enforce-dev-dispatch",
   "force-foreground-orchestrator-dispatch",
   "setup-worktree",
+  "warn-ungrilled-plan",
 ];
 
 let TMP, APP_DIR, sessionDir, env;
