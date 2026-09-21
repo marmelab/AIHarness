@@ -12,36 +12,15 @@
 //   3 - could NOT decide: --session missing, or the passed <SESSION_SHORT>
 //       has session-base siblings but no refs of its own (likely a mismatch).
 import { execFileSync } from "node:child_process";
+// relevanceRegex lives in hooks/lib/config.mjs, beside the config it reads: the review
+// router needs the same matcher, and a second copy of a glob compiler is a second set of
+// corner cases.
 import {
   loadConfig,
   isDeployEnabled,
   deployGlobs,
+  relevanceRegex,
 } from "../hooks/lib/config.mjs";
-
-// Convert a deploy-relevant glob (config.deploy.relevantGlobs) into an anchored
-// regex source. `**/` -> optional dir prefix, `**` -> any, `*` -> non-slash. The
-// git diff paths are repo-relative, so anchor at the start.
-export function globToRegexSource(glob) {
-  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  // Placeholder the glob operators FIRST, expand `*` last, then swap the
-  // placeholders in. Otherwise the `.*` inserted for `**` would be re-mangled by
-  // the single-`*` -> `[^/]*` pass.
-  const body = escaped
-    .replace(/\*\*\//g, "\0DS\0")
-    .replace(/\*\*/g, "\0D\0")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\0DS\0/g, "(?:.*/)?")
-    .replace(/\0D\0/g, ".*");
-  return `^${body}`;
-}
-
-// The single deploy-relevance matcher, built from config.deploy.relevantGlobs
-// (one definition, shared with the orchestrator's SIMPLE-review gate and
-// the planner's schema wording). Empty globs -> matches nothing.
-export function relevanceRegex(globs) {
-  if (!globs.length) return /a^/; // never matches
-  return new RegExp(globs.map(globToRegexSource).join("|"));
-}
 
 function main() {
   const args = process.argv.slice(2);

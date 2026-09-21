@@ -76,5 +76,13 @@
   },
   "documentator": {
     "author": { "name": "Documentator", "email": "documentator@harness.local" }
+  },
+  "review": {
+    "tiers": {
+      "trivial": { "model": "sonnet" },
+      "normal": { "model": "sonnet" },
+      "hard": { "model": "default" },
+      "critical": { "model": "fable" }
+    }
   }
 }

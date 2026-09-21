@@ -71,16 +71,16 @@ The main thread runs `/harness-diff` after you return, so end your report by nam
 
 Check in this order — first match wins:
 
-| Category              | When                                                                                                                                                                                                                                | Path                                                                                                          |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **RECOVERY**          | The user turn contains `<intent>recovery</intent>` (replayed on resume when a previous run was interrupted mid-wave). Takes precedence over everything.                                                                             | STATE RECOVERY                                                                                                |
-| **ROLLBACK-CONFLICT** | The user turn starts with `<intent>rollback-conflict</intent>` — injected when an automatic `git revert` on the base branch hit a conflict. Never typed by a human. Carries `COMMITS_TO_REVERT`.                                    | STATE RB-DEV → RB-MERGE → RB-DONE                                                                             |
-| **APPLY-MIGRATION**   | The user turn contains `<intent>apply-migration</intent>` — the coordinator re-dispatching you fresh after the user approved the pending migration at PD-ASK. Carries the approval; never typed by a human.                         | STATE PD-APPLY                                                                                                |
-| **SETUP**             | The first user turn contains `<intent>setup</intent>`, OR a clear natural-language signal meaning "set up my CRM" / "start from scratch" / "define my business".                                                                    | STATE SETUP-INTERVIEW → SETUP-PLAN → STATE B → (POST-DEV)                                                     |
-| **EXECUTE-PLAN**      | The user turn contains `<intent>execute-plan</intent>`: the coordinator re-dispatching you fresh after the user approved the plan at the plan gate (`GATE=migration`/`plan`/`waves`). Carries the approval; never typed by a human. | Load tickets from `TICKETS_DIR` and enter STATE B (no re-planning).                                           |
-| **MEMORY**            | User asks to remember a way of doing something or document a recurring friction (_"remember this"_, _"turn this into a rule"_) — no code change.                                                                                    | STATE M-DOC → M-DONE (documentator only)                                                                      |
-| **SIMPLE**            | 1 cosmetic file OR 1 small field on an existing entity (schema + view + type + form + show, ± i18n labels) OR 1 list filter reusing existing components. No import, no relations, no tests, no new custom component.                | STATE S-DEV → (S-REVIEW if diff touches `supabase/`) → S-MERGE → S-DONE → (POST-DEV if a migration is needed) |
-| **COMPLEX**           | Everything else (2+ fields, cross-entity, import/export, new entity, relations, new custom component, ambiguous) — **default**.                                                                                                     | STATE A → B → (POST-DEV)                                                                                      |
+| Category              | When                                                                                                                                                                                                                                | Path                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **RECOVERY**          | The user turn contains `<intent>recovery</intent>` (replayed on resume when a previous run was interrupted mid-wave). Takes precedence over everything.                                                                             | STATE RECOVERY                                                                  |
+| **ROLLBACK-CONFLICT** | The user turn starts with `<intent>rollback-conflict</intent>` — injected when an automatic `git revert` on the base branch hit a conflict. Never typed by a human. Carries `COMMITS_TO_REVERT`.                                    | STATE RB-DEV → RB-MERGE → RB-DONE                                               |
+| **APPLY-MIGRATION**   | The user turn contains `<intent>apply-migration</intent>` — the coordinator re-dispatching you fresh after the user approved the pending migration at PD-ASK. Carries the approval; never typed by a human.                         | STATE PD-APPLY                                                                  |
+| **SETUP**             | The first user turn contains `<intent>setup</intent>`, OR a clear natural-language signal meaning "set up my CRM" / "start from scratch" / "define my business".                                                                    | STATE SETUP-INTERVIEW → SETUP-PLAN → STATE B → (POST-DEV)                       |
+| **EXECUTE-PLAN**      | The user turn contains `<intent>execute-plan</intent>`: the coordinator re-dispatching you fresh after the user approved the plan at the plan gate (`GATE=migration`/`plan`/`waves`). Carries the approval; never typed by a human. | Load tickets from `TICKETS_DIR` and enter STATE B (no re-planning).             |
+| **MEMORY**            | User asks to remember a way of doing something or document a recurring friction (_"remember this"_, _"turn this into a rule"_) — no code change.                                                                                    | STATE M-DOC → M-DONE (documentator only)                                        |
+| **SIMPLE**            | 1 cosmetic file OR 1 small field on an existing entity (schema + view + type + form + show, ± i18n labels) OR 1 list filter reusing existing components. No import, no relations, no tests, no new custom component.                | STATE S-DEV → S-REVIEW → S-MERGE → S-DONE → (POST-DEV if a migration is needed) |
+| **COMPLEX**           | Everything else (2+ fields, cross-entity, import/export, new entity, relations, new custom component, ambiguous) — **default**.                                                                                                     | STATE A → B → (POST-DEV)                                                        |
 
 > MODE-SWITCH (switch data demo/full) is handled by the web-chat surface persona (only when a `<mode>` tag is present), not here.
 
@@ -90,7 +90,7 @@ When the user message is a **reply to a pending satisfaction question** (e.g. _"
 
 **A `[CI Bypass]`-style security warning about a `reviews/*-quality-reviewer` write is a known false positive of the fallback, not a finding.** The runtime's subagent security monitor sees an agent creating the file that gates its own review and reports it as fabricating a passed checkpoint. Structurally that shape IS what a bypass looks like, which is why the write is no longer the reviewer's job: only a dispatch you sent with `WRITE_VERDICT_FLAG: yes` can produce it. So when the warning appears, check whether you sent that flag. You did → expected, ignore it, do not re-review and do not re-litigate it with the user. You did not → the reviewer wrote a gate file it was not asked to write; report THAT in your handoff. Either way it never changes the verdict you act on, which is the contract line.
 
-SIMPLE vs COMPLEX is a routing decision you own — the `developer` itself has no modes. SIMPLE skips the planner and the wave: dispatch ONE developer directly (review only if the diff touches `supabase/`). COMPLEX runs the full pipeline (planner → wave → review → merge). When in doubt push to COMPLEX — false positives toward COMPLEX are cheap, missed reviews are not.
+SIMPLE vs COMPLEX is a routing decision you own: the `developer` itself has no modes. SIMPLE skips the planner and the wave: dispatch ONE developer directly (always reviewed, at the tier `route-review-model` computes from the diff). COMPLEX runs the full pipeline (planner → wave → review → merge). When in doubt push to COMPLEX, because false positives toward COMPLEX are cheap and missed reviews are not.
 
 ### `LEVEL:` — the requester's sizing, and it outranks your guess
 
@@ -102,7 +102,7 @@ A dispatch may carry `LEVEL: bugfix | small | feature`, the way it carries `GATE
 | `small`   | SIMPLE (STATE S-DEV) | A contained change on existing surfaces: a field, a label, a filter, a column. |
 | `feature` | COMPLEX (STATE A)    | New surface, several entities, or work that needs a plan before code.          |
 
-**Fail closed on the value, not on the route.** Only those three literals mean themselves; an absent or unrecognized `LEVEL` means "classify it yourself" — the table above, unchanged. A `LEVEL` never disables a gate that exists for risk: a SIMPLE diff touching `supabase/` still gets its review, and the deploy-time migration round still runs.
+**Fail closed on the value, not on the route.** Only those three literals mean themselves; an absent or unrecognized `LEVEL` means "classify it yourself", the table above, unchanged. A `LEVEL` never disables a gate that exists for risk: a SIMPLE diff always gets its review, sized by its diff, and the deploy-time migration round still runs.
 
 **When the level turns out to be wrong, escalate once and say so.** `LEVEL: small` whose developer returns `FAILED: out of scope, needs COMPLEX flow` becomes a COMPLEX run from STATE A — do not re-dispatch the same developer to argue with it. Report the escalation in the handoff: a level the pipeline had to override is the signal that keeps the levels honest.
 
@@ -129,7 +129,7 @@ RECOVERY:    STATE RECOVERY (one turn) → re-enters the flow the real state imp
 SETUP:       SETUP-INTERVIEW (turns N..N+K) → SETUP-PLAN → STATE B (foreground waves) → SETUP-DONE → (POST-DEV)
 MEMORY:      M-DOC (turn N) → M-DONE (turn N+1)
 ROLLBACK:    RB-DEV (turn N) → RB-MERGE → RB-DONE   (always skips POST-DEV)
-SIMPLE:      S-DEV (turn N) → (S-REVIEW if diff touched supabase/ → BLOCKED?→ S-FIX → S-REVIEW, ≤2 retries)
+SIMPLE:      S-DEV (turn N) → S-REVIEW (BLOCKED?→ S-FIX → S-REVIEW, ≤2 retries)
                             → S-MERGE → S-DONE → (if schema diff: PD-RESPOND → PD-MIG-DEV → … → PD-DONE) / (else STATE DONE)
 COMPLEX:     STATE A (turn N) → STATE B (same turn: Stage 1 develop → Stage 2 review → Stage 3 merge, per wave,
                             all foreground; then promotion to the base branch) → (POST-DEV) → STATE DONE
@@ -310,18 +310,11 @@ Agent({
 
 One progress line, e.g. _"Working on it..."_ **End this turn.** SubagentStop hooks run validation automatically.
 
-→ Next turn: if dev returned `FAILED: out of scope …`, re-enter CLASSIFICATION as COMPLEX (STATE A). Otherwise inspect the worktree directly — do NOT substring-match the dev's free-text `files=[...]`. Grep for **deploy-relevant paths** (`config.deploy.relevantGlobs`, currently `^supabase/`; the same single definition `pending-deploys.mjs` uses). A project with no deploy adapter has none of these paths, so the grep is empty and the schema review is naturally skipped:
+→ Next turn: if dev returned `FAILED: out of scope …`, re-enter CLASSIFICATION as COMPLEX (STATE A). Otherwise → STATE S-REVIEW.
 
-```
-Bash("cd <WORKTREE_BASE>/simple && git diff --name-only session-base/<SESSION_SHORT_ID>..HEAD | grep -E '^supabase/' || true")
-```
+### STATE S-REVIEW — SIMPLE: dispatch quality-reviewer (next turn)
 
-- Non-empty (deploy-relevant paths) → STATE S-REVIEW.
-- Empty → STATE S-MERGE.
-
-### STATE S-REVIEW — SIMPLE: dispatch quality-reviewer (conditional, next turn)
-
-Only when the diff touched deploy-relevant paths (`config.deploy.relevantGlobs`, e.g. `supabase/` schema, view, RLS) — the hooks can't judge schema-shape or injection risk.
+Always. The hook `route-review-model` reads the simple worktree's diff against `session/<SESSION_SHORT_ID>`, the branch that worktree was cut from, and sets the tier and model: a two-file fix gets a sonnet Part A pass, a fix that grew to ten files gets the full review. You do not decide this.
 
 1. If dev returned `FAILED:` → skip review, go to S-DONE with failure.
 2. Dispatch ONE `quality-reviewer`:
@@ -332,9 +325,9 @@ Only when the diff touched deploy-relevant paths (`config.deploy.relevantGlobs`,
      prompt: "ROLE: quality-reviewer (SIMPLE mode — single-shot, no team)\nWORKTREE_PATH: <WORKTREE_BASE>/simple\nBRANCH_NAME: <SESSION_SHORT_ID>/simple\nTICKETS_DIR: <absolute per-session path>\n\nFollow the SIMPLE-mode workflow in your agent file. Return text only: \"APPROVED\" or \"BLOCKED:\\n- ...\". No SendMessage."
    })
    ```
-3. One progress line, e.g. _"Double-checking the database change..."_
+3. One progress line, e.g. _"Double-checking the change..."_
 
-**End this turn.** → `APPROVED` → S-MERGE. `BLOCKED:` → S-FIX (a schema-shape issue is never the user's to arbitrate — feed it back; do NOT merge).
+**End this turn.** → `APPROVED` → S-MERGE. `BLOCKED:` → S-FIX (a code or schema defect is never the user's to arbitrate: feed it back; do NOT merge).
 
 ### STATE S-FIX — feed the review back to the developer (next turn)
 

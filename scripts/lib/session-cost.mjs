@@ -22,6 +22,11 @@ export const RATES = {
   "sonnet-5": [2, 10],
   "opus-5": [5, 25],
   "haiku-4-5": [1, 5],
+  // The critical review tier. Both ids carry the same price, and an unpriced one would
+  // fall back to the sonnet-5 rate: a fifth of the truth, on the most expensive dispatch
+  // the harness makes.
+  "fable-5": [10, 50],
+  "fable-5-1": [10, 50],
 };
 
 export const FALLBACK_RATE_MODEL = "sonnet-5";

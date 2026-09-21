@@ -10,6 +10,10 @@ import { REPO } from "./paths.mjs";
 
 export const CONFIG_FILENAME = "harness.config.json";
 
+// Duplicated from lib/tier.mjs rather than imported: tier.mjs spawns git to compute the
+// diff, and the config loader must stay free of that dependency.
+const REVIEW_TIERS = ["trivial", "normal", "hard", "critical"];
+
 // Minimal safe baseline. The committed harness.config.json overrides these.
 // Optional capabilities (deploy, app) are ABSENT here on purpose: a capability
 // exists iff its block is present in the config.
@@ -24,6 +28,22 @@ const DEFAULTS = {
   worktree: { provision: "npm-link" },
   skills: { developerMenu: [] },
   roles: {},
+  // The reviewer model per difficulty tier (lib/tier.mjs). "default" removes the dispatch's
+  // `model` so the agent's own frontmatter applies, which is the expensive direction: a
+  // runtime that ignores `model` then reviews with the declared model, never a weaker one.
+  //
+  // `critical` stays on "default" HERE while the committed harness.config.json names a
+  // model above the reviewer's own. These defaults are what a repo with NO config gets,
+  // and spending a project's money on the strongest model is a decision that project
+  // declares, never one it inherits from an absent file: fail open on ignorance.
+  review: {
+    tiers: {
+      trivial: { model: "sonnet" },
+      normal: { model: "sonnet" },
+      hard: { model: "default" },
+      critical: { model: "default" },
+    },
+  },
   launcher: {
     sessionDirEnv: "CHAT_SESSION_DIR",
     turnSentinelDir: null,
@@ -92,6 +112,22 @@ function validate(cfg) {
     }
   }
 
+  if ("review" in cfg && cfg.review !== undefined) {
+    if (!isObject(cfg.review) || !isObject(cfg.review.tiers)) {
+      fail("`review.tiers` must be an object when `review` is present");
+    }
+    for (const [tier, spec] of Object.entries(cfg.review.tiers)) {
+      if (!REVIEW_TIERS.includes(tier)) {
+        fail(
+          `review.tiers.${tier}: unknown tier (expected one of ${REVIEW_TIERS.join(", ")})`,
+        );
+      }
+      if (!isObject(spec) || typeof spec.model !== "string" || !spec.model) {
+        fail(`review.tiers.${tier} needs a non-empty string \`model\``);
+      }
+    }
+  }
+
   if ("deploy" in cfg && cfg.deploy !== undefined) {
     if (!isObject(cfg.deploy) || !Array.isArray(cfg.deploy.relevantGlobs)) {
       fail("`deploy.relevantGlobs` must be an array when `deploy` is present");
@@ -139,6 +175,40 @@ export const validationSteps = (cfg) => cfg.validation?.steps ?? [];
 export const extraForbidden = (cfg) => cfg.validation?.extraForbidden ?? [];
 export const isDeployEnabled = (cfg) => isObject(cfg.deploy);
 export const deployGlobs = (cfg) => cfg.deploy?.relevantGlobs ?? [];
+
+/**
+ * Convert a deploy-relevant glob (config.deploy.relevantGlobs) into an anchored regex
+ * source. `**\/` -> optional dir prefix, `**` -> any, `*` -> non-slash. The git diff paths
+ * are repo-relative, so anchor at the start.
+ * @param {string} glob
+ * @returns {string}
+ */
+export function globToRegexSource(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  // Placeholder the glob operators FIRST, expand `*` last, then swap the placeholders in.
+  // Otherwise the `.*` inserted for `**` would be re-mangled by the single-`*` ->
+  // `[^/]*` pass.
+  const body = escaped
+    .replace(/\*\*\//g, "\0DS\0")
+    .replace(/\*\*/g, "\0D\0")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\0DS\0/g, "(?:.*/)?")
+    .replace(/\0D\0/g, ".*");
+  return `^${body}`;
+}
+
+/**
+ * The single deploy-relevance matcher, built from config.deploy.relevantGlobs: one
+ * definition shared by the deploy round (scripts/pending-deploys.mjs) and the review
+ * router's schema escalation. Empty globs match nothing, so a project that declares no
+ * deploy adapter has no deploy-relevant path.
+ * @param {string[]} globs
+ * @returns {RegExp}
+ */
+export function relevanceRegex(globs) {
+  if (!globs.length) return /a^/; // never matches
+  return new RegExp(globs.map(globToRegexSource).join("|"));
+}
 export const isAppSmokeEnabled = (cfg) => isObject(cfg.app);
 export const worktreeProvision = (cfg) => cfg.worktree?.provision ?? "npm-link";
 export const roleNames = (cfg) => Object.keys(cfg.roles ?? {});
@@ -194,3 +264,6 @@ export const prePrSteps = (cfg) =>
   validationSteps(cfg).filter(
     (s) => (s.kind === "typecheck" || s.kind === "lint") && !s.changedScoped,
   );
+// The reviewer model for a tier; "default" when the tier is unknown, the expensive way.
+export const reviewTierModel = (cfg, tier) =>
+  cfg.review?.tiers?.[tier]?.model ?? "default";

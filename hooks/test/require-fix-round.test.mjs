@@ -53,11 +53,12 @@ const dispatch = ({
   taskId = "TASK-001",
   extra = "",
   mode,
+  roleLine = "ROLE: quality-reviewer",
   role = "aiharness:quality-reviewer",
 } = {}) => {
   if (!session) startSession();
   const lines = [
-    "ROLE: quality-reviewer",
+    roleLine,
     `TASK_ID: ${taskId}`,
     `WORKTREE_PATH: /tmp/wt/${taskId}`,
     ...(mode ? [`MODE: ${mode}`] : []),
@@ -150,6 +151,20 @@ describe("require-fix-round", () => {
         expect(dispatch({ mode }).status).toBe(0);
       },
     );
+  });
+
+  describe("the whole-feature mode is read wherever the orchestrator writes it", () => {
+    test("the feature review's own dispatch shape, with MODE: inline in the ROLE line", () => {
+      // The orchestrator's literal:
+      //   ROLE: quality-reviewer (MODE: feature-review)
+      // A pattern anchored to line start reads no mode there. That dispatch carries no
+      // TASK_ID today, so the fail-open on a missing id is all that spares it; the mode
+      // itself must be what puts it out of scope.
+      const roleLine = "ROLE: quality-reviewer (MODE: feature-review)";
+      expect(dispatch({ roleLine }).status).toBe(0);
+      expect(dispatch({ roleLine }).status).toBe(0);
+      expect(dispatch({ roleLine }).status).toBe(0);
+    });
   });
 
   describe("fails open on ignorance", () => {

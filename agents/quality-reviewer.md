@@ -1,6 +1,6 @@
 ---
 name: quality-reviewer
-description: Combined code quality, security, and QA review agent — the sole reviewer in a COMPLEX wave (code + security review AND runtime/integration validation), single-shot in the SIMPLE flow when the diff touched `supabase/` (schema/view/RLS gating before merge), and single-shot in `migration-review` mode (gating the deploy-time migration before merge).
+description: Combined code quality, security, and QA review agent, the sole reviewer in a COMPLEX wave (code + security review AND runtime/integration validation), single-shot in the SIMPLE flow (every SIMPLE change is reviewed, at the tier the harness computed from its diff), and single-shot in `migration-review` mode (gating the deploy-time migration before merge).
 model: opus
 tools:
   - Read
@@ -47,6 +47,37 @@ Verify the implementation is correct, spec-compliant, follows project convention
   - `Skill({skill: "frontend-dev"})` — React/UI patterns to check against
   - `Skill({skill: "backend-dev"})` — Supabase/SQL patterns to check against
   - `Skill({skill: "e2e-conventions"})` — e2e test conventions for this project
+
+## Depth: read `REVIEW_TIER:` first
+
+The harness writes `REVIEW_TIER: trivial | normal | hard | critical` into your dispatch
+(from the planner's scorecard and the real diff; it never lowers a stored tier). It sets
+how deep you go, not what you may skip on a finding:
+
+| tier     | Part A (code)                                                        | Part B (security)        | Part C (runtime)                                                                  |
+| -------- | -------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| trivial  | diff-scoped: every BLOCKING check, numbered or conditional           | full, scoped to the diff | only criteria the code cannot settle; no browser run unless a criterion needs one |
+| normal   | full                                                                 | full                     | only behavior-verifiable criteria, 1 screenshot budget                            |
+| hard     | full, re-verify the blast radius (grep the changed symbols' callers) | full                     | full                                                                              |
+| critical | as hard, plus read every caller of every changed export              | full                     | full, 3 screenshot budget                                                         |
+
+Every BLOCKING check is in scope at EVERY tier, `trivial` included: the numbered ones
+(A.1, A.2, A.3, A.6b, A.7) and the conditional ones that fire on what the diff touches
+(Visual theming). A tier scopes a check to the diff, it never drops one. A.7 is why that
+matters: "this new UI, filter, form or interaction needs an e2e test" is a judgement no
+hook makes, and A.2 says in so many words not to flag a missing test as over-engineering
+because A.7 covers it. What `trivial` saves is the WARNING breadth (A.4, A.5, A.6, A.8)
+and the runtime budget. A check a mode's own rubric names, such as the SIMPLE rows below,
+fires whatever the tier.
+
+This section governs the two reviews the harness tiers: the per-ticket wave review and the
+single-shot SIMPLE review. The feature-review, feature-smoke, migration-review and
+standalone review modes are never tiered, carry no `REVIEW_TIER:` line, and run at the
+depth their own sections define.
+
+A finding at any tier is still a finding: a `trivial` review that sees an injection blocks.
+In a tiered review, a missing `REVIEW_TIER:` line means `hard`. Report the tier you applied
+on the line above your contract line: `tier: <tier>`.
 
 ## OUTPUT CONTRACT (required)
 
@@ -220,24 +251,25 @@ Files to review are listed in the spawn prompt. Read them in
 
 ## SIMPLE mode (single-shot, no team)
 
-Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — single-shot, no team)`. No `COUNTERPART`, no `TEAM_LEAD`, no `TASK_ID`. A `developer` running the SIMPLE flow has already committed on the `<short>/simple` worktree; the orchestrator dispatches you only because the diff touched `supabase/` and the SIMPLE flow has no other reviewer. Act immediately — there is no peer to wait for.
+Detection: your spawn prompt contains `ROLE: quality-reviewer (SIMPLE mode — single-shot, no team)`. No `COUNTERPART`, no `TEAM_LEAD`, no `TASK_ID`. A `developer` running the SIMPLE flow has already committed on the `<short>/simple` worktree; the orchestrator dispatches you for EVERY SIMPLE change, because the SIMPLE flow has no other reviewer. How deep you go is not its decision either: the harness stamps a `REVIEW_TIER:` line onto your dispatch, computed from the worktree's diff against `session/<short>` (see the Depth section). Act immediately, there is no peer to wait for.
 
 1. **Read the worktree diff** — the developer typically produced a single commit:
    ```
    git -C <WORKTREE_PATH> log -p -1
    ```
-   For a multi-commit branch, diff against the session fork anchor `session-base/<short>` (a local ref, independent of the base branch's name — main, master, or a working branch), not `$CLAUDE_PROJECT_DIR`'s HEAD:
+   For a multi-commit branch, diff against the session branch `session/<short>` (the branch this worktree was cut from, and the same base `route-review-model` tiers against), not `$CLAUDE_PROJECT_DIR`'s HEAD:
    ```
    SHORT=$(git -C <WORKTREE_PATH> rev-parse --abbrev-ref HEAD | cut -d/ -f1)
-   git -C <WORKTREE_PATH> diff "session-base/$SHORT"..HEAD
+   git -C <WORKTREE_PATH> diff "session/$SHORT"...HEAD
    ```
-2. **Apply the scope-relevant rubric only** — SIMPLE diffs are small and schema-focused:
-   - **A.6b (schema changes)** — no `supabase/migrations/*.sql` in the diff (off-limits to SIMPLE); schema files in `supabase/schemas/*.sql` only; new column appended at the end of the `03_views.sql` SELECT, no ordinal shift.
-   - **B.1 (RLS)** — RLS enabled, policies cover required ops, no `USING (true)`.
+2. **Apply the rubric the diff earns.** The rows below fire when the diff touches the paths they name; a SIMPLE diff that touches none of them is an ordinary diff, and Parts A and B apply to it at the depth the `REVIEW_TIER:` line sets:
+   - **A.6b (schema changes)**, when the diff touches `supabase/schemas/`: no `supabase/migrations/*.sql` in the diff (off-limits to SIMPLE); schema files in `supabase/schemas/*.sql` only; new column appended at the end of the `03_views.sql` SELECT, no ordinal shift.
+   - **B.1 (RLS)**, when the diff touches a policy: RLS enabled, policies cover required ops, no `USING (true)`.
    - **B.3 (injection)** — no string-concatenated SQL, no `||` of user input.
    - **A.6 (backend patterns)** — input validation, no unbounded queries.
    - **B.2 (secrets)** — no service_role key, no hardcoded tokens.
-     Skip Parts A.1–A.5 (spec compliance, TypeScript, React patterns) and A.7 (tests) — hooks cover them and SIMPLE has no ticket spec.
+     A.1 (spec compliance) always drops out: SIMPLE has no ticket spec, so judge the change against the request in the developer's dispatch and against the codebase's own conventions.
+     These rows ADD to Part A, they do not replace it, and they fire at every tier: A.2, A.3 and A.7 apply here too, scoped to the diff at `trivial` (see the Depth section).
 3. **Return text only — no SendMessage**:
    - `APPROVED` — zero blocking issues. Exactly that one word on its own line.
    - `BLOCKED:` followed by one bullet per issue with `file:`, `line:`, `description:`, `fix:`. Final line: `Summary: N blocking issues.`

@@ -24,6 +24,9 @@ Around that, hooks:
   reject the orchestrator's stop if it tries to finish while that suite is red
 - block the commands that would make the pipeline look healthy while being broken:
   merging outside the merger, launching arbitrary containers, opening a headed browser
+- size each review by a difficulty tier computed from the plan and the diff, so a
+  two-file fix pays a sonnet pass, a schema change pays opus, and a ticket the planner
+  scored critical pays fable
 
 A test suite covers those hooks, and CI runs it on every push. That coverage is the
 product: an untested guard fails silently, and one of them had been inert for months
@@ -52,7 +55,7 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
       {
         "id": "unit",
         "kind": "unit",
-        "runner": "vitest",
+        "command": "npm test",
         "changedScoped": true
       }
     ],
@@ -64,12 +67,29 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
     "developer": { "model": "sonnet", "pipeline": true },
     "quality-reviewer": { "model": "opus", "pipeline": true },
     "merger": { "model": "haiku", "pipeline": true }
+  },
+  "review": {
+    "tiers": {
+      "trivial": { "model": "sonnet" },
+      "normal": { "model": "sonnet" },
+      "hard": { "model": "default" },
+      "critical": { "model": "fable" }
+    }
   }
 }
 ```
 
 This repo's own [harness.config.json](harness.config.json) is a working reference, and
 `node scripts/check-config-sync.mjs` tells you whether your roles cover the hook matchers.
+
+`review.tiers` runs in both directions: below the reviewer's own model the harness names a
+cheaper one, and at `critical` it names `fable`, above it. The escalation is the one
+rewrite that fails downward, since a runtime that ignores `model` there reviews with the
+agent's declared model instead. That model is the floor of every failure path and is what
+every review cost before the tiers existed, so none of them reviews more weakly than the
+untiered harness did. Whatever a tier names also needs a rate in
+[scripts/lib/session-cost.mjs](scripts/lib/session-cost.mjs), or the cost report prices it
+at the sonnet fallback.
 
 #### Two blocks are capability switches
 
@@ -99,6 +119,7 @@ present).
 | `roles.<role>.debounce`        | whether a duplicate dispatch of the role is refused                                                                                                                                                                                                                                |
 | `roles.<role>.validate`        | whether the validation chain runs on the role's stop                                                                                                                                                                                                                               |
 | `roles` (the key names)        | must cover every `SubagentStop` matcher; `check-config-sync` fails otherwise                                                                                                                                                                                                       |
+| `review.tiers.<tier>.model`    | the reviewer model per difficulty tier (`trivial`, `normal`, `hard`, `critical`); `"default"` removes the dispatch's `model` so the agent's own frontmatter applies                                                                                                                |
 | `layout.src` / `.e2e` / `.adr` | where the harness looks for source, specs and ADRs                                                                                                                                                                                                                                 |
 | `worktree.provision`           | how a task worktree gets its dependencies (default `npm-link`)                                                                                                                                                                                                                     |
 | `launcher.*`                   | four extension points for a managed launcher; each consuming hook is inert when its key is unset. See [rules/launcher-interface.md](rules/launcher-interface.md)                                                                                                                   |

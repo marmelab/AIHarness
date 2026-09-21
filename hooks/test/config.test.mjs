@@ -2,7 +2,7 @@
 // over the built-in defaults, validates the shape (fail-closed on malformed),
 // and degrades to defaults when the file is missing.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ import {
   roleModel,
   worktreeProvision,
   prePrSteps,
+  reviewTierModel,
 } from "../lib/config.mjs";
 
 // hooks/test/ -> repo root. Two levels, not three: in a consuming project the harness
@@ -153,5 +154,74 @@ describe("config loader", () => {
     expect(isDeployEnabled(cfg)).toBe(false);
     expect(roleModel(cfg, "quality-reviewer")).toBe("opus");
     expect(pipelineRoles(cfg)).toContain("test-writer");
+    // The top tier escalates ABOVE the reviewer's own model, and scripts/lib/session-cost
+    // has to carry a rate for whatever is named here or the report understates the most
+    // expensive dispatch the harness makes.
+    expect(reviewTierModel(cfg, "critical")).toBe("fable");
+  });
+
+  // README's "minimum" install example is a config a newcomer copies verbatim. If it
+  // does not load, the README is giving bad advice. Extracts the one ```json fence in
+  // README.md (the install example) and feeds it through the real loader, the same way
+  // a consumer's first `harness.config.json` would be read.
+  test("the README install example loads", () => {
+    const readme = readFileSync(join(REPO_ROOT, "README.md"), "utf8");
+    const match = readme.match(/```json\n([\s\S]*?)```/);
+    expect(
+      match,
+      "README.md must contain a ```json install example",
+    ).not.toBeNull();
+    const dir = makeRepo(undefined); // empty repo dir, we write the config ourselves below
+    writeFileSync(join(dir, CONFIG_FILENAME), match[1]);
+    clearConfigCache();
+    const cfg = loadConfig(dir);
+    expect(cfg.name).toBe("myapp");
+  });
+});
+
+describe("review.tiers", () => {
+  test("defaults keep route-review-model's behaviour: sonnet below hard, agent default above", () => {
+    const cfg = loadConfig(makeRepo(undefined));
+    expect(reviewTierModel(cfg, "trivial")).toBe("sonnet");
+    expect(reviewTierModel(cfg, "normal")).toBe("sonnet");
+    expect(reviewTierModel(cfg, "hard")).toBe("default");
+    expect(reviewTierModel(cfg, "critical")).toBe("default");
+  });
+  test("a project overrides one tier and keeps the others", () => {
+    const cfg = loadConfig(
+      makeRepo({
+        validation: { steps: [] },
+        roles: {},
+        review: { tiers: { normal: { model: "opus" } } },
+      }),
+    );
+    expect(reviewTierModel(cfg, "normal")).toBe("opus");
+    expect(reviewTierModel(cfg, "trivial")).toBe("sonnet");
+  });
+  test("an unknown tier name fails closed", () => {
+    expect(() =>
+      loadConfig(
+        makeRepo({
+          validation: { steps: [] },
+          roles: {},
+          review: { tiers: { extreme: { model: "opus" } } },
+        }),
+      ),
+    ).toThrow(/review\.tiers\.extreme/);
+  });
+  test("an empty model fails closed", () => {
+    expect(() =>
+      loadConfig(
+        makeRepo({
+          validation: { steps: [] },
+          roles: {},
+          review: { tiers: { hard: { model: "" } } },
+        }),
+      ),
+    ).toThrow(/review\.tiers\.hard/);
+  });
+  test("an unknown tier asked at runtime resolves to the default model", () => {
+    const cfg = loadConfig(makeRepo(undefined));
+    expect(reviewTierModel(cfg, "bogus")).toBe("default");
   });
 });

@@ -264,7 +264,7 @@ describe("rateFor and price", () => {
     expect(normalizeModel("claude-haiku-4-5-20251001")).toBe("haiku-4-5");
   });
 
-  test("prices the three models the harness dispatches", () => {
+  test("prices the four models the harness dispatches", () => {
     expect(rateFor("claude-sonnet-5")).toMatchObject({
       input: 2,
       output: 10,
@@ -278,6 +278,13 @@ describe("rateFor and price", () => {
     expect(rateFor("claude-haiku-4-5-20251001")).toMatchObject({
       input: 1,
       output: 5,
+      known: true,
+    });
+    // review.tiers.critical. Unpriced, it would be billed at the sonnet-5 fallback, a
+    // fifth of its real rate, behind nothing louder than a WARNING line.
+    expect(rateFor("claude-fable-5-1")).toMatchObject({
+      input: 10,
+      output: 50,
       known: true,
     });
   });
