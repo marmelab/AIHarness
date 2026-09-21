@@ -4,15 +4,23 @@
 // highest wins, by rewriting the dispatch rather than asking the orchestrator to
 // remember the rule.
 //
-// Two directions, and they are NOT symmetric:
+// Three directions, and they are NOT symmetric:
 //
-//   ordinary ticket   -> SET model "sonnet"
+//   ordinary ticket   -> SET the tier's model, BELOW the agent's own (sonnet)
 //   schema-sensitive  -> REMOVE model, so the agent file's `opus` applies
+//   critical tier     -> SET the tier's model, ABOVE the agent's own, where one is named
 //
-// Removing rather than naming `opus` is load-bearing: a runtime that ignores `model` then
-// leaves the reviewer on its declared default, so the failure mode of the optimisation is
-// spending too much, never reviewing too weakly. Fail-open goes the same way: anything
-// unreadable leaves the dispatch as dispatched, which is usually opus.
+// Removing rather than naming `opus` on the middle row is load-bearing: a runtime that
+// ignores `model` leaves the reviewer on its declared default, so a downgrade that does
+// not take effect costs tokens, never review depth. The third row is the one rewrite that
+// fails downward, since a `model` the runtime ignores or rejects there drops the
+// escalation.
+//
+// Both land on the same floor, and that is what makes the asymmetry safe: every failure
+// path reviews with the agent's declared model, which is what EVERY review cost before
+// the tiers existed. The optimisation can overspend and the escalation can fail to apply;
+// no path reviews more weakly than the untiered harness did. Fail-open goes the same way:
+// anything unreadable leaves the dispatch as dispatched.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { runStandalone } from "./lib/hook-chain.mjs";
@@ -188,7 +196,7 @@ export function check(input, ctx) {
   try {
     model = reviewTierModel(loadConfig(), tier);
   } catch {
-    model = "default"; // unreadable config: the expensive direction
+    model = "default"; // unreadable config: the agent's own model, the floor above
   }
   const asked = input?.tool_input?.model;
   const detail =

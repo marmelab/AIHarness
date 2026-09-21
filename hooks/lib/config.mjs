@@ -31,6 +31,11 @@ const DEFAULTS = {
   // The reviewer model per difficulty tier (lib/tier.mjs). "default" removes the dispatch's
   // `model` so the agent's own frontmatter applies, which is the expensive direction: a
   // runtime that ignores `model` then reviews with the declared model, never a weaker one.
+  //
+  // `critical` stays on "default" HERE while the committed harness.config.json names a
+  // model above the reviewer's own. These defaults are what a repo with NO config gets,
+  // and spending a project's money on the strongest model is a decision that project
+  // declares, never one it inherits from an absent file: fail open on ignorance.
   review: {
     tiers: {
       trivial: { model: "sonnet" },

@@ -214,6 +214,28 @@ describe("route-review-model", () => {
     cleanup();
   });
 
+  test("a critical ticket takes the model its tier names, above the agent's own", () => {
+    // The third direction: the config may name a model the agent file does not declare.
+    // Unlike the downgrade, this rewrite fails DOWNWARD — a runtime that ignores `model`
+    // reviews with the agent's own opus — so the tier has to be carried by the dispatch
+    // and not merely by the REVIEW_TIER line.
+    const r = run({
+      ticket: {
+        id: "TASK-001",
+        files_to_modify: ["src/x.tsx"],
+        scorecard: { risk: 9, coupling: 1, confidence: 10, testability: 1 },
+      },
+      model: "sonnet",
+      configText: JSON.stringify({
+        deploy: { adapter: "test", relevantGlobs: ["**/supabase/**"] },
+        review: { tiers: { critical: { model: "fable" } } },
+      }),
+    });
+    expect(r.updated.model).toBe("fable");
+    expect(r.updated.prompt).toMatch(/^REVIEW_TIER: critical$/m);
+    cleanup();
+  });
+
   test("a schema-sensitive ticket with no model keeps it absent, and still gains REVIEW_TIER", () => {
     const r = run({ ticket: TOUCHES_SUPABASE });
     expect(r.updated).not.toHaveProperty("model");

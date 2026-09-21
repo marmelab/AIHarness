@@ -82,7 +82,7 @@
       "trivial": { "model": "sonnet" },
       "normal": { "model": "sonnet" },
       "hard": { "model": "default" },
-      "critical": { "model": "default" }
+      "critical": { "model": "fable" }
     }
   }
 }

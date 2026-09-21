@@ -154,6 +154,10 @@ describe("config loader", () => {
     expect(isDeployEnabled(cfg)).toBe(false);
     expect(roleModel(cfg, "quality-reviewer")).toBe("opus");
     expect(pipelineRoles(cfg)).toContain("test-writer");
+    // The top tier escalates ABOVE the reviewer's own model, and scripts/lib/session-cost
+    // has to carry a rate for whatever is named here or the report understates the most
+    // expensive dispatch the harness makes.
+    expect(reviewTierModel(cfg, "critical")).toBe("fable");
   });
 
   // README's "minimum" install example is a config a newcomer copies verbatim. If it
