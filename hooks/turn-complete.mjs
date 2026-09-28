@@ -13,6 +13,8 @@
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, launcher } from "./lib/config.mjs";
+import { REPO } from "./lib/paths.mjs";
+import { preserveHooksLog } from "./lib/hooks-log.mjs";
 
 let sid = "";
 try {
@@ -20,6 +22,13 @@ try {
 } catch {
   // no session id -> nothing to signal
 }
+
+// Mirror hooks.log beside the session's transcripts. SessionEnd takes the complete copy,
+// but it only fires on a clean end — `clear`, `resume`, `logout`, `prompt_input_exit`,
+// `other` — and promises nothing about a crash or a closed terminal. This one runs after
+// every turn, so a killed session still leaves its guard log behind, one turn stale.
+// Skipped when the file has not grown, which is most turns.
+preserveHooksLog(REPO, sid);
 
 let dir = null;
 try {
