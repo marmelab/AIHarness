@@ -1560,6 +1560,10 @@ sel.innerHTML = D.picked
       esc(
         day(r.started_at) +
           "  ·  " +
+          // The name the session already has, which is how a reader recognises a run. The
+          // project and the id stay, because two runs can share a title.
+          (r.title || r.session_id.slice(0, 8)) +
+          "  ·  " +
           (r.slug || "").replace(/^-workspaces-/, "") +
           "  ·  " +
           r.agent_count +
@@ -1588,6 +1592,7 @@ function render(id) {
     flag.textContent = tr("redactedBadge");
   }
   document.getElementById("runsub").textContent =
+    (run.title ? run.title + " · " : "") +
     id.slice(0, 8) +
     " · " +
     (run.window_start ? L.windowed[lang] : L.solo[lang]);

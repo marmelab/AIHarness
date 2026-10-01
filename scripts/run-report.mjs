@@ -55,7 +55,7 @@ const all = (sql, ...p) => db.prepare(sql).all(...p);
 const one = (sql, ...p) => db.prepare(sql).get(...p);
 
 const runs = all(`
-  SELECT session_id, slug, arm, label, started_at, duration_ms, active_ms, busy_ms,
+  SELECT session_id, slug, title, arm, label, started_at, duration_ms, active_ms, busy_ms,
          coord_ms, stall_ms, stall_count, window_ms, window_start, window_end,
          host_turns, host_usd,
          agent_count, turn_count, call_count, error_count, usd, has_hooks_log
@@ -358,7 +358,7 @@ function redact(payload) {
 
   for (const r of payload.runs) {
     r.slug = shortSlug(r.slug);
-    cut(r, "label");
+    cut(r, "label", "title");
   }
   for (const d of Object.values(payload.detail)) {
     for (const c of d.calls) cut(c, "detail", "path");

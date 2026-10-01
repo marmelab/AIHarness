@@ -22,6 +22,7 @@ const DDL = `
 CREATE TABLE IF NOT EXISTS runs (
   session_id     TEXT PRIMARY KEY,
   slug           TEXT NOT NULL,
+  title          TEXT,
   arm            TEXT,
   label          TEXT,
   harness_version TEXT,
@@ -260,15 +261,16 @@ export function writeRun(db, run) {
     db.prepare(`DELETE FROM runs WHERE session_id = ?`).run(run.sessionId);
 
     db.prepare(
-      `INSERT INTO runs (session_id, slug, arm, label, harness_version, started_at,
+      `INSERT INTO runs (session_id, slug, title, arm, label, harness_version, started_at,
          ended_at, duration_ms, active_ms, busy_ms, coord_ms, stall_ms, stall_count,
          window_ms, window_start, window_end, host_turns, host_usd, agent_count,
          turn_count, call_count, error_count, usd, rate_known, has_hooks_log, source_path,
          schema_version, ingested_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       run.sessionId,
       run.slug,
+      run.title ?? null,
       run.arm ?? null,
       run.label ?? null,
       run.harnessVersion ?? null,

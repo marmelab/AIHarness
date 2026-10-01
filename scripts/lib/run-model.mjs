@@ -567,6 +567,83 @@ export function detectLoops(calls) {
 }
 
 /**
+ * The name Claude Code gave the session, as `/resume` shows it.
+ *
+ * Three sources, in order of how well they name a run:
+ *
+ *   1. `ai-title` entries in the main transcript. They are REFINED as the session goes —
+ *      one archived session carries forty — so the last one wins.
+ *   2. the slash command the session opened on. Six sessions in sixty have no title at
+ *      all, and every one of them started with a command; `/dev-review delta 156` names
+ *      the run better than any id does.
+ *   3. the first thing the user actually typed.
+ *
+ * The framing a session opens with is never a name: the `<command-message>` block, the
+ * caveat, and the body of a skill the command pulled in. A first pass that took the first
+ * user text verbatim titled eight preschool-crm runs "Base directory for this skill:
+ * /home/node/.claude/skills/dev-review", which is the skill talking, not the user.
+ *
+ * @param {string} body raw JSONL of the main transcript
+ * @returns {string|null}
+ */
+const INJECTED =
+  /^(Base directory for this skill|Caveat:|<|\s*$)|^[\s\S]{0,80}\/skills\//;
+
+export function sessionTitle(body) {
+  let title = null;
+  let command = null;
+  let args = null;
+  let typed = null;
+
+  for (const line of String(body ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    // Cheap guards before parsing: a main transcript is megabytes of lines that are none
+    // of these.
+    const maybeTitle = line.includes('"ai-title"');
+    if (!maybeTitle && typed && command) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type === "ai-title") {
+      if (typeof event.aiTitle === "string" && event.aiTitle.trim())
+        title = event.aiTitle.trim();
+      continue;
+    }
+    if (event.type !== "user") continue;
+    const c = event.message?.content;
+    const text =
+      typeof c === "string"
+        ? c
+        : Array.isArray(c)
+          ? c
+              .filter((b) => b?.type === "text" && typeof b.text === "string")
+              .map((b) => b.text)
+              .join(" ")
+          : "";
+    if (!text) continue;
+    if (command === null) {
+      const name = text.match(/<command-name>([^<]+)<\/command-name>/);
+      if (name) {
+        command = name[1].trim();
+        const a = text.match(/<command-args>([^<]*)<\/command-args>/);
+        args = a ? a[1].trim() : "";
+      }
+    }
+    if (typed === null) {
+      const clean = text.trim().replace(/\s+/g, " ");
+      if (clean && !INJECTED.test(clean)) typed = clean.slice(0, 80);
+    }
+  }
+
+  if (title) return title;
+  if (command) return (command + " " + (args || "")).trim();
+  return typed;
+}
+
+/**
  * Fold one agent's transcript into the shape the store writes.
  *
  * @param {object} args
@@ -880,6 +957,7 @@ export function buildRun({
   return {
     sessionId,
     slug,
+    title: sessionTitle(mainBody),
     arm: tags.arm ?? null,
     label: tags.label ?? null,
     harnessVersion: tags.harnessVersion ?? null,
