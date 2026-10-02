@@ -33,6 +33,7 @@ import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createHookContext } from "./lib/context.mjs";
 import { REPO } from "./lib/paths.mjs";
+import { preserveHooksLog } from "./lib/hooks-log.mjs";
 import { removeWorktreesUnder } from "./lib/worktree.mjs";
 import { detectInflight } from "./lib/session-state.mjs";
 import { removeWorktreeFolders } from "./lib/workspace-folders.mjs";
@@ -91,6 +92,9 @@ try {
     recursive: true,
     force: true,
   });
+  // The last complete copy, taken while the file still exists. Stop has been mirroring it
+  // all along, but that mirror is a turn stale and this one is not.
+  preserveHooksLog(ctx.repo, ctx.sessionId);
   rmSync(ctx.worktreeBase, { recursive: true, force: true });
 } catch (e) {
   ctx.error(`skipped: ${e?.message ?? e}`);

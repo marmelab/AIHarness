@@ -197,6 +197,37 @@ One caveat worth knowing before adopting it for a non-Supabase stack: four agent
 still inline Supabase specifics, so you would have to edit them. Moving those into the
 adapter is the next planned step.
 
+## A session's numbers
+
+`/aiharness:stat` opens the run-anatomy page of the session you are in: where its minutes,
+tokens and dollars went, agent by agent. The script runs before the model sees anything;
+the model's one short turn only relays the link. `--whole` also counts, in a harness run,
+your own work before the first harness agent started.
+
+A keyboard shortcut does the same with no model turn, but cannot know which session is
+yours: it takes the project's session that wrote last. In VS Code, add a user task
+(`Tasks: Open User Tasks`):
+
+```json
+{
+  "label": "Session stats",
+  "type": "shell",
+  "command": "node ~/.claude/plugins/marketplaces/aiharness/scripts/run-stats.mjs",
+  "options": { "cwd": "${workspaceFolder}" },
+  "presentation": { "reveal": "silent" }
+}
+```
+
+and bind it in `keybindings.json`:
+
+```json
+{
+  "key": "ctrl+alt+s",
+  "command": "workbench.action.tasks.runTask",
+  "args": "Session stats"
+}
+```
+
 ## Working on this repo
 
 ```

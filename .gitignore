@@ -4,3 +4,9 @@ node_modules/
 .harness/
 .promote.lock
 test-results/
+
+# Archived transcripts + the derived run store (see scripts/run-archive.mjs)
+.runs/
+
+# Per-machine permissions and hooks, not the project's
+.claude/settings.local.json
