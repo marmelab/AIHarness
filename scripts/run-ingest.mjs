@@ -25,6 +25,7 @@ import { CONFIG_DIR, REPO } from "../hooks/lib/paths.mjs";
 import { makeClassifier, validateCommandsFrom } from "./lib/activity.mjs";
 import { buildRun, SCHEMA_VERSION } from "./lib/run-model.mjs";
 import { ingestedRuns, openStore, writeRun } from "./lib/run-store.mjs";
+import { subagentsIn } from "./lib/transcripts.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
@@ -74,28 +75,6 @@ function harnessRoles(config) {
   for (const file of existsSync(shipped) ? readdirSync(shipped) : [])
     if (file.endsWith(".md")) roles.add(basename(file, ".md"));
   return roles;
-}
-
-/** Subagent transcripts plus their sidecar meta, from a directory holding `subagents/`. */
-function subagentsIn(dir) {
-  const subs = join(dir, "subagents");
-  if (!existsSync(subs)) return [];
-  const out = [];
-  for (const entry of readdirSync(subs)) {
-    if (!entry.endsWith(".jsonl")) continue;
-    const agentId = basename(entry, ".jsonl");
-    let meta = {};
-    const metaFile = join(subs, `${agentId}.meta.json`);
-    if (existsSync(metaFile)) {
-      try {
-        meta = JSON.parse(readFileSync(metaFile, "utf8"));
-      } catch {
-        /* an unreadable sidecar costs the agent its role label, not its numbers */
-      }
-    }
-    out.push({ agentId, body: readIf(join(subs, entry)), meta });
-  }
-  return out;
 }
 
 /** Every source this run can be built from, whether archived or still live. */
