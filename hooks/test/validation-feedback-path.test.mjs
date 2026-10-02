@@ -1,35 +1,32 @@
 // The reject-with-feedback path: what the harness emits when it refuses a stop.
 //
-// ============================================================================
-// READ THIS FIRST: the reject mechanism is ADVISORY, not verified end to end.
-// ============================================================================
-//
 // The loop rules/validation-commands.md describes has two halves: the hook refuses the
-// stop with exit 2 and an explanation, then the runtime injects that explanation into the
-// stopping agent's context so it can fix and stop again. Only the FIRST half is the
-// harness's, and only the first half is tested here. Whether the runtime delivers a hook's
-// stderr to a subagent is NOT established, and cannot be tested from this repo: it needs a
-// live session dispatching a real subagent.
+// stop with exit 2 and an explanation on stderr, then the runtime hands that explanation
+// to the stopping agent so it can fix and stop again. Only the FIRST half is the
+// harness's, and only the first half is tested here.
 //
-// Until the manual check below settles it, treat every refusal as advisory:
+// The second half is the runtime's, and it holds: the explanation lands in the stopping
+// subagent's OWN transcript as a meta user row, `Stop hook feedback:` then
+// `[<hook command>]: ` then the stderr text, and the agent takes another turn before it
+// stops again. It needs a live session to check, so re-check it after a runtime upgrade:
+//   1. Dispatch one developer whose FIRST stop runs with `VALIDATE_DRY_RUN=fail`. Only the
+//      first: the dry run returns before the failure budget, so `fail` on every stop
+//      refuses every stop.
+//   2. Read <main-transcript-dir>/<session-id>/subagents/agent-<id>.jsonl for that agent
+//      and grep for "Validation failed at step 'dry-run'". Absent => the rejection text
+//      reaches only the human reading hooks.log; say so here.
 //
-//   - never make correctness depend on an agent reacting to a rejection. Every refusal
-//     carries a budget and an honest exit (rules/hook-authoring.md), and that is what
-//     holds the line.
+// Delivered is not obeyed. The agent reads the refusal; whether it fixes the cause or
+// argues with it is the model's call. So correctness never depends on an agent reacting
+// to a rejection:
+//
+//   - every refusal carries a budget and an honest exit (rules/hook-authoring.md), and
+//     that is what holds the line.
 //   - the enforcement that does not need the agent is at the merge:
 //     block-merger-without-review reads the give-up marker and refuses the ticket. Keep
 //     new invariants there, not in a refusal loop.
 //   - agents/developer.md states the clean-tree precondition directly, so a compliant
 //     developer never reaches the rejection in the first place.
-//
-// MANUAL VERIFICATION (against a live runtime, then update this header):
-//   1. Dispatch one developer on a SIMPLE change with `VALIDATE_DRY_RUN=fail` set.
-//   2. Let it stop. The hook exits 2 with "Validation failed at step 'dry-run'".
-//   3. Read <main-transcript-dir>/<session-id>/subagents/agent-<id>.jsonl for that agent
-//      and grep for "Validation failed".
-//   4. Present  => the loop works; narrow this header to say so and drop the advisory
-//      framing. Absent => the rejection text is for the human reading hooks.log, nobody
-//      else, and this header stands as written.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
