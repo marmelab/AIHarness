@@ -11,7 +11,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { makeClassifier } from "../lib/activity.mjs";
 import { buildRun } from "../lib/run-model.mjs";
-import { ingestedRuns, openStore, writeRun } from "../lib/run-store.mjs";
+import {
+  CHILD_TABLES,
+  ingestedRuns,
+  openStore,
+  writeRun,
+} from "../lib/run-store.mjs";
 
 const classify = makeClassifier();
 const T0 = Date.parse("2026-09-01T10:00:00.000Z");
@@ -76,6 +81,97 @@ afterEach(() => {
 const count = (db, table) =>
   db.prepare(`SELECT count(*) n FROM ${table}`).get().n;
 
+const tally = (db) =>
+  Object.fromEntries(["runs", ...CHILD_TABLES].map((t) => [t, count(db, t)]));
+
+// A transcript with a prompt snapshot (so `context` fills) and a six-minute silence
+// between two calls (so `stalls` fills).
+const richBody = [
+  JSON.stringify({
+    type: "attachment",
+    timestamp: at(0),
+    attachment: {
+      type: "prompt_snapshot",
+      systemPrompt: ["you are a developer"],
+      tools: [{ name: "Read", description: "read a file", schema: {} }],
+    },
+  }),
+  JSON.stringify({
+    type: "assistant",
+    timestamp: at(0),
+    message: {
+      id: "msg-r1",
+      model: "claude-sonnet-5",
+      usage: {
+        input_tokens: 0,
+        output_tokens: 10,
+        cache_read_input_tokens: 1000,
+        cache_creation_input_tokens: 0,
+      },
+      content: [
+        {
+          type: "tool_use",
+          id: "r1",
+          name: "Read",
+          input: { file_path: "/a.ts" },
+        },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: "user",
+    timestamp: at(1000),
+    message: {
+      content: [{ type: "tool_result", tool_use_id: "r1", content: "ok" }],
+    },
+  }),
+  JSON.stringify({
+    type: "assistant",
+    timestamp: at(6 * 60 * 1000 + 1000),
+    message: {
+      id: "msg-r2",
+      model: "claude-sonnet-5",
+      usage: {
+        input_tokens: 0,
+        output_tokens: 10,
+        cache_read_input_tokens: 2000,
+        cache_creation_input_tokens: 0,
+      },
+      content: [
+        {
+          type: "tool_use",
+          id: "r2",
+          name: "Read",
+          input: { file_path: "/b.ts" },
+        },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: "user",
+    timestamp: at(6 * 60 * 1000 + 2000),
+    message: {
+      content: [{ type: "tool_result", tool_use_id: "r2", content: "ok" }],
+    },
+  }),
+].join("\n");
+
+const rich = () =>
+  buildRun({
+    sessionId: "s-rich",
+    slug: "-p",
+    mainBody: richBody,
+    agents: [
+      {
+        agentId: "agent-r",
+        body: richBody,
+        meta: { agentType: "aiharness:developer" },
+      },
+    ],
+    hooksLog: "",
+    classify,
+  });
+
 describe("writeRun", () => {
   test("writes the run and every child table", () => {
     const db = store();
@@ -95,6 +191,40 @@ describe("writeRun", () => {
     expect(count(db, "runs")).toBe(1);
     expect(count(db, "agents")).toBe(2);
     expect(count(db, "calls")).toBe(2);
+  });
+
+  test("every table keyed by a session is cleared before the rewrite", () => {
+    // Naming three tables is what let this through: `stalls` was absent from the delete
+    // list and the archive held every stall twice. Nothing on `runs` could show it,
+    // because stall_count is derived at ingestion, not counted from the detail. So the
+    // list is checked against the schema rather than against a memory of it.
+    const db = store();
+    const keyed = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .all()
+      .map((r) => r.name)
+      .filter((name) =>
+        db
+          .prepare(`PRAGMA table_info(${name})`)
+          .all()
+          .some((c) => c.name === "session_id"),
+      );
+    // `runs` is deleted on its own line, after the children, so it belongs to the set
+    // but not to the list.
+    expect(keyed.length).toBeGreaterThan(6);
+    expect([...keyed].sort()).toEqual([...CHILD_TABLES, "runs"].sort());
+  });
+
+  test("a second ingest changes no row count anywhere", () => {
+    // The fixture carries a stall and a prompt snapshot on purpose: a table that is empty
+    // in the fixture cannot double, and cannot report that it would.
+    const db = store();
+    writeRun(db, rich());
+    const before = tally(db);
+    expect(before.stalls).toBeGreaterThan(0);
+    expect(before.context).toBeGreaterThan(0);
+    writeRun(db, rich());
+    expect(tally(db)).toEqual(before);
   });
 
   test("re-ingesting does not disturb another session's rows", () => {

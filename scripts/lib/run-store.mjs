@@ -213,13 +213,20 @@ CREATE INDEX IF NOT EXISTS loops_by_kind ON loops (kind);
 CREATE INDEX IF NOT EXISTS context_by_component ON context (component);
 `;
 
-const CHILD_TABLES = [
+// Every table keyed by session_id, so a re-ingestion replaces a session instead of adding
+// a second copy of it. An omission here is silent: `stalls` was missing and the archive
+// held every stall twice, which no aggregate on `runs` could show because those columns
+// are computed, not summed from the detail.
+export const CHILD_TABLES = [
   "agents",
   "turns",
   "calls",
   "activities",
   "loops",
   "hooks",
+  "hook_events",
+  "stalls",
+  "context",
 ];
 
 /**
