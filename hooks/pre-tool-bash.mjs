@@ -22,6 +22,7 @@ import { runChain } from "./lib/hook-chain.mjs";
 import { check as bashGuard } from "./bash-guard.mjs";
 import { check as prePrChecks } from "./pre-pr-checks.mjs";
 import { check as blockDockerContainers } from "./block-docker-containers.mjs";
+import { check as dependencyGate } from "./dependency-gate.mjs";
 import { check as circuitBreaker } from "./circuit-breaker.mjs";
 import { check as blockOrchestratorMerge } from "./block-orchestrator-merge.mjs";
 import { check as blockWaveMergerPromote } from "./block-wave-merger-promote.mjs";
@@ -31,6 +32,7 @@ runChain([
   ["bash-guard", bashGuard],
   ["pre-pr-checks", prePrChecks],
   ["block-docker-containers", blockDockerContainers],
+  ["dependency-gate", dependencyGate],
   ["circuit-breaker", circuitBreaker],
   ["block-orchestrator-merge", blockOrchestratorMerge],
   ["block-wave-merger-promote", blockWaveMergerPromote],

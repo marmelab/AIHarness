@@ -48,16 +48,17 @@ export function readPayload() {
 }
 
 /**
- * Run `guards` in order against one payload, then exit 0 (allow).
+ * Run `guards` in order against one payload, then exit 0 (allow). A guard may be async:
+ * each one is awaited before the next starts, so the order still holds.
  *
  * A guard that THROWS is reported on BOTH channels and the chain continues. Under
  * one-process-per-hook a crashing guard denied nothing and its siblings still ran;
  * that stays true here, and the error is reported rather than swallowed.
- * @param {Array<[string, (input: object, ctx: object) => void]>} guards
+ * @param {Array<[string, (input: object, ctx: object) => void | Promise<void>]>} guards
  * @param {object} [input]
- * @returns {never}
+ * @returns {Promise<never>}
  */
-export function runChain(guards, input = readPayload()) {
+export async function runChain(guards, input = readPayload()) {
   let current = input;
   let rewritten = false;
   for (const [name, check] of guards) {
@@ -70,7 +71,7 @@ export function runChain(guards, input = readPayload()) {
     };
     const ctx = createHookContext(current, name, { onRewrite });
     try {
-      check(current, ctx);
+      await check(current, ctx);
     } catch (e) {
       // Includes a guard reaching for session state in a context that has no session
       // id: that throws at the point of access, and this is where it becomes one
@@ -123,7 +124,7 @@ export function isEntryPoint(metaUrl) {
  * chain. No-op when the module was imported by a dispatcher.
  * @param {string} metaUrl  import.meta.url of the guard module
  * @param {string} name     the guard's log prefix
- * @param {(input: object, ctx: object) => void} check
+ * @param {(input: object, ctx: object) => void | Promise<void>} check
  * @returns {void}
  */
 export function runStandalone(metaUrl, name, check) {

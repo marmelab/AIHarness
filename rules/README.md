@@ -38,7 +38,7 @@ for anything an agent must actually know.
 | `testing.md`             | always — the coverage floor AND the pertinence bar a reviewer judges against                    |
 | `english-only.md`        | the repo is written in English                                                                  |
 | `git-policy.md`          | always — what each role may do locally, and that nobody touches the remote                      |
-| `dependency-safety.md`   | always — cheap, and explains the `deny` an agent will otherwise fight                           |
+| `dependency-safety.md`   | always — cheap, and explains the dependency-gate refusals an agent will otherwise fight         |
 | `security-triggers.md`   | always — a sizing rule: what must be COMPLEX because SIMPLE skips the review                    |
 | `code-search.md`         | always — `LSP` is unavailable to harness agents; this says what to use instead                  |
 | `worktree-scope.md`      | you want the full rationale and the violation examples; the agents already carry the essentials |
