@@ -19,6 +19,7 @@ import {
   worktreeProvision,
   prePrSteps,
   reviewTierModel,
+  dependencyPolicy,
 } from "../lib/config.mjs";
 
 // hooks/test/ -> repo root. Two levels, not three: in a consuming project the harness
@@ -223,5 +224,37 @@ describe("review.tiers", () => {
   test("an unknown tier asked at runtime resolves to the default model", () => {
     const cfg = loadConfig(makeRepo(undefined));
     expect(reviewTierModel(cfg, "bogus")).toBe("default");
+  });
+});
+
+describe("dependencies", () => {
+  const withDependencies = (dependencies) =>
+    makeRepo({ validation: { steps: [] }, roles: {}, dependencies });
+
+  test("defaults to the strict policy", () => {
+    expect(dependencyPolicy(loadConfig(makeRepo(undefined)))).toEqual({
+      minReleaseAgeDays: 21,
+      minWeeklyDownloads: 1000,
+      blockingSeverities: ["high", "critical"],
+      allow: [],
+    });
+  });
+
+  test("a project overrides one threshold and keeps the others", () => {
+    const policy = dependencyPolicy(
+      loadConfig(withDependencies({ minWeeklyDownloads: 200 })),
+    );
+    expect(policy.minWeeklyDownloads).toBe(200);
+    expect(policy.minReleaseAgeDays).toBe(21);
+  });
+
+  test.each([
+    [{ minReleaseAgeDays: -1 }, /dependencies\.minReleaseAgeDays/],
+    [{ minWeeklyDownloads: 1.5 }, /dependencies\.minWeeklyDownloads/],
+    [{ blockingSeverities: ["severe"] }, /dependencies\.blockingSeverities/],
+    [{ allow: [""] }, /dependencies\.allow/],
+    [{ allow: "zod" }, /dependencies\.allow/],
+  ])("rejects %j", (dependencies, error) => {
+    expect(() => loadConfig(withDependencies(dependencies))).toThrow(error);
   });
 });

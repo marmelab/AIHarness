@@ -2,13 +2,10 @@
 // add it without a human. `npm_config_registry` and HARNESS_NPM_DOWNLOADS_API point the
 // lookups elsewhere (a mirror, or the test stub).
 
-export const MIN_RELEASE_AGE_DAYS = 21;
-export const MIN_WEEKLY_DOWNLOADS = 1000;
-
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS = 10_000;
+const RETRY_DELAY_MS = 1000;
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall"];
-const BLOCKING_SEVERITIES = new Set(["high", "critical"]);
 const EXACT = /^v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/;
 const TAG = /^[a-z][\w.-]*$/i;
 
@@ -18,7 +15,7 @@ const registry = () =>
 const downloadsApi = () =>
   trimSlash(process.env.HARNESS_NPM_DOWNLOADS_API || "https://api.npmjs.org");
 
-const getJson = async (url, init = {}) => {
+const fetchOnce = async (url, init) => {
   const res = await fetch(url, {
     ...init,
     signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -26,6 +23,15 @@ const getJson = async (url, init = {}) => {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`${url} answered ${res.status}`);
   return res.json();
+};
+
+const getJson = async (url, init = {}) => {
+  try {
+    return await fetchOnce(url, init);
+  } catch {
+    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    return fetchOnce(url, init);
+  }
 };
 
 /**
@@ -72,21 +78,23 @@ export async function fetchFacts(name, version) {
 }
 
 /**
- * Why an agent may not add this package, or null when it may.
+ * Why an agent may not add this package under `policy`, or null when it may.
  * @param {Awaited<ReturnType<typeof fetchFacts>>} facts
+ * @param {{minReleaseAgeDays: number, minWeeklyDownloads: number, blockingSeverities: string[]}} policy
  * @param {number} [now]
  * @returns {string | null}
  */
 export function refusal(
   { packument, target, weeklyDownloads = 0, advisories = [] },
+  policy,
   now = Date.now(),
 ) {
   if (!packument) return "does not exist on the npm registry";
   const ageDays = (now - Date.parse(packument.time?.created ?? "")) / DAY_MS;
-  if (!(ageDays >= MIN_RELEASE_AGE_DAYS))
-    return `was first published less than ${MIN_RELEASE_AGE_DAYS} days ago`;
-  if (weeklyDownloads < MIN_WEEKLY_DOWNLOADS)
-    return `has ${weeklyDownloads} downloads a week (minimum ${MIN_WEEKLY_DOWNLOADS})`;
+  if (!(ageDays >= policy.minReleaseAgeDays))
+    return `was first published less than ${policy.minReleaseAgeDays} days ago`;
+  if (weeklyDownloads < policy.minWeeklyDownloads)
+    return `has ${weeklyDownloads} downloads a week (minimum ${policy.minWeeklyDownloads})`;
   if (!target) return null;
   const manifest = packument.versions?.[target];
   if (!manifest) return `has no published version or tag \`${target}\``;
@@ -96,7 +104,9 @@ export function refusal(
     INSTALL_SCRIPTS.find((k) => manifest.scripts?.[k]) ??
     (manifest.gypfile ? "node-gyp" : "");
   if (script) return `${target} runs an install script (\`${script}\`)`;
-  const advisory = advisories.find((a) => BLOCKING_SEVERITIES.has(a.severity));
+  const advisory = advisories.find((a) =>
+    policy.blockingSeverities.includes(a.severity),
+  );
   if (advisory)
     return `${target} has a ${advisory.severity} security advisory: ${advisory.title}`;
   return null;

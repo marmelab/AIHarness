@@ -48,11 +48,13 @@ const REGISTRY = {
   "mildly-vulnerable": pkg({
     advisories: [{ severity: "moderate", title: "ReDoS" }],
   }),
+  flaky: pkg(),
 };
 
 let server;
 let registryUrl;
 let tmp;
+let flakyPackumentHits = 0;
 
 beforeAll(async () => {
   tmp = mkdtempSync(join(tmpdir(), "dependency-gate-"));
@@ -78,6 +80,8 @@ beforeAll(async () => {
     const name = downloads ? downloads[1] : path.slice(1);
     const entry = REGISTRY[name];
     if (!entry) return send(404, { error: "not found" });
+    if (name === "flaky" && !downloads && flakyPackumentHits++ === 0)
+      return send(503, { error: "try again" });
     send(200, downloads ? { downloads: entry.downloads } : entry.packument);
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -91,14 +95,14 @@ afterAll(() => {
 
 const run = (
   command,
-  { registry = registryUrl, cwd = tmp, hook = HOOK } = {},
+  { registry = registryUrl, cwd = tmp, hook = HOOK, appDir = tmp } = {},
 ) =>
   new Promise((resolve) => {
     const env = {
       ...process.env,
       npm_config_registry: registry,
       HARNESS_NPM_DOWNLOADS_API: registry,
-      APP_DIR: tmp,
+      APP_DIR: appDir,
     };
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CLAUDE_AGENT_NAME;
@@ -134,6 +138,16 @@ const project = (name, { dependencies = {}, bins = [] } = {}) => {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies }));
   for (const bin of bins)
     writeFileSync(join(dir, "node_modules", ".bin", bin), "");
+  return dir;
+};
+
+const configured = (name, dependencies) => {
+  const dir = join(tmp, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "harness.config.json"),
+    JSON.stringify({ dependencies }),
+  );
   return dir;
 };
 
@@ -214,13 +228,18 @@ describe("dependency-gate", () => {
     ])("`npm install %s`", async (spec, why) => {
       const r = await run(`npm install ${spec}`);
       expect(r.blocked).toContain(why);
-      expect(r.blocked).toContain("a human has to add this package");
+      expect(r.blocked).toContain("build the feature without the package");
     });
 
     test("one refused package refuses the whole command", async () => {
       const r = await run("npm install well-known brand-new");
       expect(r.blocked).toContain("`brand-new`");
       expect(r.blocked).not.toContain("`well-known`");
+    });
+
+    test("a transient registry error is retried once", async () => {
+      const r = await run("npm install flaky");
+      expect(r.command).toBe(`npm install ${PINNED} flaky`);
     });
 
     test("an unreachable registry refuses rather than lets the install run unvetted", async () => {
@@ -260,6 +279,49 @@ describe("dependency-gate", () => {
         registry: UNREACHABLE,
       });
       expect(r.blocked).toContain("would bypass the vetting");
+    });
+  });
+
+  describe("a project tunes the policy in harness.config.json", () => {
+    test("a lower download floor lets a smaller package through", async () => {
+      const appDir = configured("low-floor", { minWeeklyDownloads: 10 });
+      const r = await run("npm install obscure", { appDir });
+      expect(r.command).toBe(`npm install ${PINNED} obscure`);
+    });
+
+    test("a shorter release age lets a newer package through and pins npm to it", async () => {
+      const appDir = configured("short-age", { minReleaseAgeDays: 2 });
+      const r = await run("npm install brand-new", { appDir });
+      expect(r.command).toBe(
+        "npm install --ignore-scripts --min-release-age=2 brand-new",
+      );
+    });
+
+    test("only the listed severities refuse a package", async () => {
+      const appDir = configured("critical-only", {
+        blockingSeverities: ["critical"],
+      });
+      const r = await run("npm install vulnerable", { appDir });
+      expect(r.command).toBe(`npm install ${PINNED} vulnerable`);
+    });
+
+    test("an approved name or scope skips the vetting, still pinned", async () => {
+      const appDir = configured("approved", {
+        allow: ["native-addon", "@acme/*"],
+      });
+      const r = await run("npm install native-addon @acme/private-kit", {
+        appDir,
+        registry: UNREACHABLE,
+      });
+      expect(r.command).toBe(
+        `npm install ${PINNED} native-addon @acme/private-kit`,
+      );
+    });
+
+    test("an invalid block falls back to the defaults, it never loosens them", async () => {
+      const appDir = configured("invalid", { minWeeklyDownloads: "lots" });
+      const r = await run("npm install obscure", { appDir });
+      expect(r.blocked).toContain("12 downloads a week (minimum 1000)");
     });
   });
 

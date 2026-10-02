@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // PreToolUse(Bash) — any caller. Vets every package an `npm install <pkg>` or `npx <pkg>`
 // would fetch, then adds `--ignore-scripts --min-release-age=<days>` so npm itself refuses
-// a too-recent version anywhere in the tree, transitive ones included.
+// a too-recent version anywhere in the tree, transitive ones included. The thresholds are
+// `dependencies.*` in harness.config.json; an invalid block falls back to the defaults, so
+// a typo can never loosen the gate.
 //
 // Fails CLOSED when the registry cannot be reached: the install needs it anyway, and
 // failing open would hand back exactly the unvetted install this replaces.
@@ -11,22 +13,22 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { dependencyPolicy, loadConfig } from "./lib/config.mjs";
 import { runStandalone } from "./lib/hook-chain.mjs";
 import { findInstalls, parseSpec } from "./lib/install-commands.mjs";
-import {
-  MIN_RELEASE_AGE_DAYS,
-  MIN_WEEKLY_DOWNLOADS,
-  fetchFacts,
-  refusal,
-} from "./lib/npm-registry.mjs";
+import { fetchFacts, refusal } from "./lib/npm-registry.mjs";
 
-const PINNED_FLAGS = ` --ignore-scripts --min-release-age=${MIN_RELEASE_AGE_DAYS}`;
-const POLICY =
-  `Packages an agent adds are vetted automatically: on the npm registry, first published ` +
-  `${MIN_RELEASE_AGE_DAYS}+ days ago, ${MIN_WEEKLY_DOWNLOADS}+ weekly downloads, not deprecated, ` +
-  `no install script, no high or critical security advisory.`;
 const NEXT_STEP =
-  "Pick a well-established alternative, or tell the user that a human has to add this package.";
+  "Do not stop on this: build the feature without the package (plain code, or a package " +
+  "the project already has), or use a well-established alternative. Only if neither is " +
+  "possible, tell the user that a developer has to approve this package " +
+  "(`dependencies.allow` in harness.config.json).";
+
+const describePolicy = (policy) =>
+  `Packages an agent adds are vetted automatically: on the npm registry, first published ` +
+  `${policy.minReleaseAgeDays}+ days ago, ${policy.minWeeklyDownloads}+ weekly downloads, ` +
+  `not deprecated, no install script, no ${policy.blockingSeverities.join(" or ")} ` +
+  `security advisory.`;
 
 const declaredDependencies = (dir) => {
   try {
@@ -44,6 +46,19 @@ const declaredDependencies = (dir) => {
   }
 };
 
+const isApproved = (name, allow) =>
+  allow.some(
+    (entry) =>
+      entry === name ||
+      (entry.endsWith("/*") && name.startsWith(entry.slice(0, -1))),
+  );
+
+const skipReason = (parsed, declared, allow) => {
+  if (!parsed) return "";
+  if (declared.has(parsed.name)) return "declared";
+  return isApproved(parsed.name, allow) ? "approved" : "";
+};
+
 const isLocalBin = (dir, name) =>
   existsSync(join(dir, "node_modules", ".bin", name));
 
@@ -51,9 +66,10 @@ const quoted = (items) => items.map((s) => `\`${s}\``).join(", ");
 
 /**
  * @param {{ cwd?: string, tool_input?: { command?: string } }} input
+ * @param {{minReleaseAgeDays: number, minWeeklyDownloads: number, blockingSeverities: string[], allow: string[]}} policy
  * @returns {Promise<null | { block: string, log: string } | { rewrite: string, log: string }>}
  */
-export async function decide(input) {
+export async function decide(input, policy) {
   const command = String(input.tool_input?.command || "");
   const found = findInstalls(command);
   if (!found.length) return null;
@@ -63,8 +79,7 @@ export async function decide(input) {
     return {
       block:
         `Dependency gate: \`${other.manager}\` installs are not vetted, only npm's are ` +
-        "(`npm install <pkg>`, `npx <pkg>`). In an npm project use those; otherwise tell the " +
-        "user that a human has to add this package.",
+        `(\`npm install <pkg>\`, \`npx <pkg>\`). In an npm project use those. ${NEXT_STEP}`,
       log: `other-manager=${other.manager}`,
     };
 
@@ -74,7 +89,7 @@ export async function decide(input) {
       block:
         `Dependency gate: ${quoted(owned)} would bypass the vetting, which sets the registry, ` +
         `the release-age cutoff and --ignore-scripts itself. Drop the flag. A version younger ` +
-        `than ${MIN_RELEASE_AGE_DAYS} days or an install script needs a human.`,
+        `than ${policy.minReleaseAgeDays} days or an install script needs a developer's approval.`,
       log: `gate-owned-flags=${owned.join(",")}`,
     };
 
@@ -90,11 +105,7 @@ export async function decide(input) {
     const declared = declaredDependencies(f.dir);
     return f.specs.map((spec) => {
       const parsed = parseSpec(spec);
-      return {
-        spec,
-        parsed,
-        declared: Boolean(parsed && declared.has(parsed.name)),
-      };
+      return { spec, parsed, skip: skipReason(parsed, declared, policy.allow) };
     });
   });
   const unparsable = specs.find((s) => !s.parsed);
@@ -106,13 +117,16 @@ export async function decide(input) {
       log: `unparsable=${unparsable.spec}`,
     };
 
-  const toVet = specs.filter((s) => !s.declared);
+  const toVet = specs.filter((s) => !s.skip);
   let refused;
   try {
     const verdicts = await Promise.all(
       toVet.map(async (s) => ({
         spec: s.spec,
-        reason: refusal(await fetchFacts(s.parsed.name, s.parsed.version)),
+        reason: refusal(
+          await fetchFacts(s.parsed.name, s.parsed.version),
+          policy,
+        ),
       })),
     );
     refused = verdicts.filter((v) => v.reason);
@@ -120,8 +134,8 @@ export async function decide(input) {
     return {
       block:
         `Dependency gate: could not reach the npm registry to vet ${quoted(toVet.map((s) => s.spec))} ` +
-        `(${e.message}). The install is refused rather than run unvetted; retry later, or tell ` +
-        "the user that a human has to add this package.",
+        `(${e.message}), even after a retry. The install is refused rather than run unvetted. ` +
+        NEXT_STEP,
       log: `registry-error ${e.message}`,
     };
   }
@@ -129,26 +143,38 @@ export async function decide(input) {
     return {
       block:
         `Dependency gate refused ${refused.map((r) => `\`${r.spec}\` (${r.reason})`).join(", ")}. ` +
-        `${POLICY} ${NEXT_STEP}`,
+        `${describePolicy(policy)} ${NEXT_STEP}`,
       log: `refused=${refused.map((r) => `${r.spec}:${r.reason}`).join(";")}`,
     };
 
+  const pinned = ` --ignore-scripts --min-release-age=${policy.minReleaseAgeDays}`;
   const rewrite = installs
     .map((f) => f.insertAt)
     .sort((a, b) => b - a)
-    .reduce(
-      (cmd, at) => cmd.slice(0, at) + PINNED_FLAGS + cmd.slice(at),
-      command,
-    );
-  const names = (list) => list.map((s) => s.spec).join(",");
+    .reduce((cmd, at) => cmd.slice(0, at) + pinned + cmd.slice(at), command);
+  const names = (skip) =>
+    specs
+      .filter((s) => s.skip === skip)
+      .map((s) => s.spec)
+      .join(",");
   return {
     rewrite,
-    log: `vetted=[${names(toVet)}] declared=[${names(specs.filter((s) => s.declared))}]`,
+    log: `vetted=[${names("")}] declared=[${names("declared")}] approved=[${names("approved")}]`,
   };
 }
 
+const loadPolicy = (ctx) => {
+  try {
+    return dependencyPolicy(loadConfig());
+  } catch (e) {
+    ctx.log(`config unreadable, using the default policy: ${e.message}`);
+    return dependencyPolicy({});
+  }
+};
+
 export async function check(input, ctx) {
-  const decision = await decide(input);
+  if (!findInstalls(input.tool_input?.command).length) return;
+  const decision = await decide(input, loadPolicy(ctx));
   if (!decision) return;
   if (decision.block) ctx.block({ reason: decision.block, log: decision.log });
   ctx.rewriteInput({ command: decision.rewrite }, { log: decision.log });
