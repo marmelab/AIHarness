@@ -1360,7 +1360,8 @@ function timeline(d) {
             dur(c.charged_ms),
         ) +
         '" data-tip2="' +
-        esc((c.detail || "").slice(0, 300)) +
+        esc(c.summary || "") +
+        (c.detail ? "\n" + (c.detail || "").slice(0, 300) : "") +
         '"/>';
     }
   });
@@ -2029,7 +2030,7 @@ function render(id) {
               esc(c.tool_short) +
               "</span> " +
               '<span style="color:var(--muted)">' +
-              esc(c.detail || "") +
+              esc(c.summary || "") +
               "</span>",
             '<i class="dot" style="background:' +
               color(c.activity) +
@@ -2241,7 +2242,7 @@ function drill(sel) {
           dur(c.charged_ms) +
             (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
             (c.is_error ? ' <span class="tag bad">err</span>' : ""),
-          '<span class="mono">' + esc(c.detail || "") + "</span>",
+          '<span class="mono">' + esc(c.summary || "") + "</span>",
         ]),
       (cells, i) =>
         ' data-tip="' +
@@ -2338,7 +2339,7 @@ function drillStall(d, host, g) {
         esc((c.role || "?") + " · " + c.tool_short) +
         "</span>" +
         '<span class="sub2 mono">' +
-        esc((c.detail || "").slice(0, 160)) +
+        esc(c.summary || (c.detail || "").slice(0, 160)) +
         "</span>" +
         '<span class="sub2">' +
         esc(when(c.at)) +

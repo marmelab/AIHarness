@@ -16,7 +16,10 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isFreeCommand } from "../../hooks/lib/bash-classify.mjs";
+import {
+  isFreeCommand,
+  stripPrefixes,
+} from "../../hooks/lib/bash-classify.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const RULES_FILE = join(HERE, "..", "config", "activities.json");
@@ -146,6 +149,10 @@ export function callDetail(toolName, input) {
     const v = typeof s === "string" ? s : "";
     return v.length > n ? "…" + v.slice(-n) : v || null;
   };
+  const head = (s, n) => {
+    const v = (typeof s === "string" ? s : "").replace(/\s+/g, " ").trim();
+    return v.length > n ? v.slice(0, n) + "…" : v || null;
+  };
   switch (toolName) {
     case "Read":
     case "Write":
@@ -154,7 +161,10 @@ export function callDetail(toolName, input) {
     case "NotebookEdit":
       return tail(i.file_path);
     case "Bash":
-      return tail(i.command, 90);
+      // From the START, and long. A command is named by its verb; the last ninety
+      // characters of a pipeline are its plumbing. Paths keep their tail below, where the
+      // basename is what identifies them.
+      return head(i.command, 400);
     case "Grep":
       return `"${i.pattern ?? ""}"${i.path ? ` in ${i.path}` : ""}`;
     case "Glob":
@@ -219,6 +229,201 @@ export function shortToolName(toolName) {
   if (!name.startsWith("mcp__")) return name;
   const parts = name.split("__");
   return parts[parts.length - 1] || name;
+}
+
+// Verbs whose first non-flag word is the thing they do: `git log`, `npm run build`.
+const SUBCOMMAND = new Set([
+  "git",
+  "docker",
+  "npm",
+  "pnpm",
+  "yarn",
+  "bun",
+  "npx",
+  "make",
+  "gh",
+  "supabase",
+  "kubectl",
+]);
+// Verbs whose point is their pattern.
+const PATTERN_FIRST = new Set(["grep", "rg", "egrep", "fgrep", "ag"]);
+// Verbs that act on a file, named at the end rather than the start.
+const FILE_LAST = new Set([
+  "sed",
+  "awk",
+  "head",
+  "tail",
+  "cat",
+  "wc",
+  "sort",
+  "uniq",
+  "less",
+]);
+// Verbs that take their whole program as an argument, which is never a summary.
+const INLINE = new Set([
+  "node",
+  "python",
+  "python3",
+  "deno",
+  "ruby",
+  "perl",
+  "bun",
+]);
+
+/** Split a command line on its top-level separators, ignoring quoted ones. */
+function topLevelSplit(command) {
+  const out = [];
+  let buf = "";
+  let quote = "";
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) quote = "";
+      buf += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    const two = command.slice(i, i + 2);
+    if (two === "&&" || two === "||") {
+      out.push(buf);
+      buf = "";
+      i++;
+      continue;
+    }
+    if (ch === ";" || ch === "|" || ch === "\n") {
+      out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  out.push(buf);
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+
+/** Words of one command, keeping a quoted run together. */
+function words(stage) {
+  return (stage.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((w) =>
+    w.replace(/^['"]|['"]$/g, ""),
+  );
+}
+
+const base = (p) => String(p).split("/").filter(Boolean).pop() || String(p);
+const isFlag = (w) => w.startsWith("-");
+
+/**
+ * What a Bash command did, in a few words.
+ *
+ * The exact command is kept on the call and shown on hover; this is the label that makes a
+ * table of two hundred rows readable. It has to start from the VERB: truncating a command
+ * to its last ninety characters, which is right for a path, showed the tail of a pipeline
+ * and never what was run — `…me_atomic-crm-demo --format '{{.State.StartedAt}}` names
+ * nothing, where `docker ps` does.
+ */
+function bashSummary(command) {
+  const text = String(command ?? "").trim();
+  if (!text) return null;
+  const stages = topLevelSplit(stripPrefixes(text));
+  if (!stages.length) return null;
+  const w = words(stages[0]);
+  if (!w.length) return null;
+
+  const verb = base(w[0]);
+  const rest = w.slice(1);
+  const firstArg = rest.find((x) => !isFlag(x));
+  let what = "";
+
+  if (INLINE.has(verb) && rest.some((x) => x === "-e" || x === "-c"))
+    what = "inline script";
+  else if (SUBCOMMAND.has(verb)) {
+    // The run of plain words that opens the arguments, at most two. Two because one is
+    // often only a noun: `gh pr edit` says something, `gh pr` does not. It stops at the
+    // first flag, so an option's VALUE never leaks in — `docker ps -a --filter "name=x"`
+    // is `docker ps`, not `docker ps name=x`. A leading short flag and its own value are
+    // skipped first, so `git -C <path> log` still finds `log`.
+    let i = 0;
+    while (i < rest.length && isFlag(rest[i])) {
+      const flag = rest[i];
+      i++;
+      if (/^-[A-Za-z]$/.test(flag) && i < rest.length && !isFlag(rest[i])) i++;
+    }
+    const run = [];
+    while (i < rest.length && !isFlag(rest[i]) && run.length < 2) {
+      const w = rest[i];
+      i++;
+      if (!/^\d+$/.test(w) && !w.includes("/")) run.push(w);
+    }
+    what = run.join(" ");
+  } else if (PATTERN_FIRST.has(verb))
+    what = firstArg ? '"' + firstArg + '"' : "";
+  else if (FILE_LAST.has(verb)) {
+    const file = [...rest].reverse().find((x) => !isFlag(x) && /[./]/.test(x));
+    what = file ? base(file) : "";
+  } else if (verb === "curl" || verb === "wget") {
+    const url = rest.find((x) => /^https?:\/\//.test(x));
+    what = url
+      ? url
+          .replace(/^https?:\/\//, "")
+          .split("?")[0]
+          .replace(/\/$/, "")
+      : "";
+  } else if (firstArg) what = /\//.test(firstArg) ? base(firstArg) : firstArg;
+
+  let summary = (verb + " " + what).trim();
+  if (summary.length > 44) summary = summary.slice(0, 43) + "…";
+  // A long sequence is itself information: three commands chained is not one command.
+  if (stages.length > 1) summary += " +" + (stages.length - 1);
+  return summary;
+}
+
+/**
+ * A few words saying what a call did, whatever the tool.
+ *
+ * @param {string} toolName
+ * @param {unknown} input
+ * @returns {string|null}
+ */
+export function callSummary(toolName, input) {
+  const name = String(toolName ?? "");
+  if (!input || typeof input !== "object") return shortToolName(name);
+  const i = /** @type {Record<string, unknown>} */ (input);
+  if (name === "Bash" || name === "BashOutput")
+    return bashSummary(i.command) || "bash";
+  const path = typeof i.file_path === "string" ? base(i.file_path) : null;
+  switch (name) {
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return path;
+    case "Grep":
+      return '"' + String(i.pattern ?? "").slice(0, 36) + '"';
+    case "Glob":
+      return typeof i.pattern === "string" ? i.pattern.slice(0, 40) : null;
+    case "Skill":
+      return typeof i.skill === "string" ? i.skill : null;
+    case "Agent":
+    case "Task":
+      // The description, not the agent type: the table column already says Agent, and
+      // "general-purpose" repeated forty times names nothing.
+      return String(i.description || i.subagent_type || "agent").slice(0, 44);
+    case "SendMessage":
+      return "to " + String(i.to || "?");
+    case "WebFetch":
+      return String(i.url || "")
+        .replace(/^https?:\/\//, "")
+        .split("/")[0];
+    case "WebSearch":
+      return typeof i.query === "string" ? i.query.slice(0, 40) : null;
+    default:
+      // An MCP tool: its own short name already says what it does.
+      return shortToolName(name);
+  }
 }
 
 /**

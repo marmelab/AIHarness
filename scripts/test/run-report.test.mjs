@@ -99,6 +99,13 @@ const devBody = [
   result(62000, "d1"),
   turn(65000, "d2", "Bash", { command: "npm test" }),
   result(70000, "d2"),
+  // The exact shape that broke the build: a command that writes HTML. `<!--` opens the
+  // parser's escaped state and `<script` its double-escaped one, where the next
+  // `</script>` no longer closes the element.
+  turn(72000, "d3", "Bash", {
+    command: "printf '<!-- x --><script>alert(1)</script>' > /tmp/p.html",
+  }),
+  result(73000, "d3"),
 ].join("\n");
 
 let TMP = null;
@@ -166,13 +173,28 @@ describe("the generated page", () => {
     expect(() => new Function(script[1])).not.toThrow();
   });
 
-  test("its embedded data parses, with the script-closing sequence escaped", () => {
+  test("its embedded data cannot reach the HTML parser at all", () => {
+    // Escaping only `</script` looked sufficient and is not: `<!--` puts the parser into
+    // its escaped state and a following `<script` into its double-escaped state, where the
+    // next `</script>` no longer closes the element. The payload is transcripts, which
+    // carry shell commands that write HTML — ten calls in one archive contain `<script`.
+    // Every `<` is escaped instead, which is the same character to JSON.parse and nothing
+    // at all to the parser.
     const { html } = build();
     const json = html.match(
       /<script type="application\/json" id="data">([\s\S]*?)<\/script>/,
     )[1];
     expect(() => JSON.parse(json)).not.toThrow();
-    expect(json).not.toContain("</script");
+    expect(json).not.toContain("<");
+  });
+
+  test("a command containing a script tag does not break the page", () => {
+    // The regression, as a fixture: this exact shape refused to build before the fix.
+    const { run, html } = build();
+    expect(run.status).toBe(0);
+    const script = html.match(/<script>([\s\S]*)<\/script>\s*$/);
+    expect(script).not.toBe(null);
+    expect(() => new Function(script[1])).not.toThrow();
   });
 
   test("loads nothing from a host outside the artifact CSP allowlist", () => {

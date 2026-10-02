@@ -139,8 +139,8 @@ for (const id of picked) {
       id,
     ),
     calls: all(
-      `SELECT agent_id, turn_idx, tool_short, activity, detail, at, duration_ms,
-              charged_ms, stalled, is_error
+      `SELECT agent_id, turn_idx, tool_short, activity, summary, detail, at,
+              duration_ms, charged_ms, stalled, is_error
        FROM calls WHERE session_id = ? ORDER BY charged_ms DESC LIMIT ?`,
       id,
       CALLS_PER_RUN,
@@ -361,7 +361,7 @@ function redact(payload) {
     cut(r, "label", "title");
   }
   for (const d of Object.values(payload.detail)) {
-    for (const c of d.calls) cut(c, "detail", "path");
+    for (const c of d.calls) cut(c, "detail", "path", "summary");
     for (const a of d.agents) cut(a, "description");
     for (const l of d.loops) cut(l, "detail");
     for (const f of d.files) cut(f, "path");
@@ -390,9 +390,20 @@ const payload = {
   redacted: REDACT,
 };
 
+// Every `<` escaped, not just the `</script` sequence.
+//
+// Inside a script element the HTML parser only leaves on `</script`, so escaping that
+// looked sufficient. It is not: `<!--` puts the parser into its escaped state, a following
+// `<script` into its double-escaped state, and in that state the first `</script>` no
+// longer closes the element. The payload is transcripts, which carry shell commands that
+// write HTML, so both sequences occur — ten calls in this archive contain `<script`.
+//
+// `\u003c` is the same character to JSON.parse and nothing at all to the HTML parser, so
+// the payload becomes inert whatever it holds. It costs five bytes per `<`, which on this
+// archive is a fraction of a percent.
 const json = JSON.stringify(REDACT ? redact(payload) : payload).replace(
-  /<\/script/gi,
-  "<\\/script",
+  /</g,
+  "\\u003c",
 );
 
 const html = `<title>Harness Run Anatomy</title>
@@ -424,7 +435,7 @@ ${JS}
 </script>
 `;
 
-const inlineScript = html.match(/<script>([\s\S]*?)<\/script>/);
+const inlineScript = html.match(/<script>([\s\S]*)<\/script>\s*$/);
 if (!inlineScript) {
   console.error("the generated page has no inline script: the template broke");
   process.exit(1);

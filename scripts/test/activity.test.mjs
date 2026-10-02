@@ -7,6 +7,7 @@
 import { describe, expect, test } from "vitest";
 import {
   callDetail,
+  callSummary,
   callPath,
   callSignature,
   loadRules,
@@ -106,6 +107,94 @@ describe("project validation commands", () => {
     expect(classify("Bash", { command: "make verify" })).toBe("exec");
     expect(withProject("Bash", { command: "cd /wt && make verify" })).toBe(
       "validate",
+    );
+  });
+});
+
+describe("a call says what it did", () => {
+  // The exact command is kept and shown on hover; this is the label that makes a table of
+  // two hundred rows readable. It has to start from the VERB: truncating to the last
+  // ninety characters is right for a path and useless for a command, and it showed the
+  // tail of every pipeline — "…me_atomic-crm-demo --format '{{.State.StartedAt}}" names
+  // nothing where "docker ps" does.
+  const sum = (command) => callSummary("Bash", { command });
+
+  test("the verb and its object, not the plumbing", () => {
+    expect(sum("docker ps -a --filter \"name=x\" --format '{{.Names}}'")).toBe(
+      "docker ps",
+    );
+    expect(sum("git -C /workspaces/app log --oneline -5")).toBe("git log");
+    expect(sum("supabase db reset --linked")).toBe("supabase db reset");
+  });
+
+  test("two words of subcommand, because one is often only a noun", () => {
+    // "gh pr" says nothing; "gh pr edit" does. A bare number is never the subcommand.
+    expect(sum("gh pr edit 156 --add-label RFR")).toBe("gh pr edit");
+    expect(sum("npm run test -- EmailSendSheet")).toBe("npm run test");
+  });
+
+  test("a prefix is not the command", () => {
+    expect(sum("cd /wt && FOO=1 npm run build")).toBe("npm run build");
+  });
+
+  test("the pattern names a search, the file names an edit", () => {
+    expect(sum('grep -E "FAIL|Error" out.txt')).toBe('grep "FAIL|Error"');
+    expect(sum("sed -n 855,875p /a/b/EmailSendSheet.tsx")).toBe(
+      "sed EmailSendSheet.tsx",
+    );
+  });
+
+  test("a url is its host and path, without the scheme", () => {
+    expect(
+      sum(
+        'curl -s -o /dev/null -w "%{http_code}" http://localhost:3100/index.html',
+      ),
+    ).toBe("curl localhost:3100/index.html");
+  });
+
+  test("an inline program is not quoted back at the reader", () => {
+    expect(
+      sum('python3 -c "import json,sys; print(json.load(sys.stdin))"'),
+    ).toBe("python3 inline script");
+  });
+
+  test("a chain says how many commands it holds", () => {
+    // Three commands chained is not one command, and the count is the only hint of it.
+    expect(sum("ls -la $D; ls -la $D/* | head -20")).toMatch(/\+2$/);
+    expect(sum("git status")).not.toMatch(/\+/);
+  });
+
+  test("a dispatch is named by what it was asked to do", () => {
+    // The tool column already says Agent; "general-purpose" repeated forty times names
+    // nothing.
+    expect(
+      callSummary("Agent", {
+        subagent_type: "general-purpose",
+        description: "Implement Task 1.7",
+      }),
+    ).toBe("Implement Task 1.7");
+  });
+
+  test("other tools are named by what they touched", () => {
+    expect(callSummary("Read", { file_path: "/a/b/EmailSendSheet.tsx" })).toBe(
+      "EmailSendSheet.tsx",
+    );
+    expect(callSummary("Skill", { skill: "ponytail" })).toBe("ponytail");
+    expect(
+      callSummary("mcp__plugin_playwright_playwright__browser_click", {}),
+    ).toBe("browser_click");
+  });
+
+  test("a command keeps its head on hover, where a path keeps its tail", () => {
+    // Opposite ends, for opposite reasons: a command is named by its verb, a file by its
+    // basename.
+    const cmd = "git log --oneline " + "x".repeat(500);
+    expect(callDetail("Bash", { command: cmd }).startsWith("git log")).toBe(
+      true,
+    );
+    const path = "/" + "d".repeat(300) + "/End.tsx";
+    expect(callDetail("Read", { file_path: path }).endsWith("End.tsx")).toBe(
+      true,
     );
   });
 });

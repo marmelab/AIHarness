@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS calls (
   tool        TEXT,
   tool_short  TEXT,
   activity    TEXT,
+  summary     TEXT,
   detail      TEXT,
   path        TEXT,
   at          INTEGER,
@@ -316,9 +317,9 @@ export function writeRun(db, run) {
     );
     const insCall = db.prepare(
       `INSERT INTO calls (session_id, agent_id, turn_idx, tool_use_id, tool, tool_short,
-         activity, detail, path, at, end_at, duration_ms, charged_ms, stalled,
-         is_error, result_len)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         activity, summary, detail, path, at, end_at, duration_ms, charged_ms,
+         stalled, is_error, result_len)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     const insActivity = db.prepare(
       `INSERT INTO activities (session_id, agent_id, activity, calls, errors, duration_ms,
@@ -412,6 +413,7 @@ export function writeRun(db, run) {
           c.tool,
           c.toolShort,
           c.activity,
+          c.summary,
           c.detail,
           c.path,
           num(c.start),

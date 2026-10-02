@@ -27,6 +27,7 @@ import {
   callDetail,
   callPath,
   callSignature,
+  callSummary,
   shortToolName,
   SYNTHETIC,
 } from "./activity.mjs";
@@ -277,6 +278,7 @@ export function parseTranscript(body, classify) {
         start: at,
         activity: classify(block.name, block.input),
         detail: callDetail(block.name, block.input),
+        summary: callSummary(block.name, block.input),
         path: callPath(block.name, block.input),
         signature: callSignature(block.name, block.input),
       });
@@ -303,6 +305,7 @@ export function parseTranscript(body, classify) {
         toolShort: shortToolName(call.tool),
         activity: call.activity,
         detail: call.detail,
+        summary: call.summary,
         path: call.path,
         signature: call.signature,
         start: call.start,
