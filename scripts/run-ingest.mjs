@@ -13,6 +13,7 @@
 // Usage:
 //   node scripts/run-ingest.mjs --all [--db <file>] [--archive <dir>]
 //   node scripts/run-ingest.mjs --session <id> [--slug <slug>] [--arm A] [--label "..."]
+//   node scripts/run-ingest.mjs --latest  [--slug <slug>] [--arm A] [--label "..."]
 //   node scripts/run-ingest.mjs --live --session <id> --slug <slug>
 //   node scripts/run-ingest.mjs --status
 //
@@ -25,6 +26,7 @@ import { CONFIG_DIR, REPO } from "../hooks/lib/paths.mjs";
 import { makeClassifier, validateCommandsFrom } from "./lib/activity.mjs";
 import { buildRun, SCHEMA_VERSION } from "./lib/run-model.mjs";
 import { ingestedRuns, openStore, writeRun } from "./lib/run-store.mjs";
+import { latestSession, projectSlug } from "./lib/stat-target.mjs";
 import { subagentsIn } from "./lib/transcripts.mjs";
 
 const args = process.argv.slice(2);
@@ -138,11 +140,23 @@ const roles = harnessRoles(config);
 let targets;
 if (flag("all")) {
   targets = archivedSessions();
+} else if (flag("latest")) {
+  // Tagging an A/B arm means naming the run that just finished, and its id is nowhere a
+  // person can see it. The newest transcript for the slug IS that run, which is the same
+  // rule /stat uses to pick a session.
+  const slug = value("slug") || projectSlug(REPO);
+  const sessionId = latestSession(join(CONFIG_DIR, "projects", slug));
+  if (!sessionId) {
+    console.error(`no session found under ${slug}`);
+    process.exit(1);
+  }
+  console.log(`latest session for ${slug}: ${sessionId}`);
+  targets = [{ slug, sessionId }];
 } else {
   const sessionId = value("session");
   if (!sessionId) {
     console.error(
-      "usage: run-ingest.mjs --all | --session <id> [--slug <slug>] [--live]\n" +
+      "usage: run-ingest.mjs --all | --latest | --session <id> [--slug <slug>] [--live]\n" +
         "       run-ingest.mjs --status",
     );
     process.exit(1);
