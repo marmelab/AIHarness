@@ -17,12 +17,12 @@ const D = JSON.parse(document.getElementById("data").textContent);
 const L = {
   title: ["Run anatomy", "Anatomie d'un run"],
   windowed: [
-    "the run is the span its subagents cover; the host session's own turns are excluded",
-    "le run est la fenêtre que couvrent ses sous-agents ; les tours de la session hôte sont exclus",
+    "the run is the span its harness agents cover; the host session's own turns are excluded",
+    "le run est la fenêtre que couvrent ses agents du harness ; les tours de la session hôte sont exclus",
   ],
   solo: [
-    "no subagent: the run is the whole session",
-    "pas de sous-agent : le run est la session entière",
+    "no harness agent: the run is the whole session",
+    "pas d'agent du harness : le run est la session entière",
   ],
   boom: ["This report failed to draw", "Ce rapport n'a pas pu être dessiné"],
 
@@ -134,8 +134,8 @@ const L = {
   wallClock: [
     ["End to end", "De bout en bout"],
     [
-      "From the first subagent to the last, clock on the wall. A run is a session, and a session can be paused and resumed days later, so this can read six days of which four hours were work. It is reported because it is the truth about the calendar, and it is the base of no percentage on this page for exactly that reason. The pauses that make it large are listed beside it as stalls.",
-      "Du premier au dernier sous-agent, à l'horloge. Un run est une session, et une session peut être mise en pause puis reprise des jours plus tard : cela peut donc afficher six jours dont quatre heures de travail. C'est rapporté parce que c'est la vérité du calendrier, et cela ne sert de base à aucun pourcentage de cette page, précisément pour cette raison. Les pauses qui le gonflent sont listées à côté comme blocages.",
+      "From the first harness agent to the last, clock on the wall. A run is a session, and a session can be paused and resumed days later, so this can read six days of which four hours were work. It is reported because it is the truth about the calendar, and it is the base of no percentage on this page for exactly that reason. The pauses that make it large are listed beside it as stalls.",
+      "Du premier au dernier agent du harness, à l'horloge. Un run est une session, et une session peut être mise en pause puis reprise des jours plus tard : cela peut donc afficher six jours dont quatre heures de travail. C'est rapporté parce que c'est la vérité du calendrier, et cela ne sert de base à aucun pourcentage de cette page, précisément pour cette raison. Les pauses qui le gonflent sont listées à côté comme blocages.",
     ],
   ],
   agentTime: [
@@ -169,8 +169,8 @@ const L = {
   activeTime: [
     ["Active time", "Temps actif"],
     [
-      "The run window: the span its subagents cover. Wall-clock, merged so two agents working at once count once. A gap between two turns counts up to 5 min; past that it is idle and excluded.",
-      "La fenêtre du run : la durée que couvrent ses sous-agents. Temps réel, fusionné pour que deux agents simultanés comptent une fois. Un écart entre deux tours compte jusqu'à 5 min ; au delà il est inactif et exclu.",
+      "The run window: the span its harness agents cover. Wall-clock, merged so two agents working at once count once. A gap between two turns counts up to 5 min; past that it is idle and excluded.",
+      "La fenêtre du run : la durée que couvrent ses agents du harness. Temps réel, fusionné pour que deux agents simultanés comptent une fois. Un écart entre deux tours compte jusqu'à 5 min ; au delà il est inactif et exclu.",
     ],
   ],
   toolWork: [
@@ -218,8 +218,8 @@ const L = {
   outside: [
     ["Outside the run", "Hors du run"],
     [
-      "Turns of the main thread before or after the subagent window. Real spend, but the developer's own interactive work, not the harness's.",
-      "Tours du thread principal avant ou après la fenêtre des sous-agents. Dépense réelle, mais le travail interactif du développeur, pas celui du harness.",
+      "Turns of the main thread before or after the harness agents' window. Real spend, but the developer's own interactive work, not the harness's.",
+      "Tours du thread principal avant ou après la fenêtre des agents du harness. Dépense réelle, mais le travail interactif du développeur, pas celui du harness.",
     ],
   ],
   turns: [

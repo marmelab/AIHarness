@@ -32,7 +32,9 @@ import {
   SYNTHETIC,
 } from "./activity.mjs";
 
-export const SCHEMA_VERSION = 1;
+// Raised when a derivation changes what an already-ingested run reports, so `run-ingest
+// --status` can name the runs to re-derive.
+export const SCHEMA_VERSION = 2;
 
 // A session's calendar span is not its working time. A resumed session shows days, an
 // abandoned tab shows hours, and neither is harness cost: the first ingest of 78 real runs
@@ -831,6 +833,9 @@ export function detectRedispatches(agents) {
  * @param {string} [args.hooksLog]
  * @param {(tool: string, input: unknown) => string} args.classify
  * @param {object} [args.tags] arm / label / harnessVersion / sourcePath
+ * @param {Set<string> | null} [args.harnessRoles] the bare roles that open a run window;
+ *   null lets every subagent open it
+ * @param {boolean} [args.whole] count the whole session, never a window
  * @returns {object}
  */
 export function buildRun({
@@ -841,6 +846,8 @@ export function buildRun({
   hooksLog = "",
   classify,
   tags = {},
+  harnessRoles = null,
+  whole = false,
 }) {
   const rows = [];
   if (mainBody.trim())
@@ -864,13 +871,18 @@ export function buildRun({
 
   const withTurns = rows.filter((a) => a.turns > 0);
 
-  // THE RUN WINDOW. A session is not a run. When a session dispatched subagents, the run is
-  // the span those subagents cover; everything the main thread did before or after is the
+  // THE RUN WINDOW. A session is not a run. When a session dispatched harness agents, the
+  // run is the span those agents cover; what the main thread did before or after is the
   // developer's own interactive work, and charging it to the harness makes the main thread
-  // look like the most expensive role in every pipeline. Measured on one archived session:
-  // 222 of the main thread's 247 turns happened before the first subagent started, and they
-  // carried $58 of its $86. With no subagent, the run IS the session.
-  const spawned = withTurns.filter((a) => a.agentId !== "main");
+  // look like the most expensive role of every pipeline. Only a harness role opens the
+  // window: an Explore or a review fan-out in an ordinary session is that session's work,
+  // not a run inside it. With no harness agent, or with `whole`, the run IS the session.
+  const spawned = whole
+    ? []
+    : withTurns.filter(
+        (a) =>
+          a.agentId !== "main" && (!harnessRoles || harnessRoles.has(a.role)),
+      );
   const windowStart = spawned.length
     ? Math.min(...spawned.map((a) => a.startedAt).filter(Number.isFinite))
     : null;

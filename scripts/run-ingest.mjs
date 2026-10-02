@@ -15,9 +15,12 @@
 //   node scripts/run-ingest.mjs --session <id> [--slug <slug>] [--arm A] [--label "..."]
 //   node scripts/run-ingest.mjs --live --session <id> --slug <slug>
 //   node scripts/run-ingest.mjs --status
+//
+// --whole counts every session whole, as if it had dispatched no harness agent.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CONFIG_DIR, REPO } from "../hooks/lib/paths.mjs";
 import { makeClassifier, validateCommandsFrom } from "./lib/activity.mjs";
 import { buildRun, SCHEMA_VERSION } from "./lib/run-model.mjs";
@@ -61,6 +64,16 @@ function harnessConfig() {
     }
   }
   return null;
+}
+
+// The roles that open a run window: those the project's config declares, plus every agent
+// this plugin ships, so a project whose config predates a role still recognises it.
+function harnessRoles(config) {
+  const roles = new Set(Object.keys(config?.roles || {}));
+  const shipped = join(dirname(fileURLToPath(import.meta.url)), "..", "agents");
+  for (const file of existsSync(shipped) ? readdirSync(shipped) : [])
+    if (file.endsWith(".md")) roles.add(basename(file, ".md"));
+  return roles;
 }
 
 /** Subagent transcripts plus their sidecar meta, from a directory holding `subagents/`. */
@@ -137,9 +150,11 @@ if (flag("status")) {
   process.exit(0);
 }
 
+const config = harnessConfig();
 const classify = makeClassifier({
-  validateCommands: validateCommandsFrom(harnessConfig()),
+  validateCommands: validateCommandsFrom(config),
 });
+const roles = harnessRoles(config);
 
 let targets;
 if (flag("all")) {
@@ -186,6 +201,8 @@ for (const { slug, sessionId } of targets) {
     agents: src.agents,
     hooksLog: src.hooksLog,
     classify,
+    harnessRoles: roles,
+    whole: flag("whole"),
     tags: {
       arm: value("arm"),
       label: value("label"),

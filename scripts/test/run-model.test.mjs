@@ -762,9 +762,9 @@ describe("a run is named, not just numbered", () => {
 });
 
 describe("a session is not a run", () => {
-  // Measured on one archived session: 222 of the main thread's 247 turns happened before
-  // the first subagent started. Counting them as harness cost made the main thread the most
-  // expensive role of every pipeline, which is the opposite of what the pipeline does.
+  // The main thread's work before a harness agent starts is the developer's own. Counting it
+  // as harness cost would make the main thread the most expensive role of every pipeline,
+  // which is the opposite of what the pipeline does.
   const turnAt = (ms, id) =>
     assistant(ms, id, [toolUse("t" + id, "Read", { file_path: "/a.ts" })]);
   const mainBody = [
@@ -813,5 +813,38 @@ describe("a session is not a run", () => {
     expect(solo.windowStart).toBe(null);
     expect(solo.hostTurns).toBe(0);
     expect(solo.turnCount).toBe(3);
+  });
+
+  const roles = new Set(["developer", "orchestrator"]);
+  const withSub = (agentType, extra = {}) =>
+    buildRun({
+      sessionId: "s3",
+      slug: "-p",
+      mainBody,
+      agents: [{ agentId: "sub", body: subBody, meta: { agentType } }],
+      classify,
+      harnessRoles: roles,
+      ...extra,
+    });
+
+  test("a harness role opens the window, namespaced or bare", () => {
+    const start = Date.parse("2026-09-01T10:01:00.000Z");
+    expect(withSub("developer").windowStart).toBe(start);
+    expect(withSub("aiharness:orchestrator").windowStart).toBe(start);
+  });
+
+  test("a subagent outside the harness roles leaves the session whole", () => {
+    const run = withSub("Explore");
+    expect(run.windowStart).toBe(null);
+    expect(run.hostTurns).toBe(0);
+    // the main thread's three turns and the subagent's one
+    expect(run.turnCount).toBe(4);
+  });
+
+  test("`whole` counts the session even around a harness agent", () => {
+    const run = withSub("developer", { whole: true });
+    expect(run.windowStart).toBe(null);
+    expect(run.hostTurns).toBe(0);
+    expect(run.turnCount).toBe(4);
   });
 });
