@@ -5,8 +5,7 @@ driven by a team of subagents working in git worktrees.
 
 The point is not the agents, it is the **enforcement**. Every gate is a hook, so it fires
 whether or not the model cooperates. A prompt that says "never merge yourself" is a
-suggestion; a `PreToolUse` hook that refuses `git merge` is not. As this repo's own
-dependency rule puts it: a deny is ~100% respected, a CLAUDE.md line is not.
+suggestion; a `PreToolUse` hook that refuses `git merge` is not.
 
 ## How it works
 
