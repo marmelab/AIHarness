@@ -645,6 +645,19 @@ describe("the generated page", () => {
     expect(script).toContain("flag.hidden = !D.redacted;");
   });
 
+  test("the default selection ranks on cost, not on how many agents ran", () => {
+    // Ranking by agent count returned ten review sessions and not one development session
+    // on a real project: a review fans out to ten verification subagents while development
+    // is one agent grinding for two hours. The single-agent runs were the expensive ones,
+    // 64% of that project's spend, and the ranking hid every one of them.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).not.toContain("roleCount");
+    const src = readFileSync(SCRIPT, "utf8");
+    expect(src).toContain("sort((a, b) => b.usd - a.usd)");
+    expect(src).not.toMatch(/roleCount\.get/);
+  });
+
   test("refuses a store with no run rather than writing an empty page", () => {
     TMP = mkdtempSync(join(tmpdir(), "run-report-"));
     const dbFile = join(TMP, "empty.sqlite");

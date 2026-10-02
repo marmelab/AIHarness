@@ -66,23 +66,23 @@ if (!runs.length) {
   process.exit(1);
 }
 
-// Default to the runs that exercised the most of the pipeline, then the longest: a run with
-// one agent has nothing to dissect.
-const roleCount = new Map(
-  all(`SELECT session_id, count(DISTINCT role) n FROM agents WHERE turns > 0
-       GROUP BY session_id`).map((r) => [r.session_id, r.n]),
-);
+// Default to the most expensive runs.
+//
+// Ranking by how many agents a run spawned looked reasonable and was badly wrong: on one
+// project it returned ten review sessions and not one development session, because a
+// review fans out to ten verification subagents while development is mostly a single agent
+// grinding for two hours. Those single-agent runs were the expensive ones — $4.54 against
+// $2.75 on average, 64% of the project's spend — and the ranking hid every one of them.
+//
+// Cost does not have a shape it prefers. It surfaces a wide fan-out and a long solo run
+// alike, which is what a reader scanning for where the money goes actually wants.
 const picked = value("sessions")
   ? value("sessions")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
   : [...runs]
-      .sort(
-        (a, b) =>
-          (roleCount.get(b.session_id) || 0) -
-            (roleCount.get(a.session_id) || 0) || b.active_ms - a.active_ms,
-      )
+      .sort((a, b) => b.usd - a.usd)
       .slice(0, LIMIT)
       .map((r) => r.session_id);
 
