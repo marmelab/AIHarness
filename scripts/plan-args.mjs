@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // Assemble the args the harness-execute-plan workflow runs on.
 //
-//   node scripts/plan-args.mjs
-//   node scripts/plan-args.mjs --pending      # skip tickets already merged
+//   node scripts/plan-args.mjs --session <id>
+//   node scripts/plan-args.mjs --session <id> --pending   # skip merged tickets
+//
+// Run it from the project the session belongs to, so the worktree paths it computes
+// are that project's. `--session` exists because the session id is in the environment
+// inside a Claude session and nowhere in a terminal, which is where a person runs it.
 //
 // A workflow script has no filesystem and no Node API, so everything it needs about the
 // session arrives as one JSON value. This reads the same TASK-*.json the orchestrator
@@ -22,11 +26,21 @@ import { readTickets } from "../hooks/lib/tickets.mjs";
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
+const value = (n) => {
+  const i = args.indexOf(`--${n}`);
+  return i !== -1 && args[i + 1] ? args[i + 1] : null;
+};
 
-const ctx = createHookContext(
-  { session_id: process.env.CLAUDE_CODE_SESSION_ID || "" },
-  "plan-args",
-);
+const sessionId = value("session") || process.env.CLAUDE_CODE_SESSION_ID || "";
+if (!sessionId) {
+  console.error(
+    "plan-args: no session id. Pass --session <id>, the uuid naming the planning\n" +
+      "  session's transcript under <config>/projects/<slug>/.",
+  );
+  process.exit(2);
+}
+
+const ctx = createHookContext({ session_id: sessionId }, "plan-args");
 
 let tickets;
 try {

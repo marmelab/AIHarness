@@ -131,6 +131,24 @@ describe("plan-args", () => {
     expect(r.stderr).toContain("already merged");
   });
 
+  test("--session names the run, since a terminal has no session id", () => {
+    // The id is in the environment inside a Claude session and nowhere outside one,
+    // which is where a person runs this.
+    const env = session([{ id: "TASK-001" }]);
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const r = run(env, "--session", SESSION_ID);
+    expect(r.status).toBe(0);
+    expect(parse(r).sessionShort).toBe("ef5678ab");
+  });
+
+  test("no id at all is refused, not keyed on a shared path", () => {
+    const env = session([{ id: "TASK-001" }]);
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const r = run(env);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("--session");
+  });
+
   test("the output is the JSON the Workflow tool takes as args", () => {
     const r = run(session([{ id: "TASK-001" }]));
     expect(() => JSON.parse(r.stdout)).not.toThrow();
