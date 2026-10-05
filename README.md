@@ -5,8 +5,7 @@ driven by a team of subagents working in git worktrees.
 
 The point is not the agents, it is the **enforcement**. Every gate is a hook, so it fires
 whether or not the model cooperates. A prompt that says "never merge yourself" is a
-suggestion; a `PreToolUse` hook that refuses `git merge` is not. As this repo's own
-dependency rule puts it: a deny is ~100% respected, a CLAUDE.md line is not.
+suggestion; a `PreToolUse` hook that refuses `git merge` is not.
 
 ## How it works
 
@@ -81,6 +80,11 @@ Then declare your project's facts in `harness.config.json` at the repo root. The
 
 This repo's own [harness.config.json](harness.config.json) is a working reference, and
 `node scripts/check-config-sync.mjs` tells you whether your roles cover the hook matchers.
+
+The harness does not gate package installs. To keep agents (and everyone else) off a
+freshly compromised release, set npm's release-age floor: `min-release-age=1` in the
+project's `.npmrc`, or `NPM_CONFIG_MIN_RELEASE_AGE=1` in the machine or container env. It
+needs npm 11.10+; older npm ignores it.
 
 `review.tiers` runs in both directions: below the reviewer's own model the harness names a
 cheaper one, and at `critical` it names `fable`, above it. The escalation is the one
