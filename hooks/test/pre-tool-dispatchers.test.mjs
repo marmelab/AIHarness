@@ -31,7 +31,6 @@ const BASH_GUARDS = [
   "bash-guard",
   "pre-pr-checks",
   "block-docker-containers",
-  "dependency-gate",
   "circuit-breaker",
   "block-orchestrator-merge",
   "block-wave-merger-promote",

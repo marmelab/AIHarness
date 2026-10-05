@@ -13,7 +13,6 @@ export const CONFIG_FILENAME = "harness.config.json";
 // Duplicated from lib/tier.mjs rather than imported: tier.mjs spawns git to compute the
 // diff, and the config loader must stay free of that dependency.
 const REVIEW_TIERS = ["trivial", "normal", "hard", "critical"];
-const SEVERITIES = ["low", "moderate", "high", "critical"];
 
 // Minimal safe baseline. The committed harness.config.json overrides these.
 // Optional capabilities (deploy, app) are ABSENT here on purpose: a capability
@@ -44,12 +43,6 @@ const DEFAULTS = {
       hard: { model: "default" },
       critical: { model: "default" },
     },
-  },
-  dependencies: {
-    minReleaseAgeDays: 21,
-    minWeeklyDownloads: 1000,
-    blockingSeverities: ["high", "critical"],
-    allow: [],
   },
   launcher: {
     sessionDirEnv: "CHAT_SESSION_DIR",
@@ -133,28 +126,6 @@ function validate(cfg) {
         fail(`review.tiers.${tier} needs a non-empty string \`model\``);
       }
     }
-  }
-
-  const deps = cfg.dependencies;
-  if (!isObject(deps)) fail("`dependencies` must be an object");
-  for (const key of ["minReleaseAgeDays", "minWeeklyDownloads"]) {
-    if (!Number.isInteger(deps[key]) || deps[key] < 0) {
-      fail(`dependencies.${key} must be a non-negative integer`);
-    }
-  }
-  if (
-    !Array.isArray(deps.blockingSeverities) ||
-    deps.blockingSeverities.some((s) => !SEVERITIES.includes(s))
-  ) {
-    fail(
-      `dependencies.blockingSeverities must list severities among ${SEVERITIES.join(", ")}`,
-    );
-  }
-  if (
-    !Array.isArray(deps.allow) ||
-    deps.allow.some((name) => typeof name !== "string" || !name)
-  ) {
-    fail("dependencies.allow must be an array of package names");
   }
 
   if ("deploy" in cfg && cfg.deploy !== undefined) {
@@ -282,8 +253,6 @@ export function sessionDirFromEnv(cfg) {
   return process.env[name] || "";
 }
 export const allowedContainers = (cfg) => cfg.containers?.allow ?? [];
-export const dependencyPolicy = (cfg) =>
-  cfg.dependencies ?? DEFAULTS.dependencies;
 // The format-kind validation step (null when none), used by format-on-write.
 export const formatStep = (cfg) =>
   validationSteps(cfg).find((s) => s.kind === "format") ?? null;
