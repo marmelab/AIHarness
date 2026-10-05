@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { parseVerdict as realParseVerdict } from "../../hooks/lib/verdict.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, "..", "..", "workflows", "harness-execute-plan.js");
@@ -124,6 +125,76 @@ describe("toWaves", () => {
       .flat()
       .map((x) => x.id);
     expect(flat.sort()).toEqual(["A", "B", "C", "D"]);
+  });
+});
+
+describe("contract-line parsing agrees with the hooks", () => {
+  // The script and the SubagentStop hooks read the SAME reviewer output. If they ever
+  // disagree the run is worse than broken: the script merges on an approval the hook
+  // never recorded, and block-merger-without-review refuses a merge the script thinks
+  // it already decided.
+  const parseVerdict = lift("parseVerdict");
+
+  const CASES = [
+    "APPROVED",
+    "APPROVED.",
+    "APPROVED!",
+    "REJECTED: the filter drops archived rows",
+    "BLOCKED: migration is missing a down step",
+    "looks fine to me",
+    "",
+    "APPROVED parts: the schema, but not the view",
+    "REJECTED: first\nAPPROVED",
+    "APPROVED\nREJECTED: on second thought",
+    "some prose\n\nAPPROVED\n",
+    "REJECTED concerns are now resolved\nAPPROVED",
+  ];
+
+  for (const text of CASES)
+    test(`agrees on ${JSON.stringify(text).slice(0, 48)}`, () => {
+      expect(parseVerdict(text)).toBe(realParseVerdict(text));
+    });
+});
+
+describe("developerDone", () => {
+  const developerDone = lift("developerDone");
+
+  test("reads the DONE contract line", () => {
+    const r = developerDone(
+      "working...\nDONE: branch=ab/TASK-001 commit=deadbee",
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test("reads FAILED and keeps the reason", () => {
+    const r = developerDone("FAILED: out of scope — needs a plan");
+    expect(r.ok).toBe(false);
+    expect(r.why).toContain("out of scope");
+  });
+
+  test("silence is a failure, not a success", () => {
+    // An agent that returned nothing parseable has not finished the ticket, and treating
+    // that as DONE would send an untouched worktree to review.
+    expect(developerDone("").ok).toBe(false);
+    expect(developerDone("I had some trouble").ok).toBe(false);
+  });
+
+  test("the last contract line wins", () => {
+    expect(developerDone("DONE: first\nFAILED: then it broke").ok).toBe(false);
+  });
+});
+
+describe("rejectionBody", () => {
+  const rejectionBody = lift("rejectionBody");
+
+  test("keeps the reviewer's words, which the retry prompt pastes verbatim", () => {
+    expect(
+      rejectionBody("REJECTED: no test\n- add one for the empty case"),
+    ).toBe("no test\n- add one for the empty case");
+  });
+
+  test("an approval has no body", () => {
+    expect(rejectionBody("APPROVED")).toBe("");
   });
 });
 

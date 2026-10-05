@@ -137,50 +137,80 @@ const mergePrompt = (t) =>
 // exists only because the Agent path had nowhere else to put it.
 const reviewModelFor = (t) => (A.reviewModel || {})[t.tier || "normal"];
 
-const VERDICT = {
-  type: "object",
-  required: ["verdict"],
-  properties: {
-    verdict: { type: "string", enum: ["APPROVED", "REJECTED"] },
-    feedback: { type: "string" },
-  },
-};
+// The agents keep emitting their OUTPUT-CONTRACT line and this script reads it, rather
+// than being forced into StructuredOutput by a `schema`. Not a style choice: the
+// SubagentStop hooks parse the SAME line. `record-review-verdict` reads the reviewer's
+// last assistant text and writes the `reviews/<TASK>-quality-reviewer` flag that
+// `block-merger-without-review` then requires. An agent answering with a structured tool
+// call instead leaves that text empty, the flag unwritten and the merge refused, with
+// nothing in the run saying why.
+//
+// These mirror hooks/lib/verdict.mjs and the developer's DONE contract. The tests check
+// them against the real parser over a table of cases, so a change there fails here.
 
-const DEV = {
-  type: "object",
-  required: ["status"],
-  properties: {
-    status: { type: "string", enum: ["DONE", "FAILED"] },
-    commit: { type: "string" },
-    reason: { type: "string" },
-  },
-};
+/** "APPROVED" | "REJECTED" | "", from the last contract line present. */
+function parseVerdict(text) {
+  const lines = String(text == null ? "" : text)
+    .split("\n")
+    .map((l) => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    if (/^(REJECTED|BLOCKED):/.test(line)) return "REJECTED";
+    if (line.replace(/[.!\s]+$/, "") === "APPROVED") return "APPROVED";
+  }
+  return "";
+}
+
+/** The reviewer's own words, for the retry prompt: everything after the marker. */
+function rejectionBody(text) {
+  const lines = String(text == null ? "" : text).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].trim().match(/^(?:REJECTED|BLOCKED):\s*(.*)$/);
+    if (m) return [m[1], ...lines.slice(i + 1)].join("\n").trim();
+  }
+  return "";
+}
+
+/** A developer reports `DONE: branch=... commit=...`, or `FAILED: <reason>`. */
+function developerDone(text) {
+  const lines = String(text == null ? "" : text)
+    .split("\n")
+    .map((l) => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^DONE\b/.test(lines[i])) return { ok: true, line: lines[i] };
+    const failed = lines[i].match(/^FAILED:\s*(.*)$/);
+    if (failed)
+      return { ok: false, why: failed[1] || "developer reported FAILED" };
+  }
+  return { ok: false, why: "no DONE or FAILED contract line" };
+}
 
 /** Develop, review, and re-develop on a rejection, up to MAX_RETRIES. */
 async function untilApproved(ticket) {
-  let dev = await agent(devPrompt(ticket), {
-    agentType: "aiharness:developer",
-    label: "dev:" + ticket.id,
-    phase: "Develop",
-    schema: DEV,
-  });
-  if (!dev || dev.status !== "DONE")
-    return {
-      ticket,
-      ok: false,
-      why: (dev && dev.reason) || "developer failed",
-    };
+  let dev = developerDone(
+    await agent(devPrompt(ticket), {
+      agentType: "aiharness:developer",
+      label: "dev:" + ticket.id,
+      phase: "Develop",
+    }),
+  );
+  if (!dev.ok) return { ticket, ok: false, why: dev.why };
 
   for (let round = 0; round <= MAX_RETRIES; round++) {
-    const v = await agent(reviewPrompt(ticket), {
+    const said = await agent(reviewPrompt(ticket), {
       agentType: "aiharness:quality-reviewer",
       label: "review:" + ticket.id + (round ? " r" + round : ""),
       phase: "Review",
       model: reviewModelFor(ticket),
-      schema: VERDICT,
     });
-    if (!v) return { ticket, ok: false, why: "reviewer produced no verdict" };
-    if (v.verdict === "APPROVED") return { ticket, ok: true };
+    // STATE B: "malformed reviewer output -> treat as REJECTED". Neither a failure nor
+    // an approval: the ticket goes round again. The hooks agree, since a review with no
+    // clean marker leaves the flag unwritten and the merge refused anyway. Reading it as
+    // a failure instead would end the ticket where arm A would have retried it, which is
+    // the kind of divergence that makes an A/B meaningless.
+    const verdict = parseVerdict(said);
+    if (verdict === "APPROVED") return { ticket, ok: true };
     if (round === MAX_RETRIES)
       return {
         ticket,
@@ -190,21 +220,14 @@ async function untilApproved(ticket) {
 
     // The retry reuses the Stage 1 prompt verbatim, identity lines included: a retry is a
     // fresh agent with no memory of the first attempt.
-    dev = await agent(
-      devPrompt(ticket, "RETRY_FEEDBACK=" + (v.feedback || "")),
-      {
+    dev = developerDone(
+      await agent(devPrompt(ticket, "RETRY_FEEDBACK=" + rejectionBody(said)), {
         agentType: "aiharness:developer",
         label: "fix:" + ticket.id + " r" + (round + 1),
         phase: "Develop",
-        schema: DEV,
-      },
+      }),
     );
-    if (!dev || dev.status !== "DONE")
-      return {
-        ticket,
-        ok: false,
-        why: (dev && dev.reason) || "fix round failed",
-      };
+    if (!dev.ok) return { ticket, ok: false, why: dev.why };
   }
   return { ticket, ok: false, why: "exhausted fix rounds" };
 }
