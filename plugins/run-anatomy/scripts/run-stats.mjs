@@ -11,10 +11,10 @@
 // the one that wrote last.
 //
 // --recent reports the latest sessions of EVERY project instead, the last written first:
-// ten by default, or `--last <n>`, or every session written within `--since <age>` (30m,
+// 25 by default, or `--last <n>`, or every session written within `--since <age>` (30m,
 // 12h, 3d, 2w). `--project <text>` keeps the projects whose transcript directory contains
 // that text. Any of the three implies --recent. A session that has no model turn yet does
-// not count towards the ten.
+// not count towards the 25.
 //
 // Opening: under a VS Code remote (devcontainer, SSH) $BROWSER hands a URL to the host's
 // browser, where a container path means nothing. So the page is served on localhost by a
@@ -59,7 +59,7 @@ const value = (name) => {
 const SERVE_MS = 10 * 60 * 1000;
 const GRACE_MS = 60 * 1000;
 const PAGE_TTL_MS = 24 * 3600 * 1000;
-const RECENT_DEFAULT = 10;
+const RECENT_DEFAULT = 25;
 const PROJECTS = join(CONFIG_DIR, "projects");
 
 if (value("serve")) serve(value("serve"));

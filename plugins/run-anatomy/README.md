@@ -19,12 +19,12 @@ installing one does not enable the other.
 
 ## Your latest sessions
 
-`/run-anatomy:latest` opens one page holding your ten latest sessions across every
+`/run-anatomy:latest` opens one page holding your 25 latest sessions across every
 project, the last written first, with a selector to move between them:
 
 ```
-/run-anatomy:latest                     # the ten latest
-/run-anatomy:latest --last 25
+/run-anatomy:latest                     # the 25 latest
+/run-anatomy:latest --last 50
 /run-anatomy:latest --since 3d          # every session written in the last three days
 /run-anatomy:latest --project atomic    # projects whose transcript directory matches
 ```
@@ -33,7 +33,7 @@ A session with no model turn yet does not take a place. Projects under the tmp d
 fixtures, throwaway probes) are left out unless `--project` names them.
 
 It reads what Claude Code still holds, so it reaches back as far as `cleanupPeriodDays`
-(30 days by default) and no further. Ten sessions take a couple of seconds.
+(30 days by default) and no further. 25 sessions take about five seconds.
 
 ## This session
 
@@ -46,7 +46,7 @@ only relays the link.
 ## What it leaves on disk
 
 One HTML page per report, under the system tmp dir (`$RUN_ANATOMY_TMP_ROOT` overrides it):
-a few megabytes for ten sessions. The SQLite store the page is built from is deleted once
+around 10 MB for 25 sessions. The SQLite store the page is built from is deleted once
 the page is written, and pages older than a day are swept by the next report. Nothing is
 written in the project.
 
