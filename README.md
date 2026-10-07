@@ -208,6 +208,9 @@ installing it at user scope enables none of the harness's guards:
 /plugin install run-anatomy@aiharness
 ```
 
+`/run-anatomy:latest` then opens your latest sessions of every project on one page, and
+`/run-anatomy:stat` the one you are in.
+
 ## Working on this repo
 
 ```

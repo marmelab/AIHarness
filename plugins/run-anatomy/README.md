@@ -17,20 +17,44 @@ commands only: no hook, nothing running in the background.
 Install it at user scope to have it in every project. It is independent of `aiharness`:
 installing one does not enable the other.
 
+## Your latest sessions
+
+`/run-anatomy:latest` opens one page holding your ten latest sessions across every
+project, the last written first, with a selector to move between them:
+
+```
+/run-anatomy:latest                     # the ten latest
+/run-anatomy:latest --last 25
+/run-anatomy:latest --since 3d          # every session written in the last three days
+/run-anatomy:latest --project atomic    # projects whose transcript directory matches
+```
+
+A session with no model turn yet does not take a place. Projects under the tmp dir (test
+fixtures, throwaway probes) are left out unless `--project` names them.
+
+It reads what Claude Code still holds, so it reaches back as far as `cleanupPeriodDays`
+(30 days by default) and no further. Ten sessions take a couple of seconds.
+
 ## This session
 
-`/run-anatomy:stat` opens the page of the session you are in. The script runs before the
-model sees anything; the model's one short turn only relays the link. `--whole` also
-counts, in a harness run, your own work before the first harness agent started.
+`/run-anatomy:stat` opens the page of the session you are in. `--whole` also counts, in a
+harness run, your own work before the first harness agent started.
 
-The page and its store are written under the system tmp dir (`$RUN_ANATOMY_TMP_ROOT`
-overrides it), never in the project.
+Both commands run their script before the model sees anything; the model's one short turn
+only relays the link.
+
+## What it leaves on disk
+
+One HTML page per report, under the system tmp dir (`$RUN_ANATOMY_TMP_ROOT` overrides it):
+a few megabytes for ten sessions. The SQLite store the page is built from is deleted once
+the page is written, and pages older than a day are swept by the next report. Nothing is
+written in the project.
 
 ## From a keyboard shortcut
 
-A shortcut does the same with no model turn, but cannot know which session is yours: it
-takes the project's session that wrote last. In VS Code, add a user task
-(`Tasks: Open User Tasks`):
+A shortcut does the same with no model turn. For `stat` it cannot know which session is
+yours, so it takes the project's session that wrote last; add `--recent` to the command
+for the latest sessions instead. In VS Code, add a user task (`Tasks: Open User Tasks`):
 
 ```json
 {

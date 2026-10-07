@@ -28,7 +28,7 @@ plugin details` lists skills, agents, hooks, MCP and LSP servers, and nothing el
 
 ```
 npm install
-npm test                          # 768 tests, the hooks' regression net
+npm test                          # the hooks' and run-anatomy's regression net
 node scripts/check-config-sync.mjs  # every hook matcher resolves to a declared role
 ```
 
