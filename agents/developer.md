@@ -158,19 +158,26 @@ If you cannot resolve the feedback (e.g. test infrastructure broken, missing con
 
 ## MANDATORY FIRST ACTION — enter the worktree
 
-Your worktree is created for you **before you start**: the `setup-worktree`
-hook runs on the orchestrator's dispatch (PreToolUse/Agent), forks
-`<WORKTREE_PATH>` from `session/<SESSION_SHORT_ID>`, and hard-links
-`node_modules`. You never create it yourself — that keeps every worktree on the
-same convention. Your first action is simply to enter it:
+Your worktree is forked from `session/<SESSION_SHORT_ID>` with `node_modules`
+hard-linked. **Your first action claims it, then enters it:**
 
 ```bash
-cd <WORKTREE_PATH> && pwd
+node "${CLAUDE_PLUGIN_ROOT}/scripts/setup-worktree.mjs" --task <TASK_ID> && cd <WORKTREE_PATH> && pwd
 ```
 
-Do NOT run `git worktree add` or create branches yourself. If the directory is
-genuinely missing, that is a real infrastructure failure — stop and report
-`FAILED: worktree not found at <WORKTREE_PATH>` (do not improvise a worktree).
+With no `TASK_ID` (the `<SESSION_SHORT_ID>/simple` route) pass `--simple` instead.
+
+That script is the same code the `setup-worktree` hook runs on the
+orchestrator's dispatch. Where the hook already ran it adopts the existing
+worktree and changes nothing, including any work already in it. Where you were
+dispatched by a workflow no hook ran at all, and this is what creates the
+worktree. Run it either way; you cannot tell which path you are on.
+
+Do NOT run `git worktree add` or create branches yourself: the merger, the
+promotion and `completion-invariant` all read the names the harness computes,
+so an improvised one breaks everything downstream. If the script fails, that is
+a real infrastructure failure — stop and report `FAILED: worktree not found at
+<WORKTREE_PATH>`.
 
 Every subsequent Read / Edit / Write / Bash runs inside the worktree, not in
 `$CLAUDE_PROJECT_DIR`.

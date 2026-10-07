@@ -9,6 +9,7 @@ import {
   readdirSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -57,7 +58,28 @@ const setup = () => {
   mkdirSync(testResults, { recursive: true });
   writeFileSync(join(testResults, ".last-run.json"), "{}");
 
-  const env = { ...process.env, APP_DIR: app, HARNESS_TMP_ROOT: tmpRoot };
+  // The session's own log, which the teardown is about to destroy along with its home.
+  const logFile = join(base, "hooks.log");
+  writeFileSync(
+    logFile,
+    "[2026-09-01T10:00:00.000Z] [validate-on-stop] START role=dev\n",
+  );
+  // An isolated config dir, so the preserved copy lands somewhere the test owns rather
+  // than in the developer's real ~/.claude.
+  const configDir = join(TMP, "claude-config");
+  const preserved = join(
+    configDir,
+    "projects",
+    app.replace(/\//g, "-"),
+    SESSION_ID,
+    "hooks.log",
+  );
+  const env = {
+    ...process.env,
+    APP_DIR: app,
+    HARNESS_TMP_ROOT: tmpRoot,
+    CLAUDE_CONFIG_DIR: configDir,
+  };
   delete env.CHAT_SESSION_DIR;
   const run = (extraEnv = {}) =>
     spawnSync("node", [HOOK], {
@@ -66,10 +88,43 @@ const setup = () => {
       encoding: "utf8",
     });
   const worktreeList = () => g("worktree", "list", "--porcelain").stdout;
-  return { app, base, promoteLock, testResults, run, worktreeList };
+  return {
+    app,
+    base,
+    promoteLock,
+    testResults,
+    logFile,
+    preserved,
+    run,
+    worktreeList,
+  };
 };
 
 describe("cleanup-session", () => {
+  // hooks.log used to die with the directory it lived in, on every single session. It is
+  // the only record anywhere of a SubagentStop hook — a transcript carries PreToolUse,
+  // PostToolUse, Stop and SessionStart with exact durations, and never a SubagentStop,
+  // which is where the validation chain runs. So the chain could not be timed after the
+  // fact, ever, and an archive of 78 real sessions held not one line of it.
+  test("preserves hooks.log beside the session's transcripts", () => {
+    const { base, logFile, preserved, run } = setup();
+    expect(existsSync(logFile)).toBe(true);
+    run();
+    // The home is gone, and the log is not.
+    expect(existsSync(base)).toBe(false);
+    expect(existsSync(preserved)).toBe(true);
+    expect(readFileSync(preserved, "utf8")).toContain("validate-on-stop");
+  });
+
+  test("a session with no log is torn down all the same", () => {
+    const { base, logFile, preserved, run } = setup();
+    rmSync(logFile, { force: true });
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(existsSync(base)).toBe(false);
+    expect(existsSync(preserved)).toBe(false);
+  });
+
   test("removes the session worktrees and base dir", () => {
     const { base, run, worktreeList } = setup();
     const r = run();

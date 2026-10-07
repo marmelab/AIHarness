@@ -67,6 +67,15 @@
             "statusMessage": "Setting up worktree..."
           }
         ]
+      },
+      {
+        "matcher": "Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/require-workflow-agent-type.mjs"
+          }
+        ]
       }
     ],
     "PostToolUse": [

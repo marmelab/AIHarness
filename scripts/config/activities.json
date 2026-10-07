@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "_comment": [
+    "What an agent was DOING, per tool call. Read by scripts/lib/activity.mjs.",
+    "This file is the extension point: adding a bucket is one entry here, no code change.",
+    "Order matters inside `bash`: the first matching rule wins, so the specific ones",
+    "come before the generic ones and the `free` rule stays second to last."
+  ],
+  "byTool": {
+    "Agent": "dispatch",
+    "Task": "dispatch",
+    "SendMessage": "dispatch",
+    "TeamCreate": "dispatch",
+    "TeamDelete": "dispatch",
+    "Edit": "write",
+    "MultiEdit": "write",
+    "Write": "write",
+    "NotebookEdit": "write",
+    "Read": "explore",
+    "Grep": "explore",
+    "Glob": "explore",
+    "LS": "explore",
+    "ToolSearch": "explore",
+    "LSP": "explore",
+    "WebFetch": "research",
+    "WebSearch": "research",
+    "Skill": "skill",
+    "TodoWrite": "bookkeeping",
+    "ExitPlanMode": "bookkeeping",
+    "AskUserQuestion": "ask",
+    "Monitor": "wait",
+    "TaskOutput": "dispatch",
+    "TaskStop": "dispatch"
+  },
+  "byToolPrefix": [
+    { "prefix": "mcp__plugin_playwright", "activity": "runtime" },
+    { "prefix": "mcp__", "activity": "integration" }
+  ],
+  "bash": [
+    { "activity": "bookkeeping", "match": "harness-progress\\.log" },
+    { "activity": "contract", "match": "TICKET-[A-Za-z0-9_-]+\\.json" },
+    {
+      "activity": "runtime",
+      "match": "\\b(playwright|localhost|127\\.0\\.0\\.1|supabase)\\b"
+    },
+    { "activity": "runtime", "match": "^curl\\b" },
+    {
+      "activity": "validate",
+      "match": "\\b(tsc|typecheck|vitest|jest|eslint|biome|prettier)\\b"
+    },
+    {
+      "activity": "validate",
+      "match": "\\b(npm|pnpm|yarn|bun)\\s+(run\\s+)?(test|typecheck|lint|format|check)\\b"
+    },
+    { "activity": "git", "match": "(^|\\|\\||&&|;|\\s)git(\\s|$)" },
+    { "activity": "explore", "free": true },
+    { "activity": "exec" }
+  ],
+  "fallback": "other"
+}

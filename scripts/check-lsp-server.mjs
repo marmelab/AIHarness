@@ -18,8 +18,9 @@
 // a human both learn the same thing.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { conflictReport, lspConflicts } from "../hooks/lib/lsp-conflict.mjs";
+import { initializeProbe } from "./lib/lsp-probe.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +35,8 @@ const read = (p) => {
   }
 };
 
+const PROJECT_DIR_ENV = process.env.CLAUDE_PROJECT_DIR;
+
 const plugin = read(manifest);
 const servers = (plugin && plugin.lspServers) || {};
 const names = Object.keys(servers);
@@ -41,6 +44,23 @@ const names = Object.keys(servers);
 if (!names.length) {
   console.log("check-lsp-server: no lspServers declared, nothing to verify");
   process.exit(0);
+}
+
+const ROOT = PROJECT_DIR_ENV || process.cwd();
+
+/**
+ * Would this workspace drive a TypeScript server at all? `tsserver` serves JavaScript
+ * too, so the question is whether the package is there, not whether the files are .ts.
+ */
+function workspaceHasTypeScript(root) {
+  if (existsSync(join(root, "node_modules", "typescript", "package.json")))
+    return true;
+  const pkg = read(join(root, "package.json"));
+  if (!pkg) return false;
+  return Boolean(
+    (pkg.dependencies && pkg.dependencies.typescript) ||
+    (pkg.devDependencies && pkg.devDependencies.typescript),
+  );
 }
 
 let failed = 0;
@@ -75,25 +95,48 @@ for (const name of names) {
     failed++;
     continue;
   }
-  console.log(
-    `check-lsp-server: OK ${name} -> ${
-      String(r.stdout || r.stderr)
-        .trim()
-        .split("\n")[0]
-    }`,
+  const version = String(r.stdout || r.stderr)
+    .trim()
+    .split("\n")[0];
+
+  // The binary runs. That is not the same as the server being able to serve THIS
+  // workspace, and the difference is where the tool actually died: a workspace with no
+  // TypeScript, or one on TypeScript 7, which ships no tsserver.js. Both surface only at
+  // initialize.
+  const probe = await initializeProbe(command, args, ROOT);
+  if (probe.ok) {
+    console.log(`check-lsp-server: OK ${name} -> ${version}, serves ${ROOT}`);
+    continue;
+  }
+
+  // A project with no TypeScript was never going to get this server, and saying FAIL
+  // every time would make the check red forever and therefore ignored. It still earns a
+  // line, because the consequence is the same either way: the agents grep.
+  if (!workspaceHasTypeScript(ROOT)) {
+    console.log(
+      `check-lsp-server: OK ${name} -> ${version} (binary resolves)\n` +
+        `  NOTE it cannot serve ${ROOT}: ${probe.detail}\n` +
+        `  No typescript in this workspace, so the LSP tool is unavailable here and every\n` +
+        `  agent will grep instead. Expected where there is no TypeScript; add typescript\n` +
+        `  as a devDependency if you want the tool to work on this repo.`,
+    );
+    continue;
+  }
+
+  console.error(
+    `check-lsp-server: FAIL ${name} cannot serve ${ROOT}: ${probe.detail}\n` +
+      `  The binary runs (${version}) but the server quits at initialize, so every agent\n` +
+      `  that lists the LSP tool will silently fall back to grepping in Bash.\n` +
+      `  TypeScript 7 is one cause: it is the native rewrite and ships no tsserver.js,\n` +
+      `  which typescript-language-server wraps. TypeScript 5 and 6 both work.`,
   );
+  failed++;
 }
 
 // A project may also declare its own server. When it does and the two disagree, the one
 // that wins is not something this script can decide, so it only reports the divergence:
 // two declarations pointing at different commands is how the broken one survived.
-const projectSettings = read(
-  join(
-    process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-    ".claude",
-    "settings.json",
-  ),
-);
+const projectSettings = read(join(ROOT, ".claude", "settings.json"));
 for (const [name, cfg] of Object.entries(
   (projectSettings && projectSettings.lspServers) || {},
 )) {
@@ -112,7 +155,7 @@ for (const [name, cfg] of Object.entries(
 // first and the loser never starts, which is what actually held the tool at zero calls.
 // Invisible from this manifest alone, and invisible to the project, since the conflicting
 // plugin was enabled in the USER's settings.
-const conflicts = lspConflicts(servers, process.env.CLAUDE_PROJECT_DIR);
+const conflicts = lspConflicts(servers, PROJECT_DIR_ENV);
 if (conflicts.length) {
   console.error(`check-lsp-server: ${conflictReport(conflicts)}`);
   failed++;
