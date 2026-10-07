@@ -84,6 +84,12 @@ compare two arms of the same task, `/sessions-stats:report` walks through the th
 derives a SQLite store from them, `run-report.mjs` renders it. `run-compare.mjs` then puts
 two tagged arms side by side.
 
+## A model without a rate
+
+The cost of a session that used a model the rate table does not know is priced at the
+sonnet-5 rate, and says so: a `no rate for` tag on the page, and an `unpriced:` line under
+the link. The figure is then a guess until the plugin is updated.
+
 ## Before sharing a page
 
 The page embeds the session's real data: every shell command in full, absolute file paths,
@@ -99,3 +105,8 @@ Claude Code installs a plugin by copying its directory, so nothing here may impo
 outside `plugins/sessions-stats/`; a test enforces it. `scripts/lib/bash-classify.mjs` and
 `scripts/lib/pricing.mjs` are verbatim copies of the harness's own, which another test
 keeps identical: change both or neither.
+
+A new Claude model needs its row in `pricing.mjs` as soon as it is used, then a version bump
+of both plugins: an installed plugin is only replaced when its version changes. Until then
+its sessions are priced at the sonnet-5 rate, and the page and both commands say
+`unpriced:` with the model's name.

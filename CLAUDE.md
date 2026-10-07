@@ -41,6 +41,10 @@ a style preference: `completion-invariant` looked for verdict flags in a directo
 never existed and was inert for months, because it had no test and a guard that never
 fires reports nothing.
 
+A new Claude model needs its rate as soon as it is used: a row in `scripts/lib/pricing.mjs`,
+copied to `plugins/sessions-stats/scripts/lib/pricing.mjs`, and a version bump of both
+plugins, since an install is only replaced when its version changes.
+
 `rules/hook-authoring.md` carries the rules that came out of nine defects found by running the
 harness rather than reading it. Read it before changing a hook; it is scoped to `hooks/**` so it
 loads only then.
