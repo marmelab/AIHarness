@@ -1,5 +1,5 @@
 ---
-description: Open the run-anatomy page of this session (add --whole to count a harness run's whole session)
+description: Open the stats page of this session (add --whole to count a harness run's whole session)
 allowed-tools: Bash(node:*)
 ---
 

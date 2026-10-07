@@ -14,10 +14,10 @@
       "source": "./"
     },
     {
-      "name": "run-anatomy",
+      "name": "sessions-stats",
       "description": "Per-session report of where minutes, tokens and dollars went, for any Claude Code session",
       "category": "productivity",
-      "source": "./plugins/run-anatomy"
+      "source": "./plugins/sessions-stats"
     }
   ]
 }

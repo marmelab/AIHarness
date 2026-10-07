@@ -45,7 +45,7 @@ const value = (name, fallback = null) => {
 const PROJECTS = join(CONFIG_DIR, "projects");
 const DEST = value(
   "dest",
-  process.env.RUN_ANATOMY_ARCHIVE || join(REPO, ".runs", "archive"),
+  process.env.SESSIONS_STATS_ARCHIVE || join(REPO, ".runs", "archive"),
 );
 // The harness's own tmp root, read only to recover a hooks.log it has not mirrored.
 const HARNESS_TMP_ROOT = process.env.HARNESS_TMP_ROOT || "/tmp";

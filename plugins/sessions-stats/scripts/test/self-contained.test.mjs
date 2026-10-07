@@ -1,4 +1,4 @@
-// The plugin is installed from its own directory: Claude Code copies `plugins/run-anatomy/`
+// The plugin is installed from its own directory: Claude Code copies `plugins/sessions-stats/`
 // and nothing else. An import that climbs out of it resolves in this repository, passes
 // every test here, and fails only once installed.
 
@@ -21,7 +21,7 @@ const filesUnder = (dir, keep) =>
 
 const RELATIVE_SPEC = /\b(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']*)["']/g;
 
-describe("run-anatomy is self-contained", () => {
+describe("sessions-stats is self-contained", () => {
   test("no shipped module imports anything outside the plugin", () => {
     const modules = filesUnder(
       PLUGIN,

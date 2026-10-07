@@ -67,7 +67,7 @@ const runStats = (repo, args) =>
       ...process.env,
       CLAUDE_PROJECT_DIR: repo,
       CLAUDE_CONFIG_DIR: join(root, "config"),
-      RUN_ANATOMY_TMP_ROOT: join(root, "tmp"),
+      SESSIONS_STATS_TMP_ROOT: join(root, "tmp"),
     },
   });
 
@@ -106,7 +106,7 @@ describe("run-stats.mjs", () => {
     ]);
     const r = runStats(repo, ["--no-open"]);
     expect(r.status).toBe(0);
-    const page = join(root, "tmp", "run-anatomy", "bbbbbbbb.html");
+    const page = join(root, "tmp", "sessions-stats", "bbbbbbbb.html");
     expect(r.stdout).toContain(`page: ${page}`);
     expect(existsSync(page)).toBe(true);
   });
@@ -128,7 +128,7 @@ describe("run-stats.mjs", () => {
       "--no-open",
     ]);
     expect(r.status, r.stderr).toBe(0);
-    expect(readdirSync(join(root, "tmp", "run-anatomy"))).toEqual([
+    expect(readdirSync(join(root, "tmp", "sessions-stats"))).toEqual([
       "cccccccc.html",
     ]);
   });
@@ -261,7 +261,7 @@ describe("run-stats.mjs --recent", () => {
 
   test("leaves the page and nothing else, and sweeps pages a day old", () => {
     projects({ "-work-alpha": [{ id: "aaaaaaaa-1", second: 1000 }] });
-    const tmp = join(root, "tmp", "run-anatomy");
+    const tmp = join(root, "tmp", "sessions-stats");
     mkdirSync(tmp, { recursive: true });
     const stale = join(tmp, "old.html");
     writeFileSync(stale, "<html></html>");

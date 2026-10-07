@@ -1,5 +1,5 @@
 ---
-description: Open the run-anatomy page of your latest sessions, every project (--last <n>, --since <age>, --project <text>)
+description: Open the stats page of your latest sessions, every project (--last <n>, --since <age>, --project <text>)
 allowed-tools: Bash(node:*)
 ---
 

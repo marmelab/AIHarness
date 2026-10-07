@@ -5,7 +5,7 @@ node_modules/
 .promote.lock
 test-results/
 
-# Archived transcripts + the derived run store (see plugins/run-anatomy/scripts/run-archive.mjs)
+# Archived transcripts + the derived run store (see plugins/sessions-stats/scripts/run-archive.mjs)
 .runs/
 
 # Per-machine permissions and hooks, not the project's

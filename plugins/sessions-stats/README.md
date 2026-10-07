@@ -1,4 +1,4 @@
-# run-anatomy
+# sessions-stats
 
 Where a Claude Code session's minutes, tokens and dollars went, agent by agent, as one
 self-contained HTML page.
@@ -11,7 +11,7 @@ commands only: no hook, nothing running in the background.
 
 ```
 /plugin marketplace add marmelab/AIHarness
-/plugin install run-anatomy@aiharness
+/plugin install sessions-stats@aiharness
 ```
 
 Install it at user scope to have it in every project. It is independent of `aiharness`:
@@ -19,14 +19,14 @@ installing one does not enable the other.
 
 ## Your latest sessions
 
-`/run-anatomy:latest` opens one page holding your 25 latest sessions across every
+`/sessions-stats:latest` opens one page holding your 25 latest sessions across every
 project, the last written first, with a selector to move between them:
 
 ```
-/run-anatomy:latest                     # the 25 latest
-/run-anatomy:latest --last 50
-/run-anatomy:latest --since 3d          # every session written in the last three days
-/run-anatomy:latest --project atomic    # projects whose transcript directory matches
+/sessions-stats:latest                     # the 25 latest
+/sessions-stats:latest --last 50
+/sessions-stats:latest --since 3d          # every session written in the last three days
+/sessions-stats:latest --project atomic    # projects whose transcript directory matches
 ```
 
 A session with no model turn yet does not take a place. Projects under the tmp dir (test
@@ -37,7 +37,7 @@ It reads what Claude Code still holds, so it reaches back as far as `cleanupPeri
 
 ## This session
 
-`/run-anatomy:stat` opens the page of the session you are in. `--whole` also counts, in a
+`/sessions-stats:stat` opens the page of the session you are in. `--whole` also counts, in a
 harness run, your own work before the first harness agent started.
 
 Both commands run their script before the model sees anything; the model's one short turn
@@ -45,7 +45,7 @@ only relays the link.
 
 ## What it leaves on disk
 
-One HTML page per report, under the system tmp dir (`$RUN_ANATOMY_TMP_ROOT` overrides it):
+One HTML page per report, under the system tmp dir (`$SESSIONS_STATS_TMP_ROOT` overrides it):
 around 10 MB for 25 sessions. The SQLite store the page is built from is deleted once
 the page is written, and pages older than a day are swept by the next report. Nothing is
 written in the project.
@@ -60,7 +60,7 @@ for the latest sessions instead. In VS Code, add a user task (`Tasks: Open User 
 {
   "label": "Session stats",
   "type": "shell",
-  "command": "node ~/.claude/plugins/marketplaces/aiharness/plugins/run-anatomy/scripts/run-stats.mjs",
+  "command": "node ~/.claude/plugins/marketplaces/aiharness/plugins/sessions-stats/scripts/run-stats.mjs",
   "options": { "cwd": "${workspaceFolder}" },
   "presentation": { "reveal": "silent" }
 }
@@ -79,7 +79,7 @@ and bind it in `keybindings.json`:
 ## Keeping runs, comparing them
 
 Claude Code deletes transcripts after `cleanupPeriodDays`. To keep a run past that, or to
-compare two arms of the same task, `/run-anatomy:report` walks through the three steps:
+compare two arms of the same task, `/sessions-stats:report` walks through the three steps:
 `run-archive.mjs` copies the raw transcripts to `<project>/.runs/archive`, `run-ingest.mjs`
 derives a SQLite store from them, `run-report.mjs` renders it. `run-compare.mjs` then puts
 two tagged arms side by side.
@@ -96,6 +96,6 @@ internal channel or a private Artifact; for anything public, render it with
 It lives in the AIHarness repository and its tests run with that repo's `npm test`.
 
 Claude Code installs a plugin by copying its directory, so nothing here may import from
-outside `plugins/run-anatomy/`; a test enforces it. `scripts/lib/bash-classify.mjs` and
+outside `plugins/sessions-stats/`; a test enforces it. `scripts/lib/bash-classify.mjs` and
 `scripts/lib/pricing.mjs` are verbatim copies of the harness's own, which another test
 keeps identical: change both or neither.

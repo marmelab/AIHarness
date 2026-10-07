@@ -406,7 +406,7 @@ const json = JSON.stringify(REDACT ? redact(payload) : payload).replace(
   "\\u003c",
 );
 
-const html = `<title>Harness Run Anatomy</title>
+const html = `<title>Session stats</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -415,7 +415,7 @@ const html = `<title>Harness Run Anatomy</title>
 <div id="tip"></div>
 
 <div class="bar"><div class="wrap">
-  <h1 id="h1">Run anatomy</h1>
+  <h1 id="h1">Session stats</h1>
   <select id="pick" aria-label="Run"></select>
   <span class="sub" id="runsub"></span>
   <span class="tag" id="redacted" hidden></span>

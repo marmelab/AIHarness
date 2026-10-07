@@ -18,7 +18,7 @@ plugin details` lists skills, agents, hooks, MCP and LSP servers, and nothing el
   text is already in the prompt, and where it does not the pointer leads nowhere. What an
   agent must always know goes inline in its own file; what it needs only sometimes goes in
   a skill; what a project needs goes in that project's `.claude/rules/`.
-- `plugins/run-anatomy/`: a second plugin in the same marketplace, session reports for
+- `plugins/sessions-stats/`: a second plugin in the same marketplace, session reports for
   any session. Installed from its own directory, so it imports nothing outside it.
 - `HARNESS-SPLIT.md` — what belongs to the core, to an adapter, or to a project, and the
   measurements that decision rests on. Read it before moving anything between layers.
@@ -28,7 +28,7 @@ plugin details` lists skills, agents, hooks, MCP and LSP servers, and nothing el
 
 ```
 npm install
-npm test                          # the hooks' and run-anatomy's regression net
+npm test                          # the hooks' and sessions-stats' regression net
 node scripts/check-config-sync.mjs  # every hook matcher resolves to a declared role
 ```
 

@@ -15,7 +15,7 @@ const D = JSON.parse(document.getElementById("data").textContent);
    whoever opens it. Keys rather than inline literals: a figure whose title is translated
    but whose definition is not is worse than one in a single language. */
 const L = {
-  title: ["Run anatomy", "Anatomie d'un run"],
+  title: ["Session stats", "Statistiques de session"],
   windowed: [
     "the run is the span its harness agents cover; the host session's own turns are excluded",
     "le run est la fenêtre que couvrent ses agents du harness ; les tours de la session hôte sont exclus",

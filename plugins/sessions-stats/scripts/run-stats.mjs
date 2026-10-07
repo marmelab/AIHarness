@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A run-anatomy page in one step: ingest the sessions live, render them, open the page.
+// A stats page in one step: ingest the sessions live, render them, open the page.
 //
 // The sessions get a throwaway store under the tmp root, deleted once the page is written,
 // so a run still in progress never lands in the archive's store and nothing accumulates:

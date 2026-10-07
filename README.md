@@ -89,7 +89,7 @@ agent's declared model instead. That model is the floor of every failure path an
 every review cost before the tiers existed, so none of them reviews more weakly than the
 untiered harness did. Whatever a tier names also needs a rate in
 [scripts/lib/pricing.mjs](scripts/lib/pricing.mjs) and in its copy under
-`plugins/run-anatomy`, or the cost reports price it at the sonnet fallback.
+`plugins/sessions-stats`, or the cost reports price it at the sonnet fallback.
 
 #### Two blocks are capability switches
 
@@ -200,16 +200,16 @@ adapter is the next planned step.
 ## A session's numbers
 
 Where a session's minutes, tokens and dollars went is a separate plugin of this
-marketplace, [run-anatomy](plugins/run-anatomy/README.md). It reads the transcripts Claude
+marketplace, [sessions-stats](plugins/sessions-stats/README.md). It reads the transcripts Claude
 Code writes for every session, so it works on sessions that never ran the harness, and
 installing it at user scope enables none of the harness's guards:
 
 ```
-/plugin install run-anatomy@aiharness
+/plugin install sessions-stats@aiharness
 ```
 
-`/run-anatomy:latest` then opens your latest sessions of every project on one page, and
-`/run-anatomy:stat` the one you are in.
+`/sessions-stats:latest` then opens your latest sessions of every project on one page, and
+`/sessions-stats:stat` the one you are in.
 
 ## Working on this repo
 

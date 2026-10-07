@@ -11,7 +11,7 @@
 //  3. cache_creation IS NOT ONE PRICE: 1.25x input at 5 minutes, 2x at an hour, and the
 //     split only appears under `usage.cache_creation`.
 //
-// The rate table and the arithmetic on it live in pricing.mjs, which the run-anatomy plugin
+// The rate table and the arithmetic on it live in pricing.mjs, which the sessions-stats plugin
 // carries a verbatim copy of; they are re-exported here for this file's callers.
 
 import { detectCacheExpiries, normalizeModel, price } from "./pricing.mjs";

@@ -46,7 +46,7 @@ const value = (name, fallback = null) => {
 
 const ARCHIVE =
   value("archive") ||
-  process.env.RUN_ANATOMY_ARCHIVE ||
+  process.env.SESSIONS_STATS_ARCHIVE ||
   join(REPO, ".runs", "archive");
 const DB = value("db") || join(REPO, ".runs", "runs.sqlite");
 

@@ -71,14 +71,14 @@ What stays in the consuming repo:
   over 6 files, the most coupled thing in that repo), `backend-dev`,
   `shadcn-customization`, `frontend-dev`, `update-branding`.
 
-## Beside the layers: run-anatomy
+## Beside the layers: sessions-stats
 
 The session report is not part of the core. It ships as a second plugin of the same
-marketplace, `plugins/run-anatomy/`, because its input is the transcript Claude Code
+marketplace, `plugins/sessions-stats/`, because its input is the transcript Claude Code
 writes for every session, harness or not, and getting it in every project through the
 harness would mean enabling every guard in every project.
 
-Claude Code installs a plugin by copying its source directory, so run-anatomy imports
+Claude Code installs a plugin by copying its source directory, so sessions-stats imports
 nothing from the harness. The two things both need are carried as verbatim copies, the
 Bash classifier and the rate table, and a test fails when a copy drifts.
 

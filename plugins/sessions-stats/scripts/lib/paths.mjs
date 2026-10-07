@@ -25,6 +25,6 @@ export const CONFIG_DIR =
 
 /** Throwaway pages and stores, never the archive. */
 export const TMP_ROOT = join(
-  process.env.RUN_ANATOMY_TMP_ROOT || tmpdir(),
-  "run-anatomy",
+  process.env.SESSIONS_STATS_TMP_ROOT || tmpdir(),
+  "sessions-stats",
 );

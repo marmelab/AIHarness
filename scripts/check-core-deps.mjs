@@ -19,8 +19,8 @@ const CORE_DIRS = [
   "hooks",
   "hooks/lib",
   "scripts",
-  "plugins/run-anatomy/scripts",
-  "plugins/run-anatomy/scripts/lib",
+  "plugins/sessions-stats/scripts",
+  "plugins/sessions-stats/scripts/lib",
 ];
 const IMPORT_RE = /^\s*(?:import|export)\b[^;\n]*?\bfrom\s+["']([^"']+)["']/gm;
 

@@ -160,7 +160,7 @@ describe("the generated page", () => {
     const { run, html } = build();
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("report.html");
-    expect(html).toContain("<title>Harness Run Anatomy</title>");
+    expect(html).toContain("<title>Session stats</title>");
   });
 
   test("its inline script parses", () => {
