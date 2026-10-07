@@ -22,7 +22,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CONFIG_DIR, REPO, TMP_ROOT } from "../hooks/lib/paths.mjs";
+import { CONFIG_DIR, REPO, TMP_ROOT } from "./lib/paths.mjs";
 import { latestSession, projectSlug } from "./lib/stat-target.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +50,7 @@ function main() {
     process.exit(1);
   }
 
-  const out = join(TMP_ROOT, "harness-stat");
+  const out = TMP_ROOT;
   const short = sessionId.slice(0, 8);
   const db = join(out, `${short}.sqlite`);
   const page = join(out, `${short}.html`);

@@ -15,7 +15,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { REPO } from "../hooks/lib/paths.mjs";
+import { REPO } from "./lib/paths.mjs";
 
 const db = new DatabaseSync(join(REPO, ".runs", "runs.sqlite"));
 const slug = process.argv[2] || "%" + REPO.split("/").pop() + "%";

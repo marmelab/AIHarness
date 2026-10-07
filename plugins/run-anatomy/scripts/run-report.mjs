@@ -26,8 +26,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { REPO } from "../hooks/lib/paths.mjs";
-import { price } from "./lib/session-cost.mjs";
+import { REPO } from "./lib/paths.mjs";
+import { price } from "./lib/pricing.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, "report", "page.css"), "utf8");

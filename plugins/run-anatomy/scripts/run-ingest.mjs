@@ -22,7 +22,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_DIR, REPO } from "../hooks/lib/paths.mjs";
+import { CONFIG_DIR, REPO } from "./lib/paths.mjs";
 import { makeClassifier, validateCommandsFrom } from "./lib/activity.mjs";
 import { buildRun, SCHEMA_VERSION } from "./lib/run-model.mjs";
 import { ingestedRuns, openStore, writeRun } from "./lib/run-store.mjs";
@@ -40,7 +40,7 @@ const value = (name, fallback = null) => {
 
 const ARCHIVE =
   value("archive") ||
-  process.env.HARNESS_RUNS_DIR ||
+  process.env.RUN_ANATOMY_ARCHIVE ||
   join(REPO, ".runs", "archive");
 const DB = value("db") || join(REPO, ".runs", "runs.sqlite");
 

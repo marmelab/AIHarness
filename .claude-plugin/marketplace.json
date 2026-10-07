@@ -12,6 +12,12 @@
       "description": "Agent harness: hook-enforced implementation pipeline over git worktrees",
       "category": "development",
       "source": "./"
+    },
+    {
+      "name": "run-anatomy",
+      "description": "Per-session report of where minutes, tokens and dollars went, for any Claude Code session",
+      "category": "productivity",
+      "source": "./plugins/run-anatomy"
     }
   ]
 }

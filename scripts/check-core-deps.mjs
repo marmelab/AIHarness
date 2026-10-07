@@ -15,7 +15,13 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Test files may use vitest; the shipped core may not use anything.
-const CORE_DIRS = ["hooks", "hooks/lib", "scripts"];
+const CORE_DIRS = [
+  "hooks",
+  "hooks/lib",
+  "scripts",
+  "plugins/run-anatomy/scripts",
+  "plugins/run-anatomy/scripts/lib",
+];
 const IMPORT_RE = /^\s*(?:import|export)\b[^;\n]*?\bfrom\s+["']([^"']+)["']/gm;
 
 const isAllowed = (spec) =>

@@ -14,7 +14,7 @@
 // raw sums instead.
 
 import { join } from "node:path";
-import { REPO } from "../hooks/lib/paths.mjs";
+import { REPO } from "./lib/paths.mjs";
 import { armStats, compare, perSession } from "./lib/run-compare.mjs";
 import { openStore } from "./lib/run-store.mjs";
 

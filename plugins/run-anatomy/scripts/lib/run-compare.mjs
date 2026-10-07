@@ -14,7 +14,7 @@
 // Each measure below states what it counts, because a comparison is only as good as the
 // agreement on what is being compared.
 
-import { rateFor } from "./session-cost.mjs";
+import { rateFor } from "./pricing.mjs";
 
 /** Gaps longer than this are a person being elsewhere, not the harness making anyone wait. */
 export const HUMAN_ABSENCE_MS = 60 * 60 * 1000;

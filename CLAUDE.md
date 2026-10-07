@@ -18,6 +18,8 @@ plugin details` lists skills, agents, hooks, MCP and LSP servers, and nothing el
   text is already in the prompt, and where it does not the pointer leads nowhere. What an
   agent must always know goes inline in its own file; what it needs only sometimes goes in
   a skill; what a project needs goes in that project's `.claude/rules/`.
+- `plugins/run-anatomy/`: a second plugin in the same marketplace, session reports for
+  any session. Installed from its own directory, so it imports nothing outside it.
 - `HARNESS-SPLIT.md` — what belongs to the core, to an adapter, or to a project, and the
   measurements that decision rests on. Read it before moving anything between layers.
 - `templates/` — the `CLAUDE.md` / `AGENTS.md` a consuming project starts from.

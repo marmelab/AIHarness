@@ -88,8 +88,8 @@ rewrite that fails downward, since a runtime that ignores `model` there reviews 
 agent's declared model instead. That model is the floor of every failure path and is what
 every review cost before the tiers existed, so none of them reviews more weakly than the
 untiered harness did. Whatever a tier names also needs a rate in
-[scripts/lib/session-cost.mjs](scripts/lib/session-cost.mjs), or the cost report prices it
-at the sonnet fallback.
+[scripts/lib/pricing.mjs](scripts/lib/pricing.mjs) and in its copy under
+`plugins/run-anatomy`, or the cost reports price it at the sonnet fallback.
 
 #### Two blocks are capability switches
 
@@ -199,33 +199,13 @@ adapter is the next planned step.
 
 ## A session's numbers
 
-`/aiharness:stat` opens the run-anatomy page of the session you are in: where its minutes,
-tokens and dollars went, agent by agent. The script runs before the model sees anything;
-the model's one short turn only relays the link. `--whole` also counts, in a harness run,
-your own work before the first harness agent started.
+Where a session's minutes, tokens and dollars went is a separate plugin of this
+marketplace, [run-anatomy](plugins/run-anatomy/README.md). It reads the transcripts Claude
+Code writes for every session, so it works on sessions that never ran the harness, and
+installing it at user scope enables none of the harness's guards:
 
-A keyboard shortcut does the same with no model turn, but cannot know which session is
-yours: it takes the project's session that wrote last. In VS Code, add a user task
-(`Tasks: Open User Tasks`):
-
-```json
-{
-  "label": "Session stats",
-  "type": "shell",
-  "command": "node ~/.claude/plugins/marketplaces/aiharness/scripts/run-stats.mjs",
-  "options": { "cwd": "${workspaceFolder}" },
-  "presentation": { "reveal": "silent" }
-}
 ```
-
-and bind it in `keybindings.json`:
-
-```json
-{
-  "key": "ctrl+alt+s",
-  "command": "workbench.action.tasks.runTask",
-  "args": "Session stats"
-}
+/plugin install run-anatomy@aiharness
 ```
 
 ## Working on this repo

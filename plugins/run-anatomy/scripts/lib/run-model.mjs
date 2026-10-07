@@ -22,7 +22,7 @@
 //      and the transcript cannot separate them. It is reported as `wait`, and it is not
 //      claimed to be hook time.
 
-import { detectCacheExpiries, normalizeModel, price } from "./session-cost.mjs";
+import { detectCacheExpiries, normalizeModel, price } from "./pricing.mjs";
 import {
   callDetail,
   callPath,

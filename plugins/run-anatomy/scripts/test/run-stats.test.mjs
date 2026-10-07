@@ -57,10 +57,9 @@ const runStats = (repo, args) =>
     encoding: "utf8",
     env: {
       ...process.env,
-      APP_DIR: repo,
+      CLAUDE_PROJECT_DIR: repo,
       CLAUDE_CONFIG_DIR: join(root, "config"),
-      HARNESS_TMP_ROOT: join(root, "tmp"),
-      CLAUDE_PROJECT_DIR: "",
+      RUN_ANATOMY_TMP_ROOT: join(root, "tmp"),
     },
   });
 
@@ -99,7 +98,7 @@ describe("run-stats.mjs", () => {
     ]);
     const r = runStats(repo, ["--no-open"]);
     expect(r.status).toBe(0);
-    const page = join(root, "tmp", "harness-stat", "bbbbbbbb.html");
+    const page = join(root, "tmp", "run-anatomy", "bbbbbbbb.html");
     expect(r.stdout).toContain(`page: ${page}`);
     expect(existsSync(page)).toBe(true);
   });
