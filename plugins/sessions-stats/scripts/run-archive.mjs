@@ -10,10 +10,11 @@
 // the store from them whenever the derivation improves, and an archived run stays
 // comparable with a run captured a year later.
 //
-// The harness's own hooks.log lives under $HARNESS_TMP_ROOT (/tmp by default) and is
-// therefore gone on any session older than the last boot. It is archived when still there
-// and its absence is recorded, because "no hook ever fired" and "the log was swept" are
-// very different readings of the same empty set.
+// A harness session's hooks.log is mirrored into the session's sidecar directory by the
+// harness itself, so it is archived with the rest of that directory. A session older than
+// that mirror has only the live copy under $HARNESS_TMP_ROOT (/tmp by default), which a
+// reboot sweeps; it is taken while it survives. Its absence is recorded, because "no hook
+// ever fired" and "the log was swept" are very different readings of the same empty set.
 //
 // Usage:
 //   node scripts/run-archive.mjs --list
@@ -30,12 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import {
-  CONFIG_DIR,
-  REPO,
-  TMP_ROOT,
-  sanitizePath,
-} from "../hooks/lib/paths.mjs";
+import { CONFIG_DIR, REPO } from "./lib/paths.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
@@ -49,8 +45,10 @@ const value = (name, fallback = null) => {
 const PROJECTS = join(CONFIG_DIR, "projects");
 const DEST = value(
   "dest",
-  process.env.HARNESS_RUNS_DIR || join(REPO, ".runs", "archive"),
+  process.env.SESSIONS_STATS_ARCHIVE || join(REPO, ".runs", "archive"),
 );
+// The harness's own tmp root, read only to recover a hooks.log it has not mirrored.
+const HARNESS_TMP_ROOT = process.env.HARNESS_TMP_ROOT || "/tmp";
 
 const listSlugs = () =>
   existsSync(PROJECTS)
@@ -103,20 +101,24 @@ function copyTree(from, to) {
 }
 
 /**
- * Where the harness wrote this session's hooks.log, if it still exists.
+ * Where the harness wrote this session's hooks.log, if it still exists: the harness's
+ * session directory under its tmp root, `<root>/<sanitized repo>/<session id>/`.
  *
- * The directory is `sanitizePath(<repo root>)`, and the repo root is NOT recoverable from
- * the transcript slug: both encode the path with a separator substitution, and `-` is
- * legal in a directory name, so `-workspaces-popimpact-root-popimpact` has more than one
- * pre-image. Scanning for the session id instead is exact, since it is a uuid.
+ * The repo root is NOT recoverable from the transcript slug: both encode the path with a
+ * separator substitution, and `-` is legal in a directory name, so
+ * `-workspaces-popimpact-root-popimpact` has more than one pre-image. Scanning for the
+ * session id instead is exact, since it is a uuid.
  */
-function hooksLogFor(sessionId) {
-  const own = join(TMP_ROOT, sanitizePath(REPO), sessionId, "hooks.log");
-  if (existsSync(own)) return own;
-  if (!existsSync(TMP_ROOT)) return null;
-  for (const entry of readdirSync(TMP_ROOT, { withFileTypes: true })) {
+function liveHooksLogFor(sessionId) {
+  if (!existsSync(HARNESS_TMP_ROOT)) return null;
+  for (const entry of readdirSync(HARNESS_TMP_ROOT, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const candidate = join(TMP_ROOT, entry.name, sessionId, "hooks.log");
+    const candidate = join(
+      HARNESS_TMP_ROOT,
+      entry.name,
+      sessionId,
+      "hooks.log",
+    );
     if (existsSync(candidate)) return candidate;
   }
   return null;
@@ -134,8 +136,14 @@ function archive(session, { force }) {
   let side = { files: 0, bytes: 0 };
   if (session.side) side = copyTree(session.side, dest);
 
-  const hooks = hooksLogFor(session.id);
-  if (hooks) copyFileSync(hooks, join(dest, "hooks.log"));
+  // The mirror in the sidecar directory came with it; a session older than the mirror
+  // only has the live copy, while it survives.
+  let hooks = existsSync(join(dest, "hooks.log"));
+  if (!hooks) {
+    const live = liveHooksLogFor(session.id);
+    if (live) copyFileSync(live, join(dest, "hooks.log"));
+    hooks = Boolean(live);
+  }
 
   const manifest = {
     sessionId: session.id,
@@ -212,6 +220,7 @@ console.log(
 );
 if (noHooks)
   console.log(
-    `${noHooks} of them had no hooks.log left under ${TMP_ROOT} (swept on reboot);\n` +
+    `${noHooks} of them had no hooks.log beside their transcripts or under ` +
+      `${HARNESS_TMP_ROOT} (a session without the harness, or a log swept on reboot);\n` +
       `their guard activity is unrecoverable and the manifests record that.`,
   );

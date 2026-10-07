@@ -15,7 +15,7 @@ const D = JSON.parse(document.getElementById("data").textContent);
    whoever opens it. Keys rather than inline literals: a figure whose title is translated
    but whose definition is not is worse than one in a single language. */
 const L = {
-  title: ["Run anatomy", "Anatomie d'un run"],
+  title: ["Session stats", "Statistiques de session"],
   windowed: [
     "the run is the span its harness agents cover; the host session's own turns are excluded",
     "le run est la fenêtre que couvrent ses agents du harness ; les tours de la session hôte sont exclus",
@@ -998,9 +998,7 @@ function histogram(values, label) {
       '" height="' +
       Math.max(h, n ? 1.5 : 0).toFixed(1) +
       '" rx="1" fill="var(--accent)" data-tip="' +
-      n +
-      " " +
-      tr("callsWord") +
+      esc(n + " " + tr("callsWord")) +
       '" data-tip2="' +
       esc(dur(from) + " " + tr("toWord") + " " + dur(to)) +
       '"/>';
@@ -1360,8 +1358,10 @@ function timeline(d) {
             dur(c.charged_ms),
         ) +
         '" data-tip2="' +
-        esc(c.summary || "") +
-        (c.detail ? "\n" + (c.detail || "").slice(0, 300) : "") +
+        esc(
+          (c.summary || "") +
+            (c.detail ? "\n" + String(c.detail).slice(0, 300) : ""),
+        ) +
         '"/>';
     }
   });
@@ -1556,7 +1556,7 @@ sel.innerHTML = D.picked
     const r = D.runs.find((x) => x.session_id === id) || {};
     return (
       '<option value="' +
-      id +
+      esc(id) +
       '">' +
       esc(
         day(r.started_at) +

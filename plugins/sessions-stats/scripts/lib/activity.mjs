@@ -9,17 +9,15 @@
 // bookkeeping file. Adding a bucket must stay a one-line edit in a data file.
 //
 // Bash is the hard case, and it is the one place this module does not invent anything: it
-// defers to hooks/lib/bash-classify.mjs, which already knows that `cd /wt && FOO=1 grep x`
-// is exploration and `grep x | node build.mjs` is not, and which is covered by its own
-// tests. Re-deriving that here would produce a second, worse answer to the same question.
+// defers to bash-classify.mjs, a verbatim copy of the harness's own classifier, which
+// already knows that `cd /wt && FOO=1 grep x` is exploration and `grep x | node build.mjs`
+// is not, and which is covered by the harness's tests. Re-deriving that here would produce
+// a second, worse answer to the same question.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  isFreeCommand,
-  stripPrefixes,
-} from "../../hooks/lib/bash-classify.mjs";
+import { isFreeCommand, stripPrefixes } from "./bash-classify.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const RULES_FILE = join(HERE, "..", "config", "activities.json");

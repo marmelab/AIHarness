@@ -1,5 +1,5 @@
 ---
-description: Build the run-anatomy report for a session, from its own transcripts
+description: Build the stats report for a session, from its own transcripts
 ---
 
 Turn a Claude Code session's transcripts into one self-contained HTML page that says where its minutes and its tokens went. This is **read-only**: it reads transcripts and writes one file.

@@ -160,7 +160,7 @@ describe("the generated page", () => {
     const { run, html } = build();
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("report.html");
-    expect(html).toContain("<title>Harness Run Anatomy</title>");
+    expect(html).toContain("<title>Session stats</title>");
   });
 
   test("its inline script parses", () => {
@@ -691,5 +691,40 @@ describe("the generated page", () => {
     );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("run-ingest");
+  });
+});
+
+describe("what the page writes into its markup", () => {
+  // The page builds its markup as strings handed to innerHTML, and those strings carry
+  // transcript text: shell commands, paths, prompts. That text is not trusted, since a
+  // command can come from a README or a fetched page, and a `"` in it closes the attribute
+  // it was written into. So every attribute value is one esc() call, whole.
+  const PAGE = join(HERE, "..", "report", "page.js");
+  const ATTR = /(data-tip2?|value)="' \+([\s\S]*?)\+\s*'"/g;
+  // Escaped by the caller before they are handed in.
+  const ESCAPED_BY_CALLER = new Set(["tipT", "tipD"]);
+
+  const isOneEscCall = (expr) => {
+    if (!expr.startsWith("esc(")) return false;
+    let depth = 0;
+    for (let i = 3; i < expr.length; i++) {
+      if (expr[i] === "(") depth++;
+      else if (expr[i] === ")" && --depth === 0) return i === expr.length - 1;
+    }
+    return false;
+  };
+
+  test("every tooltip and option value is escaped as a whole", () => {
+    const js = readFileSync(PAGE, "utf8");
+    const raw = [];
+    let seen = 0;
+    for (const m of js.matchAll(ATTR)) {
+      seen++;
+      const expr = m[2].trim();
+      if (!ESCAPED_BY_CALLER.has(expr) && !isOneEscCall(expr))
+        raw.push(`${m[1]}: ${expr.replace(/\s+/g, " ")}`);
+    }
+    expect(seen).toBeGreaterThan(20);
+    expect(raw).toEqual([]);
   });
 });
