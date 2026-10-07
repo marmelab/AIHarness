@@ -18,12 +18,18 @@
 //   node scripts/run-ingest.mjs --status
 //
 // --whole counts every session whole, as if it had dispatched no harness agent.
+// --config <file> names the harness.config.json to read; without it, each session reads
+// the one in the directory it ran in, if any.
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CONFIG_DIR, REPO } from "./lib/paths.mjs";
 import { makeClassifier, validateCommandsFrom } from "./lib/activity.mjs";
+import {
+  harnessConfigFor,
+  harnessRoles,
+  sessionCwd,
+} from "./lib/harness-context.mjs";
 import { buildRun, SCHEMA_VERSION } from "./lib/run-model.mjs";
 import { ingestedRuns, openStore, writeRun } from "./lib/run-store.mjs";
 import { latestSession, projectSlug } from "./lib/stat-target.mjs";
@@ -52,33 +58,6 @@ const readIf = (file) => {
   }
 };
 
-function harnessConfig() {
-  for (const candidate of [
-    value("config"),
-    join(process.cwd(), "harness.config.json"),
-    join(REPO, "harness.config.json"),
-  ]) {
-    if (candidate && existsSync(candidate)) {
-      try {
-        return JSON.parse(readFileSync(candidate, "utf8"));
-      } catch {
-        /* a malformed config must not stop an ingest: the generic rules still apply */
-      }
-    }
-  }
-  return null;
-}
-
-// The roles that open a run window: those the project's config declares, plus every agent
-// this plugin ships, so a project whose config predates a role still recognises it.
-function harnessRoles(config) {
-  const roles = new Set(Object.keys(config?.roles || {}));
-  const shipped = join(dirname(fileURLToPath(import.meta.url)), "..", "agents");
-  for (const file of existsSync(shipped) ? readdirSync(shipped) : [])
-    if (file.endsWith(".md")) roles.add(basename(file, ".md"));
-  return roles;
-}
-
 /** Every source this run can be built from, whether archived or still live. */
 function sourcesFor({ live, slug, sessionId }) {
   if (live) {
@@ -87,7 +66,8 @@ function sourcesFor({ live, slug, sessionId }) {
       sourcePath: dir,
       mainBody: readIf(join(dir, `${sessionId}.jsonl`)),
       agents: subagentsIn(join(dir, sessionId)),
-      hooksLog: "",
+      // The harness mirrors its hooks.log into the sidecar directory as the session runs.
+      hooksLog: readIf(join(dir, sessionId, "hooks.log")),
     };
   }
   const dir = join(ARCHIVE, slug, sessionId);
@@ -130,12 +110,6 @@ if (flag("status")) {
     );
   process.exit(0);
 }
-
-const config = harnessConfig();
-const classify = makeClassifier({
-  validateCommands: validateCommandsFrom(config),
-});
-const roles = harnessRoles(config);
 
 let targets;
 if (flag("all")) {
@@ -187,14 +161,20 @@ for (const { slug, sessionId } of targets) {
     empty++;
     continue;
   }
+  const config = harnessConfigFor({
+    explicit: value("config"),
+    cwd: sessionCwd(src.mainBody),
+  });
   const run = buildRun({
     sessionId,
     slug,
     mainBody: src.mainBody,
     agents: src.agents,
     hooksLog: src.hooksLog,
-    classify,
-    harnessRoles: roles,
+    classify: makeClassifier({
+      validateCommands: validateCommandsFrom(config),
+    }),
+    harnessRoles: harnessRoles(config, src.agents),
     whole: flag("whole"),
     tags: {
       arm: value("arm"),
