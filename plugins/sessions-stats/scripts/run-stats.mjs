@@ -93,10 +93,18 @@ function main() {
     );
     process.exit(1);
   }
-  run("run-report.mjs", ["--db", db, "--sessions", sessionId, "--out", page]);
+  const report = run("run-report.mjs", [
+    "--db",
+    db,
+    "--sessions",
+    sessionId,
+    "--out",
+    page,
+  ]);
   drop(db);
 
   console.log(summary.trim());
+  relayUnpriced(report);
   show(page);
 }
 
@@ -137,7 +145,7 @@ function recent() {
     console.error(`stat: no session with a model turn under ${PROJECTS}`);
     process.exit(1);
   }
-  run("run-report.mjs", [
+  const report = run("run-report.mjs", [
     "--db",
     db,
     "--sessions",
@@ -148,6 +156,7 @@ function recent() {
   drop(db);
 
   console.log(`${picked.length} sessions`);
+  relayUnpriced(report);
   show(page);
 }
 
@@ -170,6 +179,12 @@ function ingest(sessionId, slug, db, runner) {
     .split("\n")
     .find((l) => l.startsWith(sessionId.slice(0, 8)));
   return summary && !/\s0 turns/.test(summary) ? summary : null;
+}
+
+/** The report's `unpriced:` lines: a cost the page cannot vouch for is said out loud. */
+function relayUnpriced(report) {
+  for (const line of report.split("\n"))
+    if (line.startsWith("unpriced:")) console.log(line);
 }
 
 function show(page) {

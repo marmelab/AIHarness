@@ -728,3 +728,54 @@ describe("what the page writes into its markup", () => {
     expect(raw).toEqual([]);
   });
 });
+
+describe("a model without a rate", () => {
+  // Priced at the fallback, its cost reads exactly like a real one. The page and the
+  // script's output both name it, so nobody quotes a guess.
+  const report = (model) => {
+    TMP = mkdtempSync(join(tmpdir(), "run-report-"));
+    const dbFile = join(TMP, "runs.sqlite");
+    writeRun(
+      openStore(dbFile),
+      buildRun({
+        sessionId: "sess-rate-1",
+        slug: "-fixture",
+        mainBody: mainBody.replaceAll("claude-sonnet-5", model),
+        classify,
+      }),
+    );
+    const out = join(TMP, "r.html");
+    const run = spawnSync(
+      process.execPath,
+      [SCRIPT, "--db", dbFile, "--out", out],
+      {
+        encoding: "utf8",
+      },
+    );
+    expect(run.status, run.stderr).toBe(0);
+    return { run, data: payloadOf(readFileSync(out, "utf8")) };
+  };
+
+  test("is named on the page and on its own line of output", () => {
+    const { run, data } = report("claude-future-9");
+    expect(data.detail["sess-rate-1"].unpriced).toEqual(["future-9"]);
+    expect(data.runs[0].rate_known).toBe(0);
+    expect(run.stdout).toMatch(
+      /^unpriced: future-9 \(sessions sess-rat\) priced at the sonnet-5 rate/m,
+    );
+  });
+
+  test("a priced model raises nothing", () => {
+    const { run, data } = report("claude-opus-5-5");
+    expect(data.detail["sess-rate-1"].unpriced).toEqual([]);
+    expect(data.runs[0].rate_known).toBe(1);
+    expect(run.stdout).not.toContain("unpriced:");
+  });
+
+  test("the page shows the warning from the run, not from a constant", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(html).toContain('id="unpriced" hidden');
+    expect(script).toContain("run.rate_known !== 0 && !models.length");
+  });
+});

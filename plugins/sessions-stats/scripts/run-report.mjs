@@ -27,7 +27,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { REPO } from "./lib/paths.mjs";
-import { price } from "./lib/pricing.mjs";
+import { FALLBACK_RATE_MODEL, price, rateFor } from "./lib/pricing.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(HERE, "report", "page.css"), "utf8");
@@ -58,7 +58,7 @@ const runs = all(`
   SELECT session_id, slug, title, arm, label, started_at, duration_ms, active_ms, busy_ms,
          coord_ms, stall_ms, stall_count, window_ms, window_start, window_end,
          host_turns, host_usd,
-         agent_count, turn_count, call_count, error_count, usd, has_hooks_log
+         agent_count, turn_count, call_count, error_count, usd, rate_known, has_hooks_log
   FROM runs WHERE turn_count > 0 ORDER BY started_at DESC`);
 
 if (!runs.length) {
@@ -87,6 +87,9 @@ const picked = value("sessions")
       .map((r) => r.session_id);
 
 const detail = {};
+// Models a figure was priced at the fallback rate for, with the sessions that used them.
+const unpricedIn = new Map();
+
 for (const id of picked) {
   // Percentiles and the duration histogram must see EVERY call, not the embedded sample:
   // a p95 computed over the 400 longest calls is not a p95 of anything.
@@ -96,16 +99,30 @@ for (const id of picked) {
     id,
   ).map((r) => r.charged_ms);
 
-  detail[id] = {
-    durations,
-    agents: all(
-      `SELECT agent_id, role, description, model, turns, tool_turns, think_turns, calls,
+  const agents = all(
+    `SELECT agent_id, role, description, model, turns, tool_turns, think_turns, calls,
               errors, ctx_first, ctx_last, ctx_max, out_tokens, usd, started_at, ended_at,
               active_ms, wait_ms, turns_in_window, calls_in_window, usd_in_window,
               outside_turns, outside_usd
        FROM agents WHERE session_id = ? AND turns > 0 ORDER BY started_at`,
-      id,
+    id,
+  );
+  // An agent's model is the first it ran; a later unpriced one shows as rate_known = 0
+  // on the run without a name, which the page reports as such.
+  const unpriced = [
+    ...new Set(
+      agents
+        .map((a) => a.model)
+        .filter((m) => m && m !== "<synthetic>" && !rateFor(m).known),
     ),
+  ];
+  for (const m of unpriced)
+    unpricedIn.set(m, [...(unpricedIn.get(m) || []), id.slice(0, 8)]);
+
+  detail[id] = {
+    durations,
+    agents,
+    unpriced,
     activities: all(
       `SELECT activity, sum(wall_ms) wall_ms, sum(calls) calls, sum(errors) errors,
               sum(stalled) stalled
@@ -419,6 +436,7 @@ const html = `<title>Session stats</title>
   <select id="pick" aria-label="Run"></select>
   <span class="sub" id="runsub"></span>
   <span class="tag" id="redacted" hidden></span>
+  <span class="tag bad" id="unpriced" hidden></span>
   <span class="langs" id="langs" role="group" aria-label="Language">
     <button type="button" data-lang="0">EN</button><button type="button" data-lang="1">FR</button>
   </span>
@@ -456,3 +474,10 @@ const kb = Math.round(Buffer.byteLength(html) / 1024);
 console.log(
   `${OUT}  (${kb}KB, ${runs.length} runs, ${picked.length} detailed)`,
 );
+// The figures above are wrong for these models, by however far their real rate is from the
+// fallback's. Said on its own line so a caller can relay it.
+for (const [model, sessions] of unpricedIn)
+  console.log(
+    `unpriced: ${model} (sessions ${sessions.join(", ")}) priced at the ` +
+      `${FALLBACK_RATE_MODEL} rate; add it to scripts/lib/pricing.mjs`,
+  );

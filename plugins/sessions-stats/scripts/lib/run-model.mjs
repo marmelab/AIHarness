@@ -34,7 +34,7 @@ import {
 
 // Raised when a derivation changes what an already-ingested run reports, so `run-ingest
 // --status` can name the runs to re-derive.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // A session's calendar span is not its working time. A resumed session shows days, an
 // abandoned tab shows hours, and neither is harness cost: the first ingest of 78 real runs

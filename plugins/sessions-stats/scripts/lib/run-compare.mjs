@@ -21,7 +21,6 @@ export const HUMAN_ABSENCE_MS = 60 * 60 * 1000;
 
 /** 5-minute cache TTL: a write after a lapse this long re-paid for the whole context. */
 export const CACHE_WRITE_MULTIPLIER = 1.25;
-export const CACHE_READ_MULTIPLIER = 0.1;
 
 const sum = (rows, f) => rows.reduce((t, r) => t + (f(r) || 0), 0);
 
@@ -79,9 +78,9 @@ export function armStats(db, arm) {
     const r = rateFor(t.model);
     const read = t.cache_read || 0;
     const floor = Math.min(read, t.ctx_first || 0);
-    cost.preamble += (floor * CACHE_READ_MULTIPLIER * r.input) / 1e6;
-    cost.accumulated +=
-      ((read - floor) * CACHE_READ_MULTIPLIER * r.input) / 1e6;
+    // Each model reads its cache at its own fraction of input.
+    cost.preamble += (floor * r.cacheRead * r.input) / 1e6;
+    cost.accumulated += ((read - floor) * r.cacheRead * r.input) / 1e6;
     cost.cacheWrite +=
       ((t.cache_write || 0) * CACHE_WRITE_MULTIPLIER * r.input) / 1e6;
     cost.output += ((t.out_tokens || 0) * r.output) / 1e6;
@@ -107,16 +106,12 @@ export function armStats(db, arm) {
   let amplified = 0;
   for (const c of calls) {
     const k = c.session_id + "|" + c.agent_id;
+    const r = rateFor(model.get(k));
     // The turn that MADE the call does not re-read its own result, so an agent of N turns
     // re-reads a result from turn i exactly N - 1 - i times. Counting the issuing turn
     // too overstates every result by one turn's worth.
     const left = Math.max(0, (life.get(k) || 0) - 1 - (c.turn_idx || 0));
-    amplified +=
-      ((c.result_len / 4) *
-        left *
-        CACHE_READ_MULTIPLIER *
-        rateFor(model.get(k)).input) /
-      1e6;
+    amplified += ((c.result_len / 4) * left * r.cacheRead * r.input) / 1e6;
   }
 
   const turnCount = turns.length || 1;
