@@ -279,6 +279,24 @@ describe("run-stats.mjs --recent", () => {
     expect(r.stderr).toContain("--since takes an age");
   });
 
+  test("relays a model the report could not price", () => {
+    projects({
+      "-work-alpha": [
+        {
+          id: "aaaaaaaa-1",
+          body: [
+            prompt,
+            turn.replace("claude-sonnet-5", "claude-future-9"),
+          ].join("\n"),
+          second: 1000,
+        },
+      ],
+    });
+    const r = stats(["--recent", "--no-open"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^unpriced: future-9 /m);
+  });
+
   test("says so when no session has a model turn", () => {
     projects({
       "-work-alpha": [{ id: "aaaaaaaa-1", body: prompt, second: 1000 }],

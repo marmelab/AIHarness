@@ -441,6 +441,8 @@ const S = {
   hPreamble: ["preamble", "préambule"],
   hKind: ["kind", "type"],
   redactedBadge: ["redacted: figures only", "expurgé : chiffres seulement"],
+  unpricedBadge: ["no rate for", "pas de tarif pour"],
+  unpricedAny: ["a model of this session", "un modèle de cette session"],
   hookRuns: ["recorded executions", "exécutions enregistrées"],
   noSubagentStop: [
     "SubagentStop not among them",
@@ -1591,6 +1593,16 @@ function render(id) {
   if (flag) {
     flag.hidden = !D.redacted;
     flag.textContent = tr("redactedBadge");
+  }
+  // So must a cost priced at the fallback rate: it is a guess, and it reads like the rest.
+  const unpriced = document.getElementById("unpriced");
+  if (unpriced) {
+    const models = (d && d.unpriced) || [];
+    unpriced.hidden = run.rate_known !== 0 && !models.length;
+    unpriced.textContent =
+      tr("unpricedBadge") +
+      " " +
+      (models.length ? models.join(", ") : tr("unpricedAny"));
   }
   document.getElementById("runsub").textContent =
     (run.title ? run.title + " · " : "") +
