@@ -575,6 +575,24 @@ describe("the generated page", () => {
       ).toBeTruthy();
   });
 
+  test("every model used is listed with its cost, tokens and generation time", () => {
+    const { html } = build();
+    const data = payloadOf(html);
+    const models = data.detail[data.picked[0]].models;
+    expect(models.map((m) => m.agent_id).sort()).toEqual(["dev-1", "main"]);
+    for (const m of models) {
+      expect(m.model).toBe("sonnet-5");
+      expect(m.gen_ms).toEqual(expect.any(Number));
+    }
+    // Over the run window, like the cost tile: the panel and the tile must agree.
+    const run = data.runs.find((r) => r.session_id === data.picked[0]);
+    expect(models.reduce((s, m) => s + m.usd, 0)).toBeCloseTo(run.usd, 6);
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('panelK("pModels", modelsTable(d)');
+    expect(script).toContain("function drillModel(");
+    expect(script).toContain('data-model="');
+  });
+
   test("tokens are broken out by billed kind, with their cost", () => {
     // On a subscription the dollars are an estimate at public rates; the tokens are what a
     // usage limit counts. Both are shown, and the kinds are not interchangeable: a cache
@@ -808,6 +826,18 @@ describe("a model without a rate", () => {
     });
     expect(data.runs[0].rate_known).toBe(0);
     expect(data.detail["sess-rate-1"].unpriced).toEqual(["future-9"]);
+    // And both models get a row of their own in the models panel, which tags the unpriced
+    // one: the badge says that one is unpriced, the panel says how much of the run it is.
+    const models = data.detail["sess-rate-1"].models;
+    expect([...new Set(models.map((m) => m.model))].sort()).toEqual([
+      "future-9",
+      "sonnet-5",
+    ]);
+    for (const m of models) {
+      expect(m.turns).toBeGreaterThan(0);
+      expect(m.tokens).toBeGreaterThan(0);
+      expect(m.usd).toBeGreaterThan(0);
+    }
   });
 
   test("a store priced before the rate existed says so instead of naming nothing", () => {

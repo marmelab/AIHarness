@@ -188,6 +188,21 @@ for (const id of picked) {
        GROUP BY prev_activity ORDER BY wait_ms DESC`,
       id,
     ),
+    // Per model and agent, over the run window like every other cost on the page. The
+    // generation time is the wait bucket's own rule: a gap of 5 min or more is idle, whole.
+    models: all(
+      `SELECT model, agent_id, count(*) turns, sum(usd) usd,
+              sum(in_tokens + cache_read + cache_write + out_tokens) tokens,
+              sum(CASE WHEN wait_ms < 300000 THEN wait_ms ELSE 0 END) gen_ms
+       FROM turns
+       WHERE session_id = ? AND in_tokens + cache_read + cache_write + out_tokens > 0
+         AND (? IS NULL OR (at >= ? AND at <= ?))
+       GROUP BY model, agent_id`,
+      id,
+      run?.window_start ?? null,
+      run?.window_start ?? null,
+      run?.window_end ?? null,
+    ).map((r) => ({ ...r, model: r.model || UNNAMED_MODEL })),
     // The preamble is measured, not reconstructed: ctx_first is the billed context of an
     // agent's very first turn, which is everything it was handed before it did anything.
     // The attachment breakdown is the right way to see WHAT is in it, but a wrong way to

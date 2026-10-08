@@ -117,6 +117,13 @@ const L = {
       "Les quatre types ne sont pas interchangeables. Une lecture de cache coûte un dixième d'un input frais, une écriture de cache 5 min 1,25 fois, une écriture 1 h le double, et la sortie plusieurs fois l'input. La plus grosse colonne en tokens est donc rarement la plus grosse en argent : sur un run mesuré, 52 M de tokens lus en cache coûtent moins que 0,5 M de tokens de sortie. Les dollars sont une estimation aux tarifs API publics, qui ne sont pas ce que facture un abonnement ; les tokens, eux, sont mesurés, et ce sont eux que compte une limite d'usage.",
     ],
   ],
+  pModels: [
+    ["Models used", "Modèles utilisés"],
+    [
+      "Every model that produced a turn in the run window, with its cost, the tokens it read and wrote, and its generation time (the gaps before its turns, under 5 min each), each with its share of the run. A model the pricing table has no rate for is priced at the fallback rate and tagged so. Click a row for the agents that used it.",
+      "Chaque modèle qui a produit un tour dans la fenêtre du run, avec son coût, les tokens qu'il a lus et écrits, et son temps de génération (les écarts avant ses tours, sous 5 min chacun), chacun avec sa part du run. Un modèle sans tarif dans la table de prix est chiffré au tarif par défaut, et marqué comme tel. Cliquez une ligne pour les agents qui l'ont utilisé.",
+    ],
+  ],
   pPreamble: [
     ["The preamble, per role", "Le préambule, par rôle"],
     [
@@ -508,6 +515,11 @@ const S = {
   allCalls: ["all calls", "tous les appels"],
   skipped: ["skipped", "sauté"],
   close: ["close", "fermer"],
+  hModel: ["model", "modèle"],
+  hGen: ["generation", "génération"],
+  hAgents: ["agents", "agents"],
+  defaultRate: ["fallback rate", "tarif par défaut"],
+  dAgents: ["agents that used it", "agents qui l'ont utilisé"],
   dCalls: ["calls, longest first", "appels, du plus long au plus court"],
   dByTool: ["by tool", "par outil"],
   dBySkill: ["by skill loaded", "par skill chargée"],
@@ -866,6 +878,74 @@ function preambleTable(d) {
   return topTable(
     [tr("hRole"), tr("hPreamble"), tr("hTurns"), tr("hReread")],
     rows.map((r) => [esc(r.role), K(r.avg) + " tok", r.turns, K(r.reread)]),
+  );
+}
+
+/** An agent as the page names it everywhere: its role, and the end of its id. */
+const agentName = (a) =>
+  !a
+    ? "?"
+    : a.agent_id === "main"
+      ? a.role || "main"
+      : (a.role || "?") + " " + a.agent_id.slice(-4);
+
+/** Per model: what it cost, what it read and wrote, how long it generated. */
+function modelRows(d) {
+  const by = new Map();
+  for (const r of d.models || []) {
+    const m = by.get(r.model) || {
+      model: r.model,
+      usd: 0,
+      tokens: 0,
+      gen: 0,
+      turns: 0,
+      agents: new Set(),
+    };
+    m.usd += r.usd || 0;
+    m.tokens += r.tokens || 0;
+    m.gen += r.gen_ms || 0;
+    m.turns += r.turns || 0;
+    m.agents.add(r.agent_id);
+    by.set(r.model, m);
+  }
+  return [...by.values()].sort((a, b) => b.usd - a.usd || b.tokens - a.tokens);
+}
+
+function modelsTable(d) {
+  const rows = modelRows(d);
+  const sum = (k) => rows.reduce((s, r) => s + r[k], 0);
+  const usdT = sum("usd"),
+    tokT = sum("tokens"),
+    genT = sum("gen");
+  const share = (v, t) => ' <span class="pc">' + pct(v, t) + "%</span>";
+  const unpriced = new Set(d.unpriced || []);
+  return (
+    '<div id="models">' +
+    topTable(
+      [
+        tr("hModel"),
+        "$",
+        tr("hTokens"),
+        tr("hGen"),
+        tr("hTurns"),
+        tr("hAgents"),
+      ],
+      rows.map((r) => [
+        '<span class="mono">' +
+          esc(r.model) +
+          "</span>" +
+          (unpriced.has(r.model)
+            ? ' <span class="tag bad">' + esc(tr("defaultRate")) + "</span>"
+            : ""),
+        usd(r.usd) + share(r.usd, usdT),
+        K(r.tokens) + share(r.tokens, tokT),
+        dur(r.gen) + share(r.gen, genT),
+        r.turns,
+        r.agents.size,
+      ]),
+      (cells, i) => ' class="seg" data-model="' + esc(rows[i].model) + '"',
+    ) +
+    "</div>"
   );
 }
 
@@ -1610,6 +1690,11 @@ function render(id) {
       : d && d.pricedStale
         ? tr("pricedStale")
         : tr("unpricedBadge") + " " + tr("unpricedAny");
+    unpriced.onclick = () => {
+      const target = document.getElementById("models");
+      if (target)
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
   }
   document.getElementById("runsub").textContent =
     (run.title ? run.title + " · " : "") +
@@ -1737,6 +1822,7 @@ function render(id) {
         "off",
       ),
     );
+  P.push(panelK("pModels", modelsTable(d), "c3"));
   P.push(panelK("pTokens", tokenKinds(d), "c3"));
   P.push(panelK("pPreamble", preambleTable(d), "c3"));
   if (cov.total && cov.known < cov.total)
@@ -2246,6 +2332,7 @@ function drill(sel) {
 function drillBody(d, sel) {
   if (sel.stall !== undefined) return drillStall(d.stalls[sel.stall]);
   if (sel.ctx) return drillContext(d, sel.ctx, sel.role);
+  if (sel.model) return drillModel(d, sel.model);
   if (sel.activity) return drillActivity(d, sel.activity);
   if (sel.tool) {
     const rows = d.calls.filter((c) => c.tool_short === sel.tool);
@@ -2347,6 +2434,36 @@ function drillActivity(d, activity) {
   );
 }
 
+/** The agents that ran one model, and what each spent on it. */
+function drillModel(d, model) {
+  const rows = (d.models || [])
+    .filter((r) => r.model === model)
+    .sort((a, b) => (b.usd || 0) - (a.usd || 0));
+  const m = modelRows(d).find((r) => r.model === model);
+  if (!m) return "";
+  return (
+    drillHead(
+      model,
+      usd(m.usd) + " · " + K(m.tokens) + " tok · " + dur(m.gen),
+    ) +
+    '<h4 class="dsub">' +
+    esc(tr("dAgents")) +
+    "</h4>" +
+    topTable(
+      [tr("hAgent"), tr("hTurns"), "$", tr("hTokens"), tr("hGen")],
+      rows.map((r) => [
+        '<span class="mono">' +
+          esc(agentName(d.agents.find((a) => a.agent_id === r.agent_id))) +
+          "</span>",
+        r.turns,
+        usd(r.usd),
+        K(r.tokens),
+        dur(r.gen_ms),
+      ]),
+    )
+  );
+}
+
 document.addEventListener("click", (e) => {
   let el = e.target;
   while (el && el !== document) {
@@ -2354,6 +2471,8 @@ document.addEventListener("click", (e) => {
       return drill({ ctx: el.dataset.ctx, role: el.dataset.ctxRole || null });
     if (el.dataset && el.dataset.stall !== undefined)
       return drill({ stall: Number(el.dataset.stall) });
+    if (el.dataset && el.dataset.model)
+      return drill({ model: el.dataset.model });
     if (el.dataset && el.dataset.tool) return drill({ tool: el.dataset.tool });
     if (el.dataset && el.dataset.activity)
       return drill({ activity: el.dataset.activity });

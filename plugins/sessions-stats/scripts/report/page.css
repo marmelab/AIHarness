@@ -499,7 +499,8 @@ svg text.v {
   margin-top: 8px;
 }
 tr[data-tool],
-tr[data-activity] {
+tr[data-activity],
+tr[data-model] {
   cursor: pointer;
 }
 
@@ -573,5 +574,12 @@ tr[data-activity] {
   white-space: nowrap;
 }
 tr[data-stall] {
+  cursor: pointer;
+}
+td .pc {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+#unpriced:not([hidden]) {
   cursor: pointer;
 }
