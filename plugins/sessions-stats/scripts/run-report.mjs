@@ -89,6 +89,10 @@ const picked = value("sessions")
 const detail = {};
 // Models a figure was priced at the fallback rate for, with the sessions that used them.
 const unpricedIn = new Map();
+// A turn that billed tokens under no model name at all.
+const UNNAMED_MODEL = "(unnamed)";
+// Sessions whose store row predates a rate the pricing table now has.
+const staleIn = [];
 
 for (const id of picked) {
   // Percentiles and the duration histogram must see EVERY call, not the embedded sample:
@@ -107,22 +111,31 @@ for (const id of picked) {
        FROM agents WHERE session_id = ? AND turns > 0 ORDER BY started_at`,
     id,
   );
-  // An agent's model is the first it ran; a later unpriced one shows as rate_known = 0
-  // on the run without a name, which the page reports as such.
-  const unpriced = [
-    ...new Set(
-      agents
-        .map((a) => a.model)
-        .filter((m) => m && m !== "<synthetic>" && !rateFor(m).known),
-    ),
-  ];
+  // Read from the turns, not from the agents: an agent's model is only the first it ran,
+  // so a model it switched to later would leave the run unpriced with no name to show.
+  // A turn that billed nothing needs no rate, which is what keeps `<synthetic>` out.
+  const unpriced = all(
+    `SELECT DISTINCT model FROM turns
+     WHERE session_id = ? AND in_tokens + cache_read + cache_write + out_tokens > 0`,
+    id,
+  )
+    .map((r) => r.model || "")
+    .filter((m) => !rateFor(m).known)
+    .map((m) => m || UNNAMED_MODEL);
+  // The store prices each turn when the session is ingested. A model given a rate since
+  // then leaves the run flagged with no model left to name: its figures are the fallback's
+  // until the session is ingested again.
+  const run = runs.find((r) => r.session_id === id);
+  const pricedStale = Boolean(run && run.rate_known === 0 && !unpriced.length);
   for (const m of unpriced)
     unpricedIn.set(m, [...(unpricedIn.get(m) || []), id.slice(0, 8)]);
+  if (pricedStale) staleIn.push(id.slice(0, 8));
 
   detail[id] = {
     durations,
     agents,
     unpriced,
+    pricedStale,
     activities: all(
       `SELECT activity, sum(wall_ms) wall_ms, sum(calls) calls, sum(errors) errors,
               sum(stalled) stalled
@@ -480,4 +493,9 @@ for (const [model, sessions] of unpricedIn)
   console.log(
     `unpriced: ${model} (sessions ${sessions.join(", ")}) priced at the ` +
       `${FALLBACK_RATE_MODEL} rate; add it to scripts/lib/pricing.mjs`,
+  );
+if (staleIn.length)
+  console.log(
+    `stale: sessions ${staleIn.join(", ")} were priced before their models had a ` +
+      `rate; run scripts/run-ingest.mjs again to reprice them`,
   );

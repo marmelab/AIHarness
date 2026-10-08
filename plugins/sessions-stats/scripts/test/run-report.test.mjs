@@ -732,18 +732,22 @@ describe("what the page writes into its markup", () => {
 describe("a model without a rate", () => {
   // Priced at the fallback, its cost reads exactly like a real one. The page and the
   // script's output both name it, so nobody quotes a guess.
-  const report = (model) => {
+  const report = (model, { body, stale = false } = {}) => {
     TMP = mkdtempSync(join(tmpdir(), "run-report-"));
     const dbFile = join(TMP, "runs.sqlite");
+    const db = openStore(dbFile);
     writeRun(
-      openStore(dbFile),
+      db,
       buildRun({
         sessionId: "sess-rate-1",
         slug: "-fixture",
-        mainBody: mainBody.replaceAll("claude-sonnet-5", model),
+        mainBody: body || mainBody.replaceAll("claude-sonnet-5", model),
         classify,
       }),
     );
+    // What a store ingested under an older pricing table holds for a model since priced.
+    if (stale) db.exec("UPDATE runs SET rate_known = 0");
+    db.close();
     const out = join(TMP, "r.html");
     const run = spawnSync(
       process.execPath,
@@ -765,6 +769,27 @@ describe("a model without a rate", () => {
     );
   });
 
+  test("is named when an agent switches to it after its first turn", () => {
+    // An agent's model column is the first it ran. Reading the names from there left a
+    // run flagged unpriced with nothing to name.
+    const [first, ...rest] = mainBody.split("\n");
+    const { data } = report(null, {
+      body: [
+        first,
+        ...rest.map((l) => l.replace("claude-sonnet-5", "claude-future-9")),
+      ].join("\n"),
+    });
+    expect(data.runs[0].rate_known).toBe(0);
+    expect(data.detail["sess-rate-1"].unpriced).toEqual(["future-9"]);
+  });
+
+  test("a store priced before the rate existed says so instead of naming nothing", () => {
+    const { run, data } = report("claude-opus-5-5", { stale: true });
+    expect(data.detail["sess-rate-1"].unpriced).toEqual([]);
+    expect(data.detail["sess-rate-1"].pricedStale).toBe(true);
+    expect(run.stdout).toMatch(/^stale: sessions sess-rat were priced before/m);
+  });
+
   test("a priced model raises nothing", () => {
     const { run, data } = report("claude-opus-5-5");
     expect(data.detail["sess-rate-1"].unpriced).toEqual([]);
@@ -777,5 +802,6 @@ describe("a model without a rate", () => {
     const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
     expect(html).toContain('id="unpriced" hidden');
     expect(script).toContain("run.rate_known !== 0 && !models.length");
+    expect(script).toContain('tr("pricedStale")');
   });
 });

@@ -443,6 +443,10 @@ const S = {
   redactedBadge: ["redacted: figures only", "expurgé : chiffres seulement"],
   unpricedBadge: ["no rate for", "pas de tarif pour"],
   unpricedAny: ["a model of this session", "un modèle de cette session"],
+  pricedStale: [
+    "priced before its models had a rate: ingest it again",
+    "chiffré avant que ses modèles aient un tarif : relancer l'ingest",
+  ],
   hookRuns: ["recorded executions", "exécutions enregistrées"],
   noSubagentStop: [
     "SubagentStop not among them",
@@ -1599,10 +1603,11 @@ function render(id) {
   if (unpriced) {
     const models = (d && d.unpriced) || [];
     unpriced.hidden = run.rate_known !== 0 && !models.length;
-    unpriced.textContent =
-      tr("unpricedBadge") +
-      " " +
-      (models.length ? models.join(", ") : tr("unpricedAny"));
+    unpriced.textContent = models.length
+      ? tr("unpricedBadge") + " " + models.join(", ")
+      : d && d.pricedStale
+        ? tr("pricedStale")
+        : tr("unpricedBadge") + " " + tr("unpricedAny");
   }
   document.getElementById("runsub").textContent =
     (run.title ? run.title + " · " : "") +
