@@ -88,7 +88,12 @@ two tagged arms side by side.
 
 The cost of a session that used a model the rate table does not know is priced at the
 sonnet-5 rate, and says so: a `no rate for` tag on the page, and an `unpriced:` line under
-the link. The figure is then a guess until the plugin is updated.
+the link. The figure is then a guess until the plugin is updated. The Models panel tags
+that model and shows how much of the run's cost, tokens and time it accounts for.
+
+A store derived before a model had a rate keeps that session's fallback figures until it is
+ingested again. `run-report.mjs` says so: a tag on the page, and a `stale:` line naming the
+sessions to re-run through `run-ingest.mjs`.
 
 ## Before sharing a page
 
