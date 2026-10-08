@@ -320,15 +320,8 @@ const L = {
   pCtxGrowth: [
     ["Context growth per turn", "Croissance du contexte par tour"],
     [
-      "One line per agent, coloured by role. The y axis is the context re-read on that turn; the starting height is the tile above.",
-      "Une ligne par agent, colorée par rôle. L'axe y est le contexte relu à ce tour ; la hauteur de départ est la tuile ci dessus.",
-    ],
-  ],
-  pAgents: [
-    ["Agents in the run", "Agents du run"],
-    [
-      "The run window only, and only agents that had a turn inside it. Figures are the in-window share.",
-      "Fenêtre du run uniquement, et seulement les agents qui y ont eu un tour. Les chiffres sont la part dans la fenêtre.",
+      "One line per agent, coloured by role. The y axis is the context re-read on that turn; the starting height is the tile above. Hover a line for the agent it belongs to.",
+      "Une ligne par agent, colorée par rôle. L'axe y est le contexte relu à ce tour ; la hauteur de départ est la tuile ci dessus. Survolez une ligne pour l'agent auquel elle appartient.",
     ],
   ],
   pTools: [
@@ -379,8 +372,8 @@ const L = {
   pTimeline: [
     ["Agent timeline", "Chronologie des agents"],
     [
-      "One lane per agent, one band per tool call, placed when it ran and coloured by what it did. The lane rule spans the agent's life; the empty stretches are waiting, and they are deliberately not drawn as a bar.",
-      "Une voie par agent, une bande par appel d'outil, placée au moment où il a tourné et colorée par ce qu'il faisait. Le filet couvre la vie de l'agent ; les vides sont l'attente, délibérément pas dessinée en barre.",
+      "One lane per agent, one band per tool call, placed when it ran and coloured by what it did. The lane rule spans the agent's life; the empty stretches are waiting, and they are deliberately not drawn as a bar. Hover a band for its call, and anywhere else on a lane for the agent: its task, turns, calls, largest context, cost and model, over the run window.",
+      "Une voie par agent, une bande par appel d'outil, placée au moment où il a tourné et colorée par ce qu'il faisait. Le filet couvre la vie de l'agent ; les vides sont l'attente, délibérément pas dessinée en barre. Survolez une bande pour son appel, et le reste d'une voie pour l'agent : sa tâche, ses tours, ses appels, son plus grand contexte, son coût et son modèle, sur la fenêtre du run.",
     ],
   ],
 };
@@ -871,6 +864,19 @@ const agentName = (a) =>
     : a.agent_id === "main"
       ? a.role || "main"
       : (a.role || "?") + " " + a.agent_id.slice(-4);
+
+/** What the page knows of one agent, on one line under its name. */
+const agentStats = (a) =>
+  (a.description ? a.description + "\n" : "") +
+  [
+    a.turns_in_window + " " + tr("hTurns"),
+    a.calls_in_window + " " + tr("hCalls"),
+    K(a.ctx_max) + " " + tr("hCtxMax"),
+    usd(a.usd_in_window),
+    a.model,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 /** Per model: what it cost, what it read and wrote, how long it generated. */
 function modelRows(d) {
@@ -1380,12 +1386,26 @@ function timeline(d) {
 
   agents.forEach((a, i) => {
     const y = padT + i * lane;
+    // The whole lane, under its calls, answers for the agent: hovering a call names the
+    // call, hovering anything else on the lane names the agent and its figures.
+    s +=
+      '<rect class="lane" x="0" y="' +
+      y +
+      '" width="' +
+      W +
+      '" height="' +
+      lane +
+      '" data-tip="' +
+      esc(agentName(a)) +
+      '" data-tip2="' +
+      esc(agentStats(a)) +
+      '"/>';
     s +=
       '<text x="' +
       (padL - 6) +
       '" y="' +
       (y + 10) +
-      '" text-anchor="end">' +
+      '" text-anchor="end" pointer-events="none">' +
       esc((a.role || "?").slice(0, 14) + " " + a.agent_id.slice(-4)) +
       "</text>";
     const calls = byAgent.get(a.agent_id) || [];
@@ -1393,7 +1413,7 @@ function timeline(d) {
       const from = Math.min(...calls.map((c) => c.at));
       const to = Math.max(...calls.map((c) => c.at + c.charged_ms));
       s +=
-        '<line class="gl" x1="' +
+        '<line class="gl" pointer-events="none" x1="' +
         x(from).toFixed(1) +
         '" x2="' +
         x(to).toFixed(1) +
@@ -1507,14 +1527,24 @@ function ctxChart(d) {
           ")",
       );
     const stroke = roleColor.get(a.role);
+    const points = turns
+      .map((t) => cx(t.idx).toFixed(1) + "," + cy(t.ctx).toFixed(1))
+      .join(" ");
+    // A 1.6px line is too thin to hover, so a wide transparent copy over it takes the
+    // pointer and names the agent.
     s +=
-      '<polyline points="' +
-      turns
-        .map((t) => cx(t.idx).toFixed(1) + "," + cy(t.ctx).toFixed(1))
-        .join(" ") +
+      '<g class="cline"><polyline points="' +
+      points +
       '" fill="none" stroke="' +
       stroke +
-      '" stroke-width="1.6" stroke-linejoin="round" opacity="0.85"/>';
+      '" stroke-width="1.6" stroke-linejoin="round" opacity="0.85"/>' +
+      '<polyline class="hit" points="' +
+      points +
+      '" fill="none" stroke="transparent" stroke-width="8" data-tip="' +
+      esc(agentName(a)) +
+      '" data-tip2="' +
+      esc(agentStats(a)) +
+      '"/></g>';
   }
   s += '<text x="' + p.l + '" y="' + (H - 3) + '">' + tr("turn") + " 0</text>";
   s +=
@@ -2133,26 +2163,6 @@ function render(id) {
 
   /* --- 5. per role --------------------------------------------------------------- */
   P.push(section(tr("sRoles")));
-  P.push(
-    panelK(
-      "pAgents",
-      topTable(
-        [tr("hAgent"), tr("hTurns"), tr("hCalls"), tr("hCtxMax"), "$"],
-        d.agents
-          .filter((a) => a.turns_in_window > 0)
-          .map((a) => [
-            '<span class="mono">' +
-              esc((a.role || "?") + " " + a.agent_id.slice(-4)) +
-              "</span>",
-            a.turns_in_window,
-            a.calls_in_window,
-            K(a.ctx_max),
-            usd(a.usd_in_window),
-          ]),
-      ),
-      "c4",
-    ),
-  );
   P.push(
     panelK(
       "pCostRole",

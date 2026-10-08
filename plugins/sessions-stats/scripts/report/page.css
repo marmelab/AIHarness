@@ -364,6 +364,16 @@ svg text.v {
 .seg:hover {
   opacity: 0.75;
 }
+.lane {
+  fill: transparent;
+}
+.lane:hover {
+  fill: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.cline:hover polyline:first-child {
+  stroke-width: 3;
+  opacity: 1;
+}
 
 #tip {
   position: fixed;
@@ -390,6 +400,7 @@ svg text.v {
 }
 #tip i {
   display: block;
+  white-space: pre-line;
   font-style: normal;
   color: var(--muted);
   font-size: 11px;

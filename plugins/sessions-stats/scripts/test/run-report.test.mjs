@@ -410,6 +410,23 @@ describe("the generated page", () => {
     expect(script).not.toContain('tileK(\n      "deadTime"');
   });
 
+  test("an agent is named, with its figures, on its timeline lane and its context line", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('\'<rect class="lane" x="0" y="\'');
+    expect(script).toContain('\'<polyline class="hit" points="\'');
+    // Both read the same two helpers, so the lane and the line cannot disagree.
+    expect(script.match(/esc\(agentStats\(a\)\)/g)).toHaveLength(2);
+    expect(script.match(/esc\(agentName\(a\)\)/g)).toHaveLength(2);
+    for (const field of [
+      "turns_in_window",
+      "calls_in_window",
+      "ctx_max",
+      "usd_in_window",
+    ])
+      expect(script).toContain("a." + field);
+  });
+
   test("a dispatch is not one of the longest tool calls", () => {
     // An Agent call lasts as long as its child: it is a wait, not a slow tool.
     const { html } = build();
@@ -455,11 +472,11 @@ describe("the generated page", () => {
   });
 
   test("a figure a click already reaches is not repeated in a panel of its own", () => {
-    // The injected files open from the context bars; a re-read share had no decision to
-    // support.
+    // The injected files open from the context bars; the agents' figures show on a
+    // timeline lane's hover; a re-read share had no decision to support.
     const { html } = build();
     const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
-    for (const key of ['"pInstr"', '"reread"'])
+    for (const key of ['"pInstr"', '"reread"', '"pAgents"'])
       expect(script, key + " is still drawn").not.toContain(key);
     const data = payloadOf(html);
     expect(data.detail[data.picked[0]].contextFiles).toBeUndefined();
