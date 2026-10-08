@@ -428,6 +428,33 @@ describe("the generated page", () => {
     expect(script).toContain('esc(it.def || "")');
   });
 
+  test("every activity slice opens onto its calls, a skill onto the skills loaded", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain(
+      `attr: ' data-activity="' + esc(a.activity) + '"'`,
+    );
+    expect(script).toContain("it.attr");
+    expect(script).toContain("function drillActivity(");
+    expect(script).toContain('const bySkill = activity === "skill"');
+  });
+
+  test("a detail opens in a drawer beside the figure, not at the bottom of the page", () => {
+    // At the bottom, a click scrolled away from the figure and reading it meant scrolling
+    // back. The drawer sits outside the grid, so a redraw of the grid keeps it.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(html).toMatch(
+      /<aside class="drawer" id="drawer"[^>]*><div id="drill">/,
+    );
+    expect(html.indexOf('id="drawer"')).toBeGreaterThan(
+      html.indexOf('id="grid"'),
+    );
+    expect(script).not.toContain('"pDrill"');
+    expect(script).toContain('e.key === "Escape"');
+    expect(script).toContain("drill(sameRun ? drillSel : null)");
+  });
+
   test("a stall is an entry point, not just a duration", () => {
     const { html } = build();
     const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];

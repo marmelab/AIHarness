@@ -159,13 +159,6 @@ const L = {
       "Chaque appel d'outil va dans exactement un bac, d'après son nom d'outil et, pour une commande shell, d'après ce que fait la commande.",
     ],
   ],
-  pDrill: [
-    ["Selected calls", "Appels sélectionnés"],
-    [
-      "Click a tool, an activity or a band in the timeline to list the calls behind it here. Hover a row for the full command.",
-      "Cliquez un outil, une activité ou une bande de la chronologie pour lister ici les appels qui sont derrière. Survolez une ligne pour la commande entière.",
-    ],
-  ],
   activeTime: [
     ["Active time", "Temps actif"],
     [
@@ -514,10 +507,11 @@ const S = {
   ],
   allCalls: ["all calls", "tous les appels"],
   skipped: ["skipped", "sauté"],
-  noSelection: [
-    "Nothing selected yet: click a tool, an activity or a band above.",
-    "Rien de sélectionné : cliquez un outil, une activité ou une bande ci dessus.",
-  ],
+  close: ["close", "fermer"],
+  dCalls: ["calls, longest first", "appels, du plus long au plus court"],
+  dByTool: ["by tool", "par outil"],
+  dBySkill: ["by skill loaded", "par skill chargée"],
+  hSkill: ["skill", "skill"],
 
   ofRun: ["% of the run", "% du run"],
   outTok: ["output tokens", "tokens de sortie"],
@@ -898,7 +892,7 @@ function donut(items, total, unit) {
     cy = 60;
   let a0 = -Math.PI / 2,
     s = "";
-  const arc = (a1, a2, fill, tipT, tipD) => {
+  const arc = (a1, a2, fill, tipT, tipD, attr) => {
     const big = a2 - a1 > Math.PI ? 1 : 0;
     const p = (rad, a) =>
       (cx + rad * Math.cos(a)).toFixed(2) +
@@ -927,7 +921,9 @@ function donut(items, total, unit) {
       p(r, a1) +
       ' Z" fill="' +
       fill +
-      '" stroke="var(--panel)" stroke-width="1.5" data-tip="' +
+      '" stroke="var(--panel)" stroke-width="1.5"' +
+      attr +
+      ' data-tip="' +
       tipT +
       '" data-tip2="' +
       tipD +
@@ -945,6 +941,7 @@ function donut(items, total, unit) {
       // The definition, not the value again: a slice reading "app 81%" told nobody what
       // app meant, which is the whole reason to hover it.
       esc(it.def || ""),
+      it.attr || "",
     );
     a0 = a1;
   }
@@ -958,7 +955,9 @@ function donut(items, total, unit) {
       .slice(0, 7)
       .map(
         (i) =>
-          '<span class="seg" data-tip="' +
+          '<span class="seg"' +
+          (i.attr || "") +
+          ' data-tip="' +
           esc(i.k) +
           '" data-tip2="' +
           esc(i.def || "") +
@@ -1586,8 +1585,11 @@ sel.onchange = () => render(sel.value);
 // The run being drawn. The drill-down keys on this and never on the select's value: reading
 // the control made the table depend on the DOM agreeing with the data.
 let currentRun = null;
+// What the drawer is showing, so a redraw of the same run can show it again.
+let drillSel = null;
 
 function render(id) {
+  const sameRun = currentRun === id;
   currentRun = id;
   const run = D.runs.find((x) => x.session_id === id);
   const d = D.detail[id];
@@ -1897,6 +1899,8 @@ function render(id) {
           v: a.wall_ms,
           fill: color(a.activity),
           def: actDef(a.activity),
+          // Every slice opens onto the calls behind it, a skill onto the skills it loaded.
+          attr: ' data-activity="' + esc(a.activity) + '"',
         })),
         workMs || 1,
         dur,
@@ -2173,11 +2177,10 @@ function render(id) {
       ),
     );
 
-  P.push(panelK("pDrill", '<div id="drill"></div>', "full pdrill"));
-
   document.getElementById("grid").innerHTML = P.join("");
   wireTimeline();
-  drill(null);
+  // A language switch or a zoom redraws the same run: what was open stays open.
+  drill(sameRun ? drillSel : null);
 }
 
 for (const b of document.getElementById("langs").children) {
@@ -2213,65 +2216,135 @@ try {
 
 /* --- drill-down: what is behind a bar ---
    An aggregate that cannot be opened is a number to be taken on faith. Clicking a tool row,
-   an activity, or a band in the timeline lists the calls that make it up, with the full
-   command on hover rather than truncated into uselessness. */
+   an activity, a model or a band in the timeline lists what makes it up, with the full
+   command on hover rather than truncated into uselessness. It opens in a drawer over the
+   right edge, so the figure that was clicked stays in view beside its detail. */
 function drill(sel) {
-  const d = D.detail[currentRun];
+  const drawer = document.getElementById("drawer");
   const host = document.getElementById("drill");
-  if (!d || !host) return;
-  if (sel && sel.stall !== undefined)
-    return drillStall(d, host, d.stalls[sel.stall]);
-  if (sel && sel.ctx) return drillContext(d, host, sel.ctx, sel.role);
-  let rows = d.calls;
-  let what = tr("allCalls");
-  if (sel && sel.tool) {
-    rows = rows.filter((c) => c.tool_short === sel.tool);
-    what = sel.tool;
-  }
-  if (sel && sel.activity) {
-    rows = rows.filter((c) => c.activity === sel.activity);
-    what = actLabel(sel.activity);
-  }
-  if (!sel) {
-    host.innerHTML = '<div class="sub2">' + tr("noSelection") + "</div>";
+  if (!drawer || !host) return;
+  const d = D.detail[currentRun];
+  const wasOpen = drawer.classList.contains("open");
+  const html = d && sel ? drillBody(d, sel) : "";
+  drillSel = html ? sel : null;
+  if (!html) {
+    drawer.classList.remove("open");
+    drawer.setAttribute("aria-hidden", "true");
     return;
   }
-  host.innerHTML =
-    '<div class="drillhead"><b>' +
-    esc(what) +
-    "</b> · " +
-    rows.length +
-    " " +
-    tr("callsWord") +
-    " · " +
-    dur(rows.reduce((s, c) => s + c.charged_ms, 0)) +
-    ' <button type="button" id="drillClear">×</button></div>' +
-    topTable(
-      [tr("hTool"), tr("hActivity"), tr("hTook"), tr("hWhat")],
-      rows
-        .slice(0, 60)
-        .map((c) => [
-          '<span class="mono">' + esc(c.tool_short) + "</span>",
-          '<i class="dot" style="background:' +
-            color(c.activity) +
-            '"></i> ' +
-            esc(actLabel(c.activity)),
-          dur(c.charged_ms) +
-            (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
-            (c.is_error ? ' <span class="tag bad">err</span>' : ""),
-          '<span class="mono">' + esc(c.summary || "") + "</span>",
-        ]),
-      (cells, i) =>
-        ' data-tip="' +
-        esc(rows[i].tool_short + " · " + dur(rows[i].charged_ms)) +
-        '" data-tip2="' +
-        esc((rows[i].detail || "").slice(0, 400)) +
-        '"',
-    );
+  host.innerHTML = html;
+  drawer.scrollTop = 0;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
   const clear = document.getElementById("drillClear");
-  if (clear) clear.addEventListener("click", () => drill(null));
-  const panel = host.closest(".pdrill");
-  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (clear) {
+    clear.addEventListener("click", () => drill(null));
+    if (!wasOpen) clear.focus({ preventScroll: true });
+  }
+}
+
+function drillBody(d, sel) {
+  if (sel.stall !== undefined) return drillStall(d.stalls[sel.stall]);
+  if (sel.ctx) return drillContext(d, sel.ctx, sel.role);
+  if (sel.activity) return drillActivity(d, sel.activity);
+  if (sel.tool) {
+    const rows = d.calls.filter((c) => c.tool_short === sel.tool);
+    return (
+      drillHead(sel.tool, callsMeta(rows)) +
+      '<h4 class="dsub">' +
+      esc(tr("dCalls")) +
+      "</h4>" +
+      callsTable(rows)
+    );
+  }
+  return "";
+}
+
+const drillHead = (title, meta) =>
+  '<div class="drillhead"><b>' +
+  esc(title) +
+  "</b>" +
+  (meta ? "<span>" + esc(meta) + "</span>" : "") +
+  ' <button type="button" id="drillClear" aria-label="' +
+  esc(tr("close")) +
+  '">×</button></div>';
+
+const callsMeta = (rows) =>
+  rows.length +
+  " " +
+  tr("callsWord") +
+  " · " +
+  dur(rows.reduce((s, c) => s + c.charged_ms, 0));
+
+/** One row per call, longest first, the full command one hover away. */
+function callsTable(rows) {
+  return topTable(
+    [tr("hTool"), tr("hActivity"), tr("hTook"), tr("hWhat")],
+    rows
+      .slice(0, 60)
+      .map((c) => [
+        '<span class="mono">' + esc(c.tool_short) + "</span>",
+        '<i class="dot" style="background:' +
+          color(c.activity) +
+          '"></i> ' +
+          esc(actLabel(c.activity)),
+        dur(c.charged_ms) +
+          (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
+          (c.is_error ? ' <span class="tag bad">err</span>' : ""),
+        '<span class="mono">' + esc(c.summary || "") + "</span>",
+      ]),
+    (cells, i) =>
+      ' data-tip="' +
+      esc(rows[i].tool_short + " · " + dur(rows[i].charged_ms)) +
+      '" data-tip2="' +
+      esc((rows[i].detail || "").slice(0, 400)) +
+      '"',
+  );
+}
+
+/**
+ * What one activity is made of: its definition, then its calls grouped by tool, then the
+ * calls themselves. A skill is grouped by the skill it loaded, since every one of those
+ * calls is the same tool.
+ */
+function drillActivity(d, activity) {
+  const rows = d.calls.filter((c) => c.activity === activity);
+  const bySkill = activity === "skill";
+  const groups = new Map();
+  for (const c of rows) {
+    const k = bySkill ? c.summary || c.tool_short : c.tool_short;
+    const g = groups.get(k) || { k, n: 0, ms: 0 };
+    g.n++;
+    g.ms += c.charged_ms;
+    groups.set(k, g);
+  }
+  const list = [...groups.values()].sort((a, b) => b.ms - a.ms || b.n - a.n);
+  return (
+    drillHead(actLabel(activity), callsMeta(rows)) +
+    (actDef(activity)
+      ? '<p class="def">' + esc(actDef(activity)) + "</p>"
+      : "") +
+    (bySkill || list.length > 1
+      ? '<h4 class="dsub">' +
+        esc(bySkill ? tr("dBySkill") : tr("dByTool")) +
+        "</h4>" +
+        topTable(
+          [bySkill ? tr("hSkill") : tr("hTool"), tr("hN"), tr("hTime")],
+          list.map((g) => [
+            '<span class="mono">' + esc(g.k) + "</span>",
+            g.n,
+            dur(g.ms),
+          ]),
+          bySkill
+            ? ""
+            : (cells, i) => ' class="seg" data-tool="' + esc(list[i].k) + '"',
+        )
+      : "") +
+    '<h4 class="dsub">' +
+    esc(tr("dCalls")) +
+    "</h4>" +
+    callsTable(rows)
+  );
 }
 
 document.addEventListener("click", (e) => {
@@ -2284,8 +2357,14 @@ document.addEventListener("click", (e) => {
     if (el.dataset && el.dataset.tool) return drill({ tool: el.dataset.tool });
     if (el.dataset && el.dataset.activity)
       return drill({ activity: el.dataset.activity });
+    // Inside the drawer, or on the page's own controls: nothing to close.
+    if (el.id === "drawer" || el.classList?.contains("bar")) return;
     el = el.parentNode;
   }
+  if (drillSel) drill(null);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && drillSel) drill(null);
 });
 
 /* --- drag a range on the timeline to zoom into it ---
@@ -2344,8 +2423,8 @@ function wireTimeline() {
  * between, which is the only evidence that a SubagentStop hook, and therefore the
  * validation chain, was what filled it.
  */
-function drillStall(d, host, g) {
-  if (!g) return;
+function drillStall(g) {
+  if (!g) return "";
   const when = (ms) => new Date(ms).toISOString().slice(11, 19);
   const side = (c, label) =>
     '<div class="stallside"><b>' +
@@ -2364,12 +2443,8 @@ function drillStall(d, host, g) {
       : '<span class="sub2">—</span>') +
     "</div>";
 
-  host.innerHTML =
-    '<div class="drillhead"><b>' +
-    esc(tr("stallAt") + " " + when(g.at)) +
-    "</b> · " +
-    dur(g.ms) +
-    ' <button type="button" id="drillClear">×</button></div>' +
+  return (
+    drillHead(tr("stallAt") + " " + when(g.at), dur(g.ms)) +
     '<div class="stallgrid">' +
     side(g.before, tr("lastBefore")) +
     side(g.after, tr("firstAfter")) +
@@ -2383,11 +2458,8 @@ function drillStall(d, host, g) {
             '<span class="mono">' + esc(h.message) + "</span>",
           ]),
         )
-      : '<div class="sub2">' + esc(tr("noHookTrace")) + "</div>");
-  const clear = document.getElementById("drillClear");
-  if (clear) clear.addEventListener("click", () => drill(null));
-  const panel = host.closest(".pdrill");
-  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      : '<div class="sub2">' + esc(tr("noHookTrace")) + "</div>")
+  );
 }
 
 /**
@@ -2401,7 +2473,7 @@ function drillStall(d, host, g) {
  */
 const CTX_PREFIX = { tools: "tool:", skills: "skill:", instructions: "file:" };
 
-function drillContext(d, host, component, role) {
+function drillContext(d, component, role) {
   const prefix = CTX_PREFIX[component];
   // Filtered to the role whose bar was clicked. Without it the list contradicted the bar:
   // a planner's 12 KB of tools opened onto the 125 KB union of every role's.
@@ -2426,15 +2498,11 @@ function drillContext(d, host, component, role) {
   const total = items.reduce((sum, i) => sum + (i.bytes || 0), 0);
   const sized = items.some((i) => i.bytes > 0);
 
-  host.innerHTML =
-    '<div class="drillhead"><b>' +
-    esc((role ? role + " · " : "") + ctxLabel(component)) +
-    "</b> · " +
-    items.length +
-    " " +
-    esc(tr("hItem")) +
-    (sized ? " · " + kb(total) : "") +
-    ' <button type="button" id="drillClear">×</button></div>' +
+  return (
+    drillHead(
+      (role ? role + " · " : "") + ctxLabel(component),
+      items.length + " " + tr("hItem") + (sized ? " · " + kb(total) : ""),
+    ) +
     (!prefix
       ? '<div class="sub2">' + esc(tr("noBreakdown")) + "</div>"
       : !items.length
@@ -2459,9 +2527,6 @@ function drillContext(d, host, component, role) {
                       "</span>",
                   ],
             ),
-          ));
-  const clear = document.getElementById("drillClear");
-  if (clear) clear.addEventListener("click", () => drill(null));
-  const panel = host.closest(".pdrill");
-  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+          ))
+  );
 }

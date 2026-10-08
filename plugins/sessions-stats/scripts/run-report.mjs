@@ -460,6 +460,8 @@ const html = `<title>Session stats</title>
   <div class="grid" id="grid"></div>
 </div>
 
+<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Detail"><div id="drill"></div></aside>
+
 <script type="application/json" id="data">${json}</script>
 <script>
 ${JS}
