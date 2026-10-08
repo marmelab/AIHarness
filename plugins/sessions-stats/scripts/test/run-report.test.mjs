@@ -114,7 +114,7 @@ afterEach(() => {
   TMP = null;
 });
 
-function build(flags = []) {
+function build(flags = [], { dev = devBody } = {}) {
   TMP = mkdtempSync(join(tmpdir(), "run-report-"));
   const dbFile = join(TMP, "runs.sqlite");
   const db = openStore(dbFile);
@@ -127,7 +127,7 @@ function build(flags = []) {
       agents: [
         {
           agentId: "dev-1",
-          body: devBody,
+          body: dev,
           meta: { agentType: "aiharness:developer" },
         },
       ],
@@ -382,7 +382,6 @@ describe("the generated page", () => {
       "coordination", // the turnaround the harness owns
       "stalls", //       the pauses that have their own causes
       "busy",
-      "reread", //       reads of a file the agent had already opened
       "errorRate",
       "perTurn",
     ])
@@ -409,6 +408,62 @@ describe("the generated page", () => {
     expect(script).toContain('"coordination"');
     expect(script).toContain('"stalls"');
     expect(script).not.toContain('tileK(\n      "deadTime"');
+  });
+
+  test("a dispatch is not one of the longest tool calls", () => {
+    // An Agent call lasts as long as its child: it is a wait, not a slow tool.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toMatch(
+      /const longCalls = d\.calls\s*\.filter\(\(c\) => !BLOCKED\.has\(c\.activity\)\)/,
+    );
+    expect(script).toContain("longCalls.map((c) => [");
+  });
+
+  test("generation after a tool leaves out dispatches, questions and idle gaps", () => {
+    // A 6-minute gap after the edit is idle by the wait bucket's rule, so it is not
+    // generation; the 3-second one after the test run is.
+    const dev = devBody
+      .replace(at(65000), at(62000 + 6 * 60000))
+      .replace(at(70000), at(62000 + 6 * 60000 + 5000))
+      .replace(at(72000), at(62000 + 6 * 60000 + 8000))
+      .replace(at(73000), at(62000 + 6 * 60000 + 9000));
+    const { html } = build([], { dev });
+    const data = payloadOf(html);
+    const rows = data.detail[data.picked[0]].waitAfter;
+    expect(rows.every((w) => w.wait_ms < 300000 * w.turns)).toBe(true);
+    expect(rows.find((w) => w.prev === "write")).toBeUndefined();
+    expect(rows.find((w) => w.prev === "validate")).toMatchObject({
+      turns: 1,
+      wait_ms: 3000,
+    });
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain(".filter((w) => !BLOCKED.has(w.prev))");
+  });
+
+  test("the cost and clock tiles share one heading, the clock row under the cost row", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('P.push(section(tr("sSummary")))');
+    expect(script).not.toContain('tr("sTime")');
+    const cost = script.indexOf("costTiles.join");
+    expect(cost).toBeGreaterThan(-1);
+    expect(script.indexOf("timeTiles.join")).toBeGreaterThan(cost);
+    expect(script.indexOf('"pModels"')).toBeGreaterThan(
+      script.indexOf("timeTiles.join"),
+    );
+  });
+
+  test("a figure a click already reaches is not repeated in a panel of its own", () => {
+    // The injected files open from the context bars; a re-read share had no decision to
+    // support.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    for (const key of ['"pInstr"', '"reread"'])
+      expect(script, key + " is still drawn").not.toContain(key);
+    const data = payloadOf(html);
+    expect(data.detail[data.picked[0]].contextFiles).toBeUndefined();
+    expect(data.detail[data.picked[0]].rereads).toBeUndefined();
   });
 
   test("a tool whose duration is someone else's time is ranked apart", () => {
@@ -514,25 +569,6 @@ describe("the generated page", () => {
         total: expect.any(Number),
       });
     }
-  });
-
-  test("the waste figure counts re-reads, not reads", () => {
-    // Reading files is what an agent does; the share of turns that wrote one said nothing
-    // about waste. Opening a file the same agent had already opened does: the first read
-    // fell out of the context and the second is paid twice.
-    const { html } = build();
-    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
-    expect(script).toContain('"reread"');
-    expect(script).not.toContain('"productive"');
-    const json = html.match(
-      /<script type="application\/json" id="data">([\s\S]*?)<\/script>/,
-    )[1];
-    const data = JSON.parse(json.replace(/<\\\/script/g, "</script"));
-    for (const id of data.picked)
-      expect(data.detail[id].rereads).toMatchObject({
-        total: expect.any(Number),
-        again: expect.any(Number),
-      });
   });
 
   test("a part of the context opens onto what is inside it", () => {
@@ -687,7 +723,6 @@ describe("the generated page", () => {
       const b = red.detail[id];
       expect(b.tokens).toEqual(a.tokens);
       expect(b.tokenKinds).toEqual(a.tokenKinds);
-      expect(b.rereads).toEqual(a.rereads);
       expect(b.activities).toEqual(a.activities);
       expect(b.durations).toEqual(a.durations);
       expect(b.calls.map((c) => c.charged_ms)).toEqual(

@@ -82,13 +82,6 @@ const L = {
       "Le coût du run divisé par ses tours. Le tour est l'unité de facturation, puisqu'il relit tout le contexte quoi qu'il fasse ensuite : ce chiffre suit la taille du contexte bien plus que ce que l'agent a accompli.",
     ],
   ],
-  reread: [
-    ["Files read twice", "Fichiers relus"],
-    [
-      "Share of Read calls that opened a file the SAME agent had already opened. Reading is what an agent is for, so counting reads says nothing; reading the same file again does. It means the first read fell out of the context, and the second is paid twice: once for the call, and once for putting the same tokens back into every turn that follows.",
-      "Part des appels Read qui ouvrent un fichier que le MÊME agent avait déjà ouvert. Lire est la raison d'être d'un agent, donc compter les lectures ne dit rien ; relire le même fichier, si. Cela veut dire que la première lecture est tombée du contexte, et la seconde est payée deux fois : une fois pour l'appel, une fois pour remettre les mêmes tokens dans chaque tour suivant.",
-    ],
-  ],
   errorRate: [
     ["Tool calls that failed", "Appels d'outils en échec"],
     [
@@ -361,12 +354,12 @@ const L = {
   ],
   pWaitAfter: [
     [
-      "Waiting: what the agent had just done",
-      "L'attente : ce que l'agent venait de faire",
+      "Generation after each kind of tool",
+      "Génération après chaque type d'outil",
     ],
     [
-      "Subagents only: the main thread's gaps are a person typing, not the harness working, and they made this table unreadable. Each row is a pause, grouped by what the agent had just finished when it started. Read it as: after N turns of <activity>, the agents waited <time> in total, and the turn that followed produced <avg output> tokens. Waiting after 'write' points at the validation chain; a large average output points at the model simply writing a lot.",
-      "Sous-agents uniquement : les écarts du thread principal sont quelqu'un qui tape, pas le harness qui travaille, et ils rendaient ce tableau illisible. Chaque ligne est une pause, groupée par ce que l'agent venait de finir quand elle a commencé. À lire comme : après N tours d'<activité>, les agents ont attendu <temps> au total, et le tour suivant a produit <sortie moy.> tokens. De l'attente après 'write' désigne la chaîne de validation ; une sortie moyenne élevée désigne le modèle qui écrit beaucoup.",
+      "Which tool results the model is slow to answer. Each row groups the turns that followed a turn of one activity: after N turns of <activity>, the model took <time> in total to produce its next turn, and that turn averaged <avg output> tokens. A long time with a small output is the model reading and weighing what the tool returned, such as a long test log; a large output is the model writing. Subagents only, since the main thread's gaps are a person typing. Turns that follow a dispatch or a question are left out: the model was reading another agent's or a person's answer, not a tool's.",
+      "Les résultats d'outils auxquels le modèle met du temps à répondre. Chaque ligne groupe les tours qui suivent un tour d'une activité : après N tours d'<activité>, le modèle a mis <temps> au total à produire son tour suivant, et ce tour a fait <sortie moy.> tokens en moyenne. Un temps long pour une sortie courte, c'est le modèle qui lit et pèse ce que l'outil a renvoyé, comme un long log de tests ; une grosse sortie, c'est le modèle qui écrit. Sous-agents uniquement, car les écarts du thread principal sont quelqu'un qui tape. Les tours qui suivent un dispatch ou une question sont exclus : le modèle lisait la réponse d'un autre agent ou d'une personne, pas celle d'un outil.",
     ],
   ],
   pFiles: [
@@ -381,13 +374,6 @@ const L = {
     [
       "From the transcript, which records every hook execution with its duration and exit code. A non-zero exit is a hook that refused or failed; the transcript does not say which, only hooks.log carries the message.",
       "Depuis le transcript, qui enregistre chaque exécution de hook avec sa durée et son code de sortie. Une sortie non nulle est un hook qui a refusé ou échoué ; le transcript ne dit pas lequel, seul hooks.log porte le message.",
-    ],
-  ],
-  pInstr: [
-    ["Instruction files injected", "Fichiers d'instructions injectés"],
-    [
-      "The CLAUDE.md, AGENTS.md and memory files delivered to the agents of this run, at the size actually sent. Every agent pays for all of them on every turn.",
-      "Les CLAUDE.md, AGENTS.md et fichiers de mémoire livrés aux agents de ce run, à la taille réellement envoyée. Chaque agent les paie tous, à chaque tour.",
     ],
   ],
   pTimeline: [
@@ -434,7 +420,6 @@ const S = {
   hHowLong: ["lasted", "a duré"],
   ofSubTurns: ["of subagent turns", "des tours de sous-agents"],
   ofCalls: ["of all calls", "de tous les appels"],
-  ofReads: ["of all reads", "de toutes les lectures"],
   nobodyWorking: ["nobody was working", "personne ne travaillait"],
   atLeastOne: ["at least one agent working", "au moins un agent au travail"],
   hRole: ["role", "rôle"],
@@ -457,10 +442,9 @@ const S = {
   hShareUsd: ["% $", "% $"],
   hReread: ["re-read", "relu"],
   hCost: ["cost", "coût"],
-  sCost: ["Cost: where the money went", "Coût : où est passé l'argent"],
-  sTime: [
-    "Wall clock: where the time went",
-    "Temps réel : où est passé le temps",
+  sSummary: [
+    "Where the money and the time went",
+    "Où sont passés l'argent et le temps",
   ],
   sWork: [
     "What the agents actually did",
@@ -575,8 +559,7 @@ const S = {
   hKind: ["kind", "type"],
   hTimes: ["times", "fois"],
   hWasted: ["wasted", "perdu"],
-  hAfter: ["after", "apres"],
-  hWait: ["wait", "attente"],
+  hAfter: ["after", "après"],
   hAvgOut: ["avg output", "sortie moy."],
   hFile: ["file", "fichier"],
   hSize: ["size", "taille"],
@@ -1755,7 +1738,6 @@ function render(id) {
   // WORKING envelope (busy plus the short turnarounds), which a resume cannot inflate. The
   // span stays on the page as its own figure, with its own caveat.
   const workingMs = busyMs + coordMs;
-  const rr = d.rereads || { total: 0, again: 0 };
   // The host session is not a pipeline agent and it spans the whole conversation: leaving
   // it in made "longest agent" report the main thread on every run.
   const longest = d.agents
@@ -1770,9 +1752,13 @@ function render(id) {
   const par = busyMs > 0 ? agentMs / busyMs : 0;
   const P = [];
 
-  /* --- 1. cost ------------------------------------------------------------------ */
-  P.push(section(tr("sCost")));
-  P.push(
+  /* --- 1. what it cost, and how long it took ----------------------------------- */
+  // One heading, the cost tiles on one row and the clock tiles on the row under it: they
+  // are read together, and the panels sit below both rather than between them.
+  P.push(section(tr("sSummary")));
+  const costTiles = [];
+  const timeTiles = [];
+  costTiles.push(
     tileK(
       "cost",
       usd(run.usd),
@@ -1782,14 +1768,14 @@ function render(id) {
           : ""),
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "perTurn",
       usd(turns ? run.usd / turns : 0),
       turns + " " + tr("hTurns"),
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "preambleTax",
       Math.round(preShare * 100) + "<small>%</small>",
@@ -1797,7 +1783,7 @@ function render(id) {
       preShare >= 0.2 ? "flag" : "",
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "ctxBefore",
       startCtx.length ? kb(quantile(startCtx, 0.5)) : "-",
@@ -1806,7 +1792,7 @@ function render(id) {
         : tr("notRecorded"),
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "largestCtx",
       K(Math.max(...ctxs, 0)) + "<small> tok</small>",
@@ -1814,7 +1800,7 @@ function render(id) {
     ),
   );
   if (run.host_turns)
-    P.push(
+    costTiles.push(
       tileK(
         "outside",
         usd(run.host_usd),
@@ -1822,6 +1808,45 @@ function render(id) {
         "off",
       ),
     );
+  timeTiles.push(
+    tileK(
+      "working",
+      dur(workingMs),
+      day(run.started_at) + " · " + run.agent_count + " " + tr("agents"),
+    ),
+  );
+  timeTiles.push(tileK("wallClock", dur(windowMs), tr("endToEnd"), "off"));
+  timeTiles.push(
+    tileK(
+      "busy",
+      dur(busyMs),
+      pct(busyMs, workingMs) + tr("ofWorking") + " · " + tr("atLeastOne"),
+    ),
+  );
+  timeTiles.push(
+    tileK(
+      "coordination",
+      dur(coordMs),
+      pct(coordMs, workingMs) + tr("ofWorking") + " · " + tr("betweenAgents"),
+    ),
+  );
+  timeTiles.push(
+    tileK(
+      "stalls",
+      dur(stallMs),
+      (run.stall_count || 0) + " " + tr("incidents"),
+      (run.stall_count || 0) > 2 ? "flag" : "",
+    ),
+  );
+  timeTiles.push(
+    tileK(
+      "parallel",
+      par.toFixed(1) + "<small>x</small>",
+      dur(agentMs) + " / " + dur(busyMs),
+    ),
+  );
+  P.push('<div class="tiles">' + costTiles.join("") + "</div>");
+  P.push('<div class="tiles">' + timeTiles.join("") + "</div>");
   P.push(panelK("pModels", modelsTable(d), "c3"));
   P.push(panelK("pTokens", tokenKinds(d), "c3"));
   P.push(panelK("pPreamble", preambleTable(d), "c3"));
@@ -1842,63 +1867,7 @@ function render(id) {
       ),
     );
   P.push(panelK("pCtxFill", startingContext(d), "c3"));
-  if (d.contextFiles.length)
-    P.push(
-      panelK(
-        "pInstr",
-        topTable(
-          [tr("hFile"), tr("hSize")],
-          d.contextFiles.map((f) => [
-            '<span class="mono">' +
-              esc(String(f.detail).split("/").slice(-2).join("/")) +
-              "</span>",
-            kb(f.bytes),
-          ]),
-        ),
-        "c3",
-      ),
-    );
   P.push(panelK("pCtxGrowth", ctxChart(d), "c3"));
-
-  /* --- 2. wall clock ------------------------------------------------------------- */
-  P.push(section(tr("sTime")));
-  P.push(
-    tileK(
-      "working",
-      dur(workingMs),
-      day(run.started_at) + " · " + run.agent_count + " " + tr("agents"),
-    ),
-  );
-  P.push(tileK("wallClock", dur(windowMs), tr("endToEnd"), "off"));
-  P.push(
-    tileK(
-      "busy",
-      dur(busyMs),
-      pct(busyMs, workingMs) + tr("ofWorking") + " · " + tr("atLeastOne"),
-    ),
-  );
-  P.push(
-    tileK(
-      "coordination",
-      dur(coordMs),
-      pct(coordMs, workingMs) + tr("ofWorking") + " · " + tr("betweenAgents"),
-    ),
-  );
-  P.push(
-    tileK(
-      "stalls",
-      dur(stallMs),
-      (run.stall_count || 0) + " " + tr("incidents"),
-      (run.stall_count || 0) > 2 ? "flag" : "",
-    ),
-  );
-  P.push(
-    tileK(
-      "parallel",
-      par.toFixed(1) + "<small>x</small>",
-      dur(agentMs) + " / " + dur(busyMs),
-    ),
-  );
   if (d.stalls.length)
     P.push(
       panelK(
@@ -2054,15 +2023,6 @@ function render(id) {
   P.push(section(tr("sWaste")));
   P.push(
     tileK(
-      "reread",
-      (rr.total ? Math.round((rr.again / rr.total) * 100) : 0) +
-        "<small>%</small>",
-      rr.again + " / " + rr.total + " " + tr("ofReads"),
-      rr.total && rr.again / rr.total > 0.15 ? "flag" : "",
-    ),
-  );
-  P.push(
-    tileK(
       "errorRate",
       (calls ? Math.round((errors / calls) * 100) : 0) + "<small>%</small>",
       errors + " / " + calls + " " + tr("ofCalls"),
@@ -2125,42 +2085,45 @@ function render(id) {
       "c3",
     ),
   );
+  // A dispatch lasts as long as its child and a question as long as the human: neither is a
+  // slow tool, and both would top this table for that reason alone.
+  const longCalls = d.calls
+    .filter((c) => !BLOCKED.has(c.activity))
+    .slice(0, 10);
   P.push(
     panelK(
       "pLongest",
       topTable(
         [tr("hToolArg"), tr("hActivity"), tr("hTook")],
-        d.calls
-          .slice(0, 10)
-          .map((c) => [
-            '<span class="mono">' +
-              esc(c.tool_short) +
-              "</span> " +
-              '<span style="color:var(--muted)">' +
-              esc(c.summary || "") +
-              "</span>",
-            '<i class="dot" style="background:' +
-              color(c.activity) +
-              '"></i> ' +
-              esc(actLabel(c.activity)),
-            dur(c.charged_ms) +
-              (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
-              (c.is_error ? ' <span class="tag bad">err</span>' : ""),
-          ]),
+        longCalls.map((c) => [
+          '<span class="mono">' +
+            esc(c.tool_short) +
+            "</span> " +
+            '<span style="color:var(--muted)">' +
+            esc(c.summary || "") +
+            "</span>",
+          '<i class="dot" style="background:' +
+            color(c.activity) +
+            '"></i> ' +
+            esc(actLabel(c.activity)),
+          dur(c.charged_ms) +
+            (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
+            (c.is_error ? ' <span class="tag bad">err</span>' : ""),
+        ]),
         (cells, i) =>
           ' data-tip="' +
           esc(
-            d.calls[i].tool_short +
+            longCalls[i].tool_short +
               " · " +
-              actLabel(d.calls[i].activity) +
+              actLabel(longCalls[i].activity) +
               " · " +
-              dur(d.calls[i].charged_ms) +
-              (d.calls[i].stalled ? " · stalled" : ""),
+              dur(longCalls[i].charged_ms) +
+              (longCalls[i].stalled ? " · stalled" : ""),
           ) +
           '" data-tip2="' +
           esc(
-            (d.calls[i].detail || "").slice(0, 420) +
-              (d.calls[i].stalled ? "  —  " + tr("stalledWhat") : ""),
+            (longCalls[i].detail || "").slice(0, 420) +
+              (longCalls[i].stalled ? "  —  " + tr("stalledWhat") : ""),
           ) +
           '"',
       ),
@@ -2212,9 +2175,11 @@ function render(id) {
     panelK(
       "pWaitAfter",
       topTable(
-        [tr("hAfter"), tr("hTurns"), tr("hWait"), tr("hAvgOut")],
+        [tr("hAfter"), tr("hTurns"), tr("hGen"), tr("hAvgOut")],
+        // After a dispatch or a question, the gap is the model reading another agent's or a
+        // person's answer: the timeline already shows that wait, and no tool caused it.
         d.waitAfter
-          .filter((w) => w.prev !== "ask")
+          .filter((w) => !BLOCKED.has(w.prev))
           .slice(0, 8)
           .map((w) => [
             '<i class="dot" style="background:' +

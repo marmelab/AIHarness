@@ -223,6 +223,14 @@ h2.q {
   }
 }
 
+/* A row of tiles of its own, on the same columns as the grid around it. */
+.tiles {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+
 /* --- the big number --- */
 .big {
   font-size: 30px;

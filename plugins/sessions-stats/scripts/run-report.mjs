@@ -180,10 +180,12 @@ for (const id of picked) {
        WHERE session_id = ? ORDER BY wasted_ms DESC, count DESC LIMIT 12`,
       id,
     ),
+    // Generation only, by the wait bucket's rule: a gap of 5 min or more is idle, whole.
     waitAfter: all(
-      `SELECT prev_activity prev, count(*) turns, sum(min(wait_ms, 300000)) wait_ms,
+      `SELECT prev_activity prev, count(*) turns, sum(wait_ms) wait_ms,
               cast(avg(out_tokens) as int) avg_out
-       FROM turns WHERE session_id = ? AND wait_ms > 0 AND prev_activity IS NOT NULL
+       FROM turns WHERE session_id = ? AND wait_ms > 0 AND wait_ms < 300000
+         AND prev_activity IS NOT NULL
          AND agent_id <> 'main'
        GROUP BY prev_activity ORDER BY wait_ms DESC`,
       id,
@@ -281,20 +283,6 @@ for (const id of picked) {
       }
       return acc;
     })(),
-    // Reading is what an agent is for, so counting reads says nothing. Reading the SAME
-    // file twice in the same agent does: the first read fell out of the context, and the
-    // second one is paid twice over, once for the call and once for the tokens it puts
-    // back.
-    rereads: one(
-      `SELECT (SELECT count(*) FROM calls
-                WHERE session_id = ? AND tool_short = 'Read' AND path IS NOT NULL) total,
-              (SELECT coalesce(sum(n - 1), 0) FROM (
-                 SELECT count(*) n FROM calls
-                 WHERE session_id = ? AND tool_short = 'Read' AND path IS NOT NULL
-                 GROUP BY agent_id, path HAVING n > 1)) again`,
-      id,
-      id,
-    ),
     // What is inside each part of a fresh context, PER ROLE. Roles are not handed the same
     // thing at all: on one run the main thread carries 14 tool definitions for 124 KB while
     // the planner carries 6 for 12 KB. Grouping by component alone made every bar open onto
@@ -363,12 +351,6 @@ for (const id of picked) {
        WHERE c.session_id = ? AND c.component NOT LIKE 'file:%'`,
       id,
     ),
-    contextFiles: all(
-      `SELECT detail, max(bytes) bytes, count(*) agents FROM context
-       WHERE session_id = ? AND component LIKE 'file:%'
-       GROUP BY detail ORDER BY bytes DESC LIMIT 8`,
-      id,
-    ),
   };
 }
 
@@ -410,7 +392,6 @@ function redact(payload) {
     for (const a of d.agents) cut(a, "description");
     for (const l of d.loops) cut(l, "detail");
     for (const f of d.files) cut(f, "path");
-    for (const c of d.contextFiles) cut(c, "detail");
     for (const c of d.contextItems)
       if (c.component.startsWith("file:")) {
         c.component = "file:" + (c.component.split("/").pop() || "?");
