@@ -427,6 +427,26 @@ describe("the generated page", () => {
       expect(script).toContain("a." + field);
   });
 
+  test("the two halves of agent time say what they measure", () => {
+    // "Tool work" and "Generation + hooks" read as two kinds of work, and the recorded
+    // hooks are not even in the second: each runs inside its tool call.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    for (const label of [
+      "Tool execution",
+      "Exécution des outils",
+      "Model generation",
+      "Génération du modèle",
+    ])
+      expect(script).toContain('"' + label + '"');
+    for (const old of [
+      "Generation + hooks",
+      "Génération + hooks",
+      "Travail outil",
+    ])
+      expect(script).not.toContain(old);
+  });
+
   test("a dispatch is not one of the longest tool calls", () => {
     // An Agent call lasts as long as its child: it is a wait, not a slow tool.
     const { html } = build();

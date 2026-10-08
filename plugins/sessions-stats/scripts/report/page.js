@@ -141,8 +141,8 @@ const L = {
   agentTime: [
     ["Agent time", "Temps agent"],
     [
-      "Tool work plus generation, summed OVER THE AGENTS. With agents running in parallel it exceeds the wall clock, and the ratio between the two is the parallelism.",
-      "Travail outil plus génération, sommés SUR LES AGENTS. Avec des agents en parallèle, ce total dépasse le temps réel, et le rapport entre les deux est le parallélisme.",
+      "Tool execution plus model generation, summed OVER THE AGENTS. With agents running in parallel it exceeds the wall clock, and the ratio between the two is the parallelism.",
+      "Exécution des outils plus génération du modèle, sommées SUR LES AGENTS. Avec des agents en parallèle, ce total dépasse le temps réel, et le rapport entre les deux est le parallélisme.",
     ],
   ],
   parallel: [
@@ -167,24 +167,24 @@ const L = {
     ],
   ],
   toolWork: [
-    ["Tool work", "Travail outil"],
+    ["Tool execution", "Exécution des outils"],
     [
-      "Sum of tool-call durations, merged so calls fired together in one turn count once. A call is timed from its tool_use entry to its tool_result entry, capped at 15 min.",
-      "Somme des durées d'appels d'outils, fusionnée pour que des appels lancés ensemble comptent une fois. Un appel est chronométré de son entrée tool_use à son entrée tool_result, plafonné à 15 min.",
+      "Time the tools themselves were running: from a call going out to its result coming back, while the model waits for a command, a file read or a test suite. Calls fired together in one turn count once, and each is capped at 15 min. A call that waits on a child agent or a human is not here: see Supervision and Waiting on a human.",
+      "Temps pendant lequel les outils eux-mêmes tournaient : de l'envoi d'un appel au retour de son résultat, pendant que le modèle attend une commande, une lecture de fichier ou une suite de tests. Des appels lancés ensemble dans un tour comptent une fois, et chacun est plafonné à 15 min. Un appel qui attend un agent enfant ou un humain n'est pas ici : voir Supervision et Attente d'un humain.",
     ],
   ],
   waiting: [
-    ["Generation + hooks", "Génération + hooks"],
+    ["Model generation", "Génération du modèle"],
     [
-      "The gaps between turns, each counted up to 5 min. This is essentially the model writing its next turn. The hooks the transcript records are NOT in here — each carries the id of the call it belongs to, so it ran inside that call, and all of them together come to under five minutes across the whole archive. The one hook that would land in this gap is SubagentStop, where the validation chain runs, and a transcript never records it: if that is what you are chasing, hooks.log is the only source, and it must survive for you to read it.",
-      "Les écarts entre tours, comptés jusqu'à 5 min chacun. C'est pour l'essentiel le modèle qui écrit son tour suivant. Les hooks que le transcript enregistre n'y sont PAS : chacun porte l'identifiant de l'appel auquel il appartient, donc il a tourné dans cet appel, et tous réunis ils font moins de cinq minutes sur toute l'archive. Le seul hook qui atterrirait dans cet écart est SubagentStop, où tourne la chaîne de validation, et un transcript ne l'enregistre jamais : si c'est ce que vous cherchez, hooks.log est la seule source, et encore faut-il qu'il ait survécu.",
+      "Time the model spent producing its turns: from a tool result coming back to the next response being written. It is the model reading what came back and writing what comes next, paid in output tokens. A gap of 5 min or more is idle, whole, and counted nowhere. The hooks the transcript records are not here: each ran inside its tool call, so it is in tool execution. Only a SubagentStop hook, which no transcript records, could hide in this figure, and hooks.log is the one place that names it.",
+      "Temps passé par le modèle à produire ses tours : du retour d'un résultat d'outil à l'écriture de la réponse suivante. C'est le modèle qui lit ce qui est revenu et écrit la suite, payé en tokens de sortie. Un écart de 5 min ou plus est inactif, en entier, et compté nulle part. Les hooks que le transcript enregistre n'y sont pas : chacun a tourné dans son appel d'outil, il est donc dans l'exécution des outils. Seul un hook SubagentStop, qu'aucun transcript n'enregistre, pourrait se cacher dans ce chiffre, et hooks.log est le seul endroit qui le nomme.",
     ],
   ],
   ratio: [
-    ["Wait per minute acting", "Attente par minute d'action"],
+    ["Generation per minute of tools", "Génération par minute d'outil"],
     [
-      "Generation+hooks divided by tool work. Above 1, the run spends longer producing text than running anything.",
-      "Génération+hooks divisé par le travail outil. Au dessus de 1, le run passe plus de temps à produire du texte qu'à exécuter quoi que ce soit.",
+      "Model generation divided by tool execution. Above 1, the run spends longer producing text than running anything.",
+      "Génération du modèle divisée par l'exécution des outils. Au dessus de 1, le run passe plus de temps à produire du texte qu'à exécuter quoi que ce soit.",
     ],
   ],
   cost: [
@@ -261,15 +261,15 @@ const L = {
   supervise: [
     ["Supervision", "Supervision"],
     [
-      "Time a parent agent spent inside an Agent call, which lasts exactly as long as the child it spawned. The parent executed nothing during it, and the child's own row already carries those minutes, so this is EXCLUDED from tool work and from agent time. Counting it was 51% of one run's reported work.",
-      "Temps passé par un agent parent dans un appel Agent, qui dure exactement aussi longtemps que l'enfant qu'il a lancé. Le parent n'exécute rien pendant ce temps, et la ligne de l'enfant porte déjà ces minutes : c'est donc EXCLU du travail outil et du temps agent. Le compter représentait 51 % du travail annoncé d'un run.",
+      "Time a parent agent spent inside an Agent call, which lasts exactly as long as the child it spawned. The parent executed nothing during it, and the child's own row already carries those minutes, so this is EXCLUDED from tool execution and from agent time. Counting it was 51% of one run's reported work.",
+      "Temps passé par un agent parent dans un appel Agent, qui dure exactement aussi longtemps que l'enfant qu'il a lancé. Le parent n'exécute rien pendant ce temps, et la ligne de l'enfant porte déjà ces minutes : c'est donc EXCLU de l'exécution des outils et du temps agent. Le compter représentait 51 % du travail annoncé d'un run.",
     ],
   ],
   human: [
     ["Waiting on a human", "Attente d'un humain"],
     [
-      "Time inside an AskUserQuestion call, and nothing else: the agent was idle while somebody read the question. A person pausing between two messages is not this — it has no tool call to measure and lands in the stalls instead. Excluded from tool work and from agent time.",
-      "Temps passé dans un appel AskUserQuestion, et rien d'autre : l'agent ne faisait rien pendant que quelqu'un lisait la question. Une personne qui marque une pause entre deux messages n'est pas comptée ici — il n'y a pas d'appel d'outil à mesurer, et cela se retrouve dans les blocages. Exclu du travail outil et du temps agent.",
+      "Time inside an AskUserQuestion call, and nothing else: the agent was idle while somebody read the question. A person pausing between two messages is not this: it has no tool call to measure and lands in the stalls instead. Excluded from tool execution and from agent time.",
+      "Temps passé dans un appel AskUserQuestion, et rien d'autre : l'agent ne faisait rien pendant que quelqu'un lisait la question. Une personne qui marque une pause entre deux messages n'est pas comptée ici : il n'y a pas d'appel d'outil à mesurer, et cela se retrouve dans les blocages. Exclu de l'exécution des outils et du temps agent.",
     ],
   ],
   hookTime: [
@@ -287,7 +287,7 @@ const L = {
     ],
   ],
   pByActivity: [
-    ["Tool work by activity", "Travail outil par activité"],
+    ["Tool execution by activity", "Exécution des outils par activité"],
     [
       "What the agents DID, so waiting and idling are absent by construction. Each call is bucketed by its tool and, for Bash, by what the command does.",
       "Ce que les agents ont FAIT : l'attente et l'inactif en sont absents par construction. Chaque appel est classé par son outil et, pour Bash, par ce que fait la commande.",
@@ -519,8 +519,14 @@ const S = {
   medianTurn: ["median turn", "tour médian"],
   repeatsFound: ["repeats found", "répétitions trouvées"],
   noneFound: ["none found", "aucune"],
-  waitsMore: ["waits more than it acts", "attend plus qu'il n'agit"],
-  actsMore: ["acts more than it waits", "agit plus qu'il n'attend"],
+  waitsMore: [
+    "generates longer than its tools run",
+    "génère plus longtemps que ses outils ne tournent",
+  ],
+  actsMore: [
+    "its tools run longer than it generates",
+    "ses outils tournent plus longtemps qu'il ne génère",
+  ],
   longestCalls: ["longest calls", "appels les plus longs"],
   noCtxAttach: [
     "this run predates the context attachments",
@@ -531,10 +537,10 @@ const S = {
   nothing: ["nothing", "rien"],
   callsWord: ["calls", "appels"],
   toWord: ["to", "a"],
-  toolWorkLabel: ["tool work", "travail outil"],
-  genLabel: ["generation + hooks", "génération + hooks"],
-  acting: ["acting", "à agir"],
-  generating: ["generating", "à générer"],
+  toolWorkLabel: ["tool execution", "exécution des outils"],
+  genLabel: ["model generation", "génération du modèle"],
+  acting: ["running tools", "d'exécution d'outils"],
+  generating: ["generating", "de génération"],
   idleExcluded: ["idle, excluded", "inactif, exclu"],
   turn: ["turn", "tour"],
   hAgent: ["agent", "agent"],
@@ -2153,7 +2159,7 @@ function render(id) {
           '" data-tip2="' +
           esc(
             (longCalls[i].detail || "").slice(0, 420) +
-              (longCalls[i].stalled ? "  —  " + tr("stalledWhat") : ""),
+              (longCalls[i].stalled ? "\n" + tr("stalledWhat") : ""),
           ) +
           '"',
       ),
