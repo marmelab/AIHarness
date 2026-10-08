@@ -114,7 +114,7 @@ afterEach(() => {
   TMP = null;
 });
 
-function build(flags = []) {
+function build(flags = [], { dev = devBody } = {}) {
   TMP = mkdtempSync(join(tmpdir(), "run-report-"));
   const dbFile = join(TMP, "runs.sqlite");
   const db = openStore(dbFile);
@@ -127,7 +127,7 @@ function build(flags = []) {
       agents: [
         {
           agentId: "dev-1",
-          body: devBody,
+          body: dev,
           meta: { agentType: "aiharness:developer" },
         },
       ],
@@ -382,7 +382,6 @@ describe("the generated page", () => {
       "coordination", // the turnaround the harness owns
       "stalls", //       the pauses that have their own causes
       "busy",
-      "reread", //       reads of a file the agent had already opened
       "errorRate",
       "perTurn",
     ])
@@ -411,6 +410,99 @@ describe("the generated page", () => {
     expect(script).not.toContain('tileK(\n      "deadTime"');
   });
 
+  test("an agent is named, with its figures, on its timeline lane and its context line", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('\'<rect class="lane" x="0" y="\'');
+    expect(script).toContain('\'<polyline class="hit" points="\'');
+    // Both read the same two helpers, so the lane and the line cannot disagree.
+    expect(script.match(/esc\(agentStats\(a\)\)/g)).toHaveLength(2);
+    expect(script.match(/esc\(agentName\(a\)\)/g)).toHaveLength(2);
+    for (const field of [
+      "turns_in_window",
+      "calls_in_window",
+      "ctx_max",
+      "usd_in_window",
+    ])
+      expect(script).toContain("a." + field);
+  });
+
+  test("the two halves of agent time say what they measure", () => {
+    // "Tool work" and "Generation + hooks" read as two kinds of work, and the recorded
+    // hooks are not even in the second: each runs inside its tool call.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    for (const label of [
+      "Tool execution",
+      "Exécution des outils",
+      "Model generation",
+      "Génération du modèle",
+    ])
+      expect(script).toContain('"' + label + '"');
+    for (const old of [
+      "Generation + hooks",
+      "Génération + hooks",
+      "Travail outil",
+    ])
+      expect(script).not.toContain(old);
+  });
+
+  test("a dispatch is not one of the longest tool calls", () => {
+    // An Agent call lasts as long as its child: it is a wait, not a slow tool.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toMatch(
+      /const longCalls = d\.calls\s*\.filter\(\(c\) => !BLOCKED\.has\(c\.activity\)\)/,
+    );
+    expect(script).toContain("longCalls.map((c) => [");
+  });
+
+  test("generation after a tool leaves out dispatches, questions and idle gaps", () => {
+    // A 6-minute gap after the edit is idle by the wait bucket's rule, so it is not
+    // generation; the 3-second one after the test run is.
+    const dev = devBody
+      .replace(at(65000), at(62000 + 6 * 60000))
+      .replace(at(70000), at(62000 + 6 * 60000 + 5000))
+      .replace(at(72000), at(62000 + 6 * 60000 + 8000))
+      .replace(at(73000), at(62000 + 6 * 60000 + 9000));
+    const { html } = build([], { dev });
+    const data = payloadOf(html);
+    const rows = data.detail[data.picked[0]].waitAfter;
+    expect(rows.every((w) => w.wait_ms < 300000 * w.turns)).toBe(true);
+    expect(rows.find((w) => w.prev === "write")).toBeUndefined();
+    expect(rows.find((w) => w.prev === "validate")).toMatchObject({
+      turns: 1,
+      wait_ms: 3000,
+    });
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain(".filter((w) => !BLOCKED.has(w.prev))");
+  });
+
+  test("the cost and clock tiles share one heading, the clock row under the cost row", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('P.push(section(tr("sSummary")))');
+    expect(script).not.toContain('tr("sTime")');
+    const cost = script.indexOf("costTiles.join");
+    expect(cost).toBeGreaterThan(-1);
+    expect(script.indexOf("timeTiles.join")).toBeGreaterThan(cost);
+    expect(script.indexOf('"pModels"')).toBeGreaterThan(
+      script.indexOf("timeTiles.join"),
+    );
+  });
+
+  test("a figure a click already reaches is not repeated in a panel of its own", () => {
+    // The injected files open from the context bars; the agents' figures show on a
+    // timeline lane's hover; a re-read share had no decision to support.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    for (const key of ['"pInstr"', '"reread"', '"pAgents"'])
+      expect(script, key + " is still drawn").not.toContain(key);
+    const data = payloadOf(html);
+    expect(data.detail[data.picked[0]].contextFiles).toBeUndefined();
+    expect(data.detail[data.picked[0]].rereads).toBeUndefined();
+  });
+
   test("a tool whose duration is someone else's time is ranked apart", () => {
     const { html } = build();
     const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
@@ -426,6 +518,33 @@ describe("the generated page", () => {
     const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
     expect(script).toContain("def: actDef(a.activity)");
     expect(script).toContain('esc(it.def || "")');
+  });
+
+  test("every activity slice opens onto its calls, a skill onto the skills loaded", () => {
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain(
+      `attr: ' data-activity="' + esc(a.activity) + '"'`,
+    );
+    expect(script).toContain("it.attr");
+    expect(script).toContain("function drillActivity(");
+    expect(script).toContain('const bySkill = activity === "skill"');
+  });
+
+  test("a detail opens in a drawer beside the figure, not at the bottom of the page", () => {
+    // At the bottom, a click scrolled away from the figure and reading it meant scrolling
+    // back. The drawer sits outside the grid, so a redraw of the grid keeps it.
+    const { html } = build();
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(html).toMatch(
+      /<aside class="drawer" id="drawer"[^>]*><div id="drill">/,
+    );
+    expect(html.indexOf('id="drawer"')).toBeGreaterThan(
+      html.indexOf('id="grid"'),
+    );
+    expect(script).not.toContain('"pDrill"');
+    expect(script).toContain('e.key === "Escape"');
+    expect(script).toContain("drill(sameRun ? drillSel : null)");
   });
 
   test("a stall is an entry point, not just a duration", () => {
@@ -489,25 +608,6 @@ describe("the generated page", () => {
     }
   });
 
-  test("the waste figure counts re-reads, not reads", () => {
-    // Reading files is what an agent does; the share of turns that wrote one said nothing
-    // about waste. Opening a file the same agent had already opened does: the first read
-    // fell out of the context and the second is paid twice.
-    const { html } = build();
-    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
-    expect(script).toContain('"reread"');
-    expect(script).not.toContain('"productive"');
-    const json = html.match(
-      /<script type="application\/json" id="data">([\s\S]*?)<\/script>/,
-    )[1];
-    const data = JSON.parse(json.replace(/<\\\/script/g, "</script"));
-    for (const id of data.picked)
-      expect(data.detail[id].rereads).toMatchObject({
-        total: expect.any(Number),
-        again: expect.any(Number),
-      });
-  });
-
   test("a part of the context opens onto what is inside it", () => {
     // "51 KB of tool definitions" is a number; "Bash costs 22 KB of every turn" is a
     // decision. Only the parts the transcript itemises can open, and the others say so.
@@ -546,6 +646,24 @@ describe("the generated page", () => {
         i.role,
         "a context item with no role cannot be scoped",
       ).toBeTruthy();
+  });
+
+  test("every model used is listed with its cost, tokens and generation time", () => {
+    const { html } = build();
+    const data = payloadOf(html);
+    const models = data.detail[data.picked[0]].models;
+    expect(models.map((m) => m.agent_id).sort()).toEqual(["dev-1", "main"]);
+    for (const m of models) {
+      expect(m.model).toBe("sonnet-5");
+      expect(m.gen_ms).toEqual(expect.any(Number));
+    }
+    // Over the run window, like the cost tile: the panel and the tile must agree.
+    const run = data.runs.find((r) => r.session_id === data.picked[0]);
+    expect(models.reduce((s, m) => s + m.usd, 0)).toBeCloseTo(run.usd, 6);
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('panelK("pModels", modelsTable(d)');
+    expect(script).toContain("function drillModel(");
+    expect(script).toContain('data-model="');
   });
 
   test("tokens are broken out by billed kind, with their cost", () => {
@@ -642,7 +760,6 @@ describe("the generated page", () => {
       const b = red.detail[id];
       expect(b.tokens).toEqual(a.tokens);
       expect(b.tokenKinds).toEqual(a.tokenKinds);
-      expect(b.rereads).toEqual(a.rereads);
       expect(b.activities).toEqual(a.activities);
       expect(b.durations).toEqual(a.durations);
       expect(b.calls.map((c) => c.charged_ms)).toEqual(
@@ -732,18 +849,22 @@ describe("what the page writes into its markup", () => {
 describe("a model without a rate", () => {
   // Priced at the fallback, its cost reads exactly like a real one. The page and the
   // script's output both name it, so nobody quotes a guess.
-  const report = (model) => {
+  const report = (model, { body, stale = false } = {}) => {
     TMP = mkdtempSync(join(tmpdir(), "run-report-"));
     const dbFile = join(TMP, "runs.sqlite");
+    const db = openStore(dbFile);
     writeRun(
-      openStore(dbFile),
+      db,
       buildRun({
         sessionId: "sess-rate-1",
         slug: "-fixture",
-        mainBody: mainBody.replaceAll("claude-sonnet-5", model),
+        mainBody: body || mainBody.replaceAll("claude-sonnet-5", model),
         classify,
       }),
     );
+    // What a store ingested under an older pricing table holds for a model since priced.
+    if (stale) db.exec("UPDATE runs SET rate_known = 0");
+    db.close();
     const out = join(TMP, "r.html");
     const run = spawnSync(
       process.execPath,
@@ -765,6 +886,39 @@ describe("a model without a rate", () => {
     );
   });
 
+  test("is named when an agent switches to it after its first turn", () => {
+    // An agent's model column is the first it ran. Reading the names from there left a
+    // run flagged unpriced with nothing to name.
+    const [first, ...rest] = mainBody.split("\n");
+    const { data } = report(null, {
+      body: [
+        first,
+        ...rest.map((l) => l.replace("claude-sonnet-5", "claude-future-9")),
+      ].join("\n"),
+    });
+    expect(data.runs[0].rate_known).toBe(0);
+    expect(data.detail["sess-rate-1"].unpriced).toEqual(["future-9"]);
+    // And both models get a row of their own in the models panel, which tags the unpriced
+    // one: the badge says that one is unpriced, the panel says how much of the run it is.
+    const models = data.detail["sess-rate-1"].models;
+    expect([...new Set(models.map((m) => m.model))].sort()).toEqual([
+      "future-9",
+      "sonnet-5",
+    ]);
+    for (const m of models) {
+      expect(m.turns).toBeGreaterThan(0);
+      expect(m.tokens).toBeGreaterThan(0);
+      expect(m.usd).toBeGreaterThan(0);
+    }
+  });
+
+  test("a store priced before the rate existed says so instead of naming nothing", () => {
+    const { run, data } = report("claude-opus-5-5", { stale: true });
+    expect(data.detail["sess-rate-1"].unpriced).toEqual([]);
+    expect(data.detail["sess-rate-1"].pricedStale).toBe(true);
+    expect(run.stdout).toMatch(/^stale: sessions sess-rat were priced before/m);
+  });
+
   test("a priced model raises nothing", () => {
     const { run, data } = report("claude-opus-5-5");
     expect(data.detail["sess-rate-1"].unpriced).toEqual([]);
@@ -777,5 +931,6 @@ describe("a model without a rate", () => {
     const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
     expect(html).toContain('id="unpriced" hidden');
     expect(script).toContain("run.rate_known !== 0 && !models.length");
+    expect(script).toContain('tr("pricedStale")');
   });
 });

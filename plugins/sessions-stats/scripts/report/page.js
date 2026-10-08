@@ -82,13 +82,6 @@ const L = {
       "Le coût du run divisé par ses tours. Le tour est l'unité de facturation, puisqu'il relit tout le contexte quoi qu'il fasse ensuite : ce chiffre suit la taille du contexte bien plus que ce que l'agent a accompli.",
     ],
   ],
-  reread: [
-    ["Files read twice", "Fichiers relus"],
-    [
-      "Share of Read calls that opened a file the SAME agent had already opened. Reading is what an agent is for, so counting reads says nothing; reading the same file again does. It means the first read fell out of the context, and the second is paid twice: once for the call, and once for putting the same tokens back into every turn that follows.",
-      "Part des appels Read qui ouvrent un fichier que le MÊME agent avait déjà ouvert. Lire est la raison d'être d'un agent, donc compter les lectures ne dit rien ; relire le même fichier, si. Cela veut dire que la première lecture est tombée du contexte, et la seconde est payée deux fois : une fois pour l'appel, une fois pour remettre les mêmes tokens dans chaque tour suivant.",
-    ],
-  ],
   errorRate: [
     ["Tool calls that failed", "Appels d'outils en échec"],
     [
@@ -117,6 +110,13 @@ const L = {
       "Les quatre types ne sont pas interchangeables. Une lecture de cache coûte un dixième d'un input frais, une écriture de cache 5 min 1,25 fois, une écriture 1 h le double, et la sortie plusieurs fois l'input. La plus grosse colonne en tokens est donc rarement la plus grosse en argent : sur un run mesuré, 52 M de tokens lus en cache coûtent moins que 0,5 M de tokens de sortie. Les dollars sont une estimation aux tarifs API publics, qui ne sont pas ce que facture un abonnement ; les tokens, eux, sont mesurés, et ce sont eux que compte une limite d'usage.",
     ],
   ],
+  pModels: [
+    ["Models used", "Modèles utilisés"],
+    [
+      "Every model that produced a turn in the run window, with its cost, the tokens it read and wrote, and its generation time (the gaps before its turns, under 5 min each), each with its share of the run. A model the pricing table has no rate for is priced at the fallback rate and tagged so. Click a row for the agents that used it.",
+      "Chaque modèle qui a produit un tour dans la fenêtre du run, avec son coût, les tokens qu'il a lus et écrits, et son temps de génération (les écarts avant ses tours, sous 5 min chacun), chacun avec sa part du run. Un modèle sans tarif dans la table de prix est chiffré au tarif par défaut, et marqué comme tel. Cliquez une ligne pour les agents qui l'ont utilisé.",
+    ],
+  ],
   pPreamble: [
     ["The preamble, per role", "Le préambule, par rôle"],
     [
@@ -141,8 +141,8 @@ const L = {
   agentTime: [
     ["Agent time", "Temps agent"],
     [
-      "Tool work plus generation, summed OVER THE AGENTS. With agents running in parallel it exceeds the wall clock, and the ratio between the two is the parallelism.",
-      "Travail outil plus génération, sommés SUR LES AGENTS. Avec des agents en parallèle, ce total dépasse le temps réel, et le rapport entre les deux est le parallélisme.",
+      "Tool execution plus model generation, summed OVER THE AGENTS. With agents running in parallel it exceeds the wall clock, and the ratio between the two is the parallelism.",
+      "Exécution des outils plus génération du modèle, sommées SUR LES AGENTS. Avec des agents en parallèle, ce total dépasse le temps réel, et le rapport entre les deux est le parallélisme.",
     ],
   ],
   parallel: [
@@ -159,13 +159,6 @@ const L = {
       "Chaque appel d'outil va dans exactement un bac, d'après son nom d'outil et, pour une commande shell, d'après ce que fait la commande.",
     ],
   ],
-  pDrill: [
-    ["Selected calls", "Appels sélectionnés"],
-    [
-      "Click a tool, an activity or a band in the timeline to list the calls behind it here. Hover a row for the full command.",
-      "Cliquez un outil, une activité ou une bande de la chronologie pour lister ici les appels qui sont derrière. Survolez une ligne pour la commande entière.",
-    ],
-  ],
   activeTime: [
     ["Active time", "Temps actif"],
     [
@@ -174,24 +167,24 @@ const L = {
     ],
   ],
   toolWork: [
-    ["Tool work", "Travail outil"],
+    ["Tool execution", "Exécution des outils"],
     [
-      "Sum of tool-call durations, merged so calls fired together in one turn count once. A call is timed from its tool_use entry to its tool_result entry, capped at 15 min.",
-      "Somme des durées d'appels d'outils, fusionnée pour que des appels lancés ensemble comptent une fois. Un appel est chronométré de son entrée tool_use à son entrée tool_result, plafonné à 15 min.",
+      "Time the tools themselves were running: from a call going out to its result coming back, while the model waits for a command, a file read or a test suite. Calls fired together in one turn count once, and each is capped at 15 min. A call that waits on a child agent or a human is not here: see Supervision and Waiting on a human.",
+      "Temps pendant lequel les outils eux-mêmes tournaient : de l'envoi d'un appel au retour de son résultat, pendant que le modèle attend une commande, une lecture de fichier ou une suite de tests. Des appels lancés ensemble dans un tour comptent une fois, et chacun est plafonné à 15 min. Un appel qui attend un agent enfant ou un humain n'est pas ici : voir Supervision et Attente d'un humain.",
     ],
   ],
   waiting: [
-    ["Generation + hooks", "Génération + hooks"],
+    ["Model generation", "Génération du modèle"],
     [
-      "The gaps between turns, each counted up to 5 min. This is essentially the model writing its next turn. The hooks the transcript records are NOT in here — each carries the id of the call it belongs to, so it ran inside that call, and all of them together come to under five minutes across the whole archive. The one hook that would land in this gap is SubagentStop, where the validation chain runs, and a transcript never records it: if that is what you are chasing, hooks.log is the only source, and it must survive for you to read it.",
-      "Les écarts entre tours, comptés jusqu'à 5 min chacun. C'est pour l'essentiel le modèle qui écrit son tour suivant. Les hooks que le transcript enregistre n'y sont PAS : chacun porte l'identifiant de l'appel auquel il appartient, donc il a tourné dans cet appel, et tous réunis ils font moins de cinq minutes sur toute l'archive. Le seul hook qui atterrirait dans cet écart est SubagentStop, où tourne la chaîne de validation, et un transcript ne l'enregistre jamais : si c'est ce que vous cherchez, hooks.log est la seule source, et encore faut-il qu'il ait survécu.",
+      "Time the model spent producing its turns: from a tool result coming back to the next response being written. It is the model reading what came back and writing what comes next, paid in output tokens. A gap of 5 min or more is idle, whole, and counted nowhere. The hooks the transcript records are not here: each ran inside its tool call, so it is in tool execution. Only a SubagentStop hook, which no transcript records, could hide in this figure, and hooks.log is the one place that names it.",
+      "Temps passé par le modèle à produire ses tours : du retour d'un résultat d'outil à l'écriture de la réponse suivante. C'est le modèle qui lit ce qui est revenu et écrit la suite, payé en tokens de sortie. Un écart de 5 min ou plus est inactif, en entier, et compté nulle part. Les hooks que le transcript enregistre n'y sont pas : chacun a tourné dans son appel d'outil, il est donc dans l'exécution des outils. Seul un hook SubagentStop, qu'aucun transcript n'enregistre, pourrait se cacher dans ce chiffre, et hooks.log est le seul endroit qui le nomme.",
     ],
   ],
   ratio: [
-    ["Wait per minute acting", "Attente par minute d'action"],
+    ["Generation per minute of tools", "Génération par minute d'outil"],
     [
-      "Generation+hooks divided by tool work. Above 1, the run spends longer producing text than running anything.",
-      "Génération+hooks divisé par le travail outil. Au dessus de 1, le run passe plus de temps à produire du texte qu'à exécuter quoi que ce soit.",
+      "Model generation divided by tool execution. Above 1, the run spends longer producing text than running anything.",
+      "Génération du modèle divisée par l'exécution des outils. Au dessus de 1, le run passe plus de temps à produire du texte qu'à exécuter quoi que ce soit.",
     ],
   ],
   cost: [
@@ -268,15 +261,15 @@ const L = {
   supervise: [
     ["Supervision", "Supervision"],
     [
-      "Time a parent agent spent inside an Agent call, which lasts exactly as long as the child it spawned. The parent executed nothing during it, and the child's own row already carries those minutes, so this is EXCLUDED from tool work and from agent time. Counting it was 51% of one run's reported work.",
-      "Temps passé par un agent parent dans un appel Agent, qui dure exactement aussi longtemps que l'enfant qu'il a lancé. Le parent n'exécute rien pendant ce temps, et la ligne de l'enfant porte déjà ces minutes : c'est donc EXCLU du travail outil et du temps agent. Le compter représentait 51 % du travail annoncé d'un run.",
+      "Time a parent agent spent inside an Agent call, which lasts exactly as long as the child it spawned. The parent executed nothing during it, and the child's own row already carries those minutes, so this is EXCLUDED from tool execution and from agent time. Counting it was 51% of one run's reported work.",
+      "Temps passé par un agent parent dans un appel Agent, qui dure exactement aussi longtemps que l'enfant qu'il a lancé. Le parent n'exécute rien pendant ce temps, et la ligne de l'enfant porte déjà ces minutes : c'est donc EXCLU de l'exécution des outils et du temps agent. Le compter représentait 51 % du travail annoncé d'un run.",
     ],
   ],
   human: [
     ["Waiting on a human", "Attente d'un humain"],
     [
-      "Time inside an AskUserQuestion call, and nothing else: the agent was idle while somebody read the question. A person pausing between two messages is not this — it has no tool call to measure and lands in the stalls instead. Excluded from tool work and from agent time.",
-      "Temps passé dans un appel AskUserQuestion, et rien d'autre : l'agent ne faisait rien pendant que quelqu'un lisait la question. Une personne qui marque une pause entre deux messages n'est pas comptée ici — il n'y a pas d'appel d'outil à mesurer, et cela se retrouve dans les blocages. Exclu du travail outil et du temps agent.",
+      "Time inside an AskUserQuestion call, and nothing else: the agent was idle while somebody read the question. A person pausing between two messages is not this: it has no tool call to measure and lands in the stalls instead. Excluded from tool execution and from agent time.",
+      "Temps passé dans un appel AskUserQuestion, et rien d'autre : l'agent ne faisait rien pendant que quelqu'un lisait la question. Une personne qui marque une pause entre deux messages n'est pas comptée ici : il n'y a pas d'appel d'outil à mesurer, et cela se retrouve dans les blocages. Exclu de l'exécution des outils et du temps agent.",
     ],
   ],
   hookTime: [
@@ -294,7 +287,7 @@ const L = {
     ],
   ],
   pByActivity: [
-    ["Tool work by activity", "Travail outil par activité"],
+    ["Tool execution by activity", "Exécution des outils par activité"],
     [
       "What the agents DID, so waiting and idling are absent by construction. Each call is bucketed by its tool and, for Bash, by what the command does.",
       "Ce que les agents ont FAIT : l'attente et l'inactif en sont absents par construction. Chaque appel est classé par son outil et, pour Bash, par ce que fait la commande.",
@@ -327,15 +320,8 @@ const L = {
   pCtxGrowth: [
     ["Context growth per turn", "Croissance du contexte par tour"],
     [
-      "One line per agent, coloured by role. The y axis is the context re-read on that turn; the starting height is the tile above.",
-      "Une ligne par agent, colorée par rôle. L'axe y est le contexte relu à ce tour ; la hauteur de départ est la tuile ci dessus.",
-    ],
-  ],
-  pAgents: [
-    ["Agents in the run", "Agents du run"],
-    [
-      "The run window only, and only agents that had a turn inside it. Figures are the in-window share.",
-      "Fenêtre du run uniquement, et seulement les agents qui y ont eu un tour. Les chiffres sont la part dans la fenêtre.",
+      "One line per agent, coloured by role. The y axis is the context re-read on that turn; the starting height is the tile above. Hover a line for the agent it belongs to.",
+      "Une ligne par agent, colorée par rôle. L'axe y est le contexte relu à ce tour ; la hauteur de départ est la tuile ci dessus. Survolez une ligne pour l'agent auquel elle appartient.",
     ],
   ],
   pTools: [
@@ -361,12 +347,12 @@ const L = {
   ],
   pWaitAfter: [
     [
-      "Waiting: what the agent had just done",
-      "L'attente : ce que l'agent venait de faire",
+      "Generation after each kind of tool",
+      "Génération après chaque type d'outil",
     ],
     [
-      "Subagents only: the main thread's gaps are a person typing, not the harness working, and they made this table unreadable. Each row is a pause, grouped by what the agent had just finished when it started. Read it as: after N turns of <activity>, the agents waited <time> in total, and the turn that followed produced <avg output> tokens. Waiting after 'write' points at the validation chain; a large average output points at the model simply writing a lot.",
-      "Sous-agents uniquement : les écarts du thread principal sont quelqu'un qui tape, pas le harness qui travaille, et ils rendaient ce tableau illisible. Chaque ligne est une pause, groupée par ce que l'agent venait de finir quand elle a commencé. À lire comme : après N tours d'<activité>, les agents ont attendu <temps> au total, et le tour suivant a produit <sortie moy.> tokens. De l'attente après 'write' désigne la chaîne de validation ; une sortie moyenne élevée désigne le modèle qui écrit beaucoup.",
+      "Which tool results the model is slow to answer. Each row groups the turns that followed a turn of one activity: after N turns of <activity>, the model took <time> in total to produce its next turn, and that turn averaged <avg output> tokens. A long time with a small output is the model reading and weighing what the tool returned, such as a long test log; a large output is the model writing. Subagents only, since the main thread's gaps are a person typing. Turns that follow a dispatch or a question are left out: the model was reading another agent's or a person's answer, not a tool's.",
+      "Les résultats d'outils auxquels le modèle met du temps à répondre. Chaque ligne groupe les tours qui suivent un tour d'une activité : après N tours d'<activité>, le modèle a mis <temps> au total à produire son tour suivant, et ce tour a fait <sortie moy.> tokens en moyenne. Un temps long pour une sortie courte, c'est le modèle qui lit et pèse ce que l'outil a renvoyé, comme un long log de tests ; une grosse sortie, c'est le modèle qui écrit. Sous-agents uniquement, car les écarts du thread principal sont quelqu'un qui tape. Les tours qui suivent un dispatch ou une question sont exclus : le modèle lisait la réponse d'un autre agent ou d'une personne, pas celle d'un outil.",
     ],
   ],
   pFiles: [
@@ -383,18 +369,11 @@ const L = {
       "Depuis le transcript, qui enregistre chaque exécution de hook avec sa durée et son code de sortie. Une sortie non nulle est un hook qui a refusé ou échoué ; le transcript ne dit pas lequel, seul hooks.log porte le message.",
     ],
   ],
-  pInstr: [
-    ["Instruction files injected", "Fichiers d'instructions injectés"],
-    [
-      "The CLAUDE.md, AGENTS.md and memory files delivered to the agents of this run, at the size actually sent. Every agent pays for all of them on every turn.",
-      "Les CLAUDE.md, AGENTS.md et fichiers de mémoire livrés aux agents de ce run, à la taille réellement envoyée. Chaque agent les paie tous, à chaque tour.",
-    ],
-  ],
   pTimeline: [
     ["Agent timeline", "Chronologie des agents"],
     [
-      "One lane per agent, one band per tool call, placed when it ran and coloured by what it did. The lane rule spans the agent's life; the empty stretches are waiting, and they are deliberately not drawn as a bar.",
-      "Une voie par agent, une bande par appel d'outil, placée au moment où il a tourné et colorée par ce qu'il faisait. Le filet couvre la vie de l'agent ; les vides sont l'attente, délibérément pas dessinée en barre.",
+      "One lane per agent, one band per tool call, placed when it ran and coloured by what it did. The lane rule spans the agent's life; the empty stretches are waiting, and they are deliberately not drawn as a bar. Hover a band for its call, and anywhere else on a lane for the agent: its task, turns, calls, largest context, cost and model, over the run window.",
+      "Une voie par agent, une bande par appel d'outil, placée au moment où il a tourné et colorée par ce qu'il faisait. Le filet couvre la vie de l'agent ; les vides sont l'attente, délibérément pas dessinée en barre. Survolez une bande pour son appel, et le reste d'une voie pour l'agent : sa tâche, ses tours, ses appels, son plus grand contexte, son coût et son modèle, sur la fenêtre du run.",
     ],
   ],
 };
@@ -434,7 +413,6 @@ const S = {
   hHowLong: ["lasted", "a duré"],
   ofSubTurns: ["of subagent turns", "des tours de sous-agents"],
   ofCalls: ["of all calls", "de tous les appels"],
-  ofReads: ["of all reads", "de toutes les lectures"],
   nobodyWorking: ["nobody was working", "personne ne travaillait"],
   atLeastOne: ["at least one agent working", "au moins un agent au travail"],
   hRole: ["role", "rôle"],
@@ -443,6 +421,10 @@ const S = {
   redactedBadge: ["redacted: figures only", "expurgé : chiffres seulement"],
   unpricedBadge: ["no rate for", "pas de tarif pour"],
   unpricedAny: ["a model of this session", "un modèle de cette session"],
+  pricedStale: [
+    "priced before its models had a rate: ingest it again",
+    "chiffré avant que ses modèles aient un tarif : relancer l'ingest",
+  ],
   hookRuns: ["recorded executions", "exécutions enregistrées"],
   noSubagentStop: [
     "SubagentStop not among them",
@@ -453,10 +435,9 @@ const S = {
   hShareUsd: ["% $", "% $"],
   hReread: ["re-read", "relu"],
   hCost: ["cost", "coût"],
-  sCost: ["Cost: where the money went", "Coût : où est passé l'argent"],
-  sTime: [
-    "Wall clock: where the time went",
-    "Temps réel : où est passé le temps",
+  sSummary: [
+    "Where the money and the time went",
+    "Où sont passés l'argent et le temps",
   ],
   sWork: [
     "What the agents actually did",
@@ -510,10 +491,16 @@ const S = {
   ],
   allCalls: ["all calls", "tous les appels"],
   skipped: ["skipped", "sauté"],
-  noSelection: [
-    "Nothing selected yet: click a tool, an activity or a band above.",
-    "Rien de sélectionné : cliquez un outil, une activité ou une bande ci dessus.",
-  ],
+  close: ["close", "fermer"],
+  hModel: ["model", "modèle"],
+  hGen: ["generation", "génération"],
+  hAgents: ["agents", "agents"],
+  defaultRate: ["fallback rate", "tarif par défaut"],
+  dAgents: ["agents that used it", "agents qui l'ont utilisé"],
+  dCalls: ["calls, longest first", "appels, du plus long au plus court"],
+  dByTool: ["by tool", "par outil"],
+  dBySkill: ["by skill loaded", "par skill chargée"],
+  hSkill: ["skill", "skill"],
 
   ofRun: ["% of the run", "% du run"],
   outTok: ["output tokens", "tokens de sortie"],
@@ -532,8 +519,14 @@ const S = {
   medianTurn: ["median turn", "tour médian"],
   repeatsFound: ["repeats found", "répétitions trouvées"],
   noneFound: ["none found", "aucune"],
-  waitsMore: ["waits more than it acts", "attend plus qu'il n'agit"],
-  actsMore: ["acts more than it waits", "agit plus qu'il n'attend"],
+  waitsMore: [
+    "generates longer than its tools run",
+    "génère plus longtemps que ses outils ne tournent",
+  ],
+  actsMore: [
+    "its tools run longer than it generates",
+    "ses outils tournent plus longtemps qu'il ne génère",
+  ],
   longestCalls: ["longest calls", "appels les plus longs"],
   noCtxAttach: [
     "this run predates the context attachments",
@@ -544,10 +537,10 @@ const S = {
   nothing: ["nothing", "rien"],
   callsWord: ["calls", "appels"],
   toWord: ["to", "a"],
-  toolWorkLabel: ["tool work", "travail outil"],
-  genLabel: ["generation + hooks", "génération + hooks"],
-  acting: ["acting", "à agir"],
-  generating: ["generating", "à générer"],
+  toolWorkLabel: ["tool execution", "exécution des outils"],
+  genLabel: ["model generation", "génération du modèle"],
+  acting: ["running tools", "d'exécution d'outils"],
+  generating: ["generating", "de génération"],
   idleExcluded: ["idle, excluded", "inactif, exclu"],
   turn: ["turn", "tour"],
   hAgent: ["agent", "agent"],
@@ -565,8 +558,7 @@ const S = {
   hKind: ["kind", "type"],
   hTimes: ["times", "fois"],
   hWasted: ["wasted", "perdu"],
-  hAfter: ["after", "apres"],
-  hWait: ["wait", "attente"],
+  hAfter: ["after", "après"],
   hAvgOut: ["avg output", "sortie moy."],
   hFile: ["file", "fichier"],
   hSize: ["size", "taille"],
@@ -871,6 +863,87 @@ function preambleTable(d) {
   );
 }
 
+/** An agent as the page names it everywhere: its role, and the end of its id. */
+const agentName = (a) =>
+  !a
+    ? "?"
+    : a.agent_id === "main"
+      ? a.role || "main"
+      : (a.role || "?") + " " + a.agent_id.slice(-4);
+
+/** What the page knows of one agent, on one line under its name. */
+const agentStats = (a) =>
+  (a.description ? a.description + "\n" : "") +
+  [
+    a.turns_in_window + " " + tr("hTurns"),
+    a.calls_in_window + " " + tr("hCalls"),
+    K(a.ctx_max) + " " + tr("hCtxMax"),
+    usd(a.usd_in_window),
+    a.model,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+/** Per model: what it cost, what it read and wrote, how long it generated. */
+function modelRows(d) {
+  const by = new Map();
+  for (const r of d.models || []) {
+    const m = by.get(r.model) || {
+      model: r.model,
+      usd: 0,
+      tokens: 0,
+      gen: 0,
+      turns: 0,
+      agents: new Set(),
+    };
+    m.usd += r.usd || 0;
+    m.tokens += r.tokens || 0;
+    m.gen += r.gen_ms || 0;
+    m.turns += r.turns || 0;
+    m.agents.add(r.agent_id);
+    by.set(r.model, m);
+  }
+  return [...by.values()].sort((a, b) => b.usd - a.usd || b.tokens - a.tokens);
+}
+
+function modelsTable(d) {
+  const rows = modelRows(d);
+  const sum = (k) => rows.reduce((s, r) => s + r[k], 0);
+  const usdT = sum("usd"),
+    tokT = sum("tokens"),
+    genT = sum("gen");
+  const share = (v, t) => ' <span class="pc">' + pct(v, t) + "%</span>";
+  const unpriced = new Set(d.unpriced || []);
+  return (
+    '<div id="models">' +
+    topTable(
+      [
+        tr("hModel"),
+        "$",
+        tr("hTokens"),
+        tr("hGen"),
+        tr("hTurns"),
+        tr("hAgents"),
+      ],
+      rows.map((r) => [
+        '<span class="mono">' +
+          esc(r.model) +
+          "</span>" +
+          (unpriced.has(r.model)
+            ? ' <span class="tag bad">' + esc(tr("defaultRate")) + "</span>"
+            : ""),
+        usd(r.usd) + share(r.usd, usdT),
+        K(r.tokens) + share(r.tokens, tokT),
+        dur(r.gen) + share(r.gen, genT),
+        r.turns,
+        r.agents.size,
+      ]),
+      (cells, i) => ' class="seg" data-model="' + esc(rows[i].model) + '"',
+    ) +
+    "</div>"
+  );
+}
+
 const panelK = (k, body, cls = "", extra = "") =>
   panel(ttl(k) + extra, body, cls, tipOf(k));
 const tile = (title, big, sub, tip = "", cls = "") =>
@@ -894,7 +967,7 @@ function donut(items, total, unit) {
     cy = 60;
   let a0 = -Math.PI / 2,
     s = "";
-  const arc = (a1, a2, fill, tipT, tipD) => {
+  const arc = (a1, a2, fill, tipT, tipD, attr) => {
     const big = a2 - a1 > Math.PI ? 1 : 0;
     const p = (rad, a) =>
       (cx + rad * Math.cos(a)).toFixed(2) +
@@ -923,7 +996,9 @@ function donut(items, total, unit) {
       p(r, a1) +
       ' Z" fill="' +
       fill +
-      '" stroke="var(--panel)" stroke-width="1.5" data-tip="' +
+      '" stroke="var(--panel)" stroke-width="1.5"' +
+      attr +
+      ' data-tip="' +
       tipT +
       '" data-tip2="' +
       tipD +
@@ -941,6 +1016,7 @@ function donut(items, total, unit) {
       // The definition, not the value again: a slice reading "app 81%" told nobody what
       // app meant, which is the whole reason to hover it.
       esc(it.def || ""),
+      it.attr || "",
     );
     a0 = a1;
   }
@@ -954,7 +1030,9 @@ function donut(items, total, unit) {
       .slice(0, 7)
       .map(
         (i) =>
-          '<span class="seg" data-tip="' +
+          '<span class="seg"' +
+          (i.attr || "") +
+          ' data-tip="' +
           esc(i.k) +
           '" data-tip2="' +
           esc(i.def || "") +
@@ -1314,12 +1392,26 @@ function timeline(d) {
 
   agents.forEach((a, i) => {
     const y = padT + i * lane;
+    // The whole lane, under its calls, answers for the agent: hovering a call names the
+    // call, hovering anything else on the lane names the agent and its figures.
+    s +=
+      '<rect class="lane" x="0" y="' +
+      y +
+      '" width="' +
+      W +
+      '" height="' +
+      lane +
+      '" data-tip="' +
+      esc(agentName(a)) +
+      '" data-tip2="' +
+      esc(agentStats(a)) +
+      '"/>';
     s +=
       '<text x="' +
       (padL - 6) +
       '" y="' +
       (y + 10) +
-      '" text-anchor="end">' +
+      '" text-anchor="end" pointer-events="none">' +
       esc((a.role || "?").slice(0, 14) + " " + a.agent_id.slice(-4)) +
       "</text>";
     const calls = byAgent.get(a.agent_id) || [];
@@ -1327,7 +1419,7 @@ function timeline(d) {
       const from = Math.min(...calls.map((c) => c.at));
       const to = Math.max(...calls.map((c) => c.at + c.charged_ms));
       s +=
-        '<line class="gl" x1="' +
+        '<line class="gl" pointer-events="none" x1="' +
         x(from).toFixed(1) +
         '" x2="' +
         x(to).toFixed(1) +
@@ -1441,14 +1533,24 @@ function ctxChart(d) {
           ")",
       );
     const stroke = roleColor.get(a.role);
+    const points = turns
+      .map((t) => cx(t.idx).toFixed(1) + "," + cy(t.ctx).toFixed(1))
+      .join(" ");
+    // A 1.6px line is too thin to hover, so a wide transparent copy over it takes the
+    // pointer and names the agent.
     s +=
-      '<polyline points="' +
-      turns
-        .map((t) => cx(t.idx).toFixed(1) + "," + cy(t.ctx).toFixed(1))
-        .join(" ") +
+      '<g class="cline"><polyline points="' +
+      points +
       '" fill="none" stroke="' +
       stroke +
-      '" stroke-width="1.6" stroke-linejoin="round" opacity="0.85"/>';
+      '" stroke-width="1.6" stroke-linejoin="round" opacity="0.85"/>' +
+      '<polyline class="hit" points="' +
+      points +
+      '" fill="none" stroke="transparent" stroke-width="8" data-tip="' +
+      esc(agentName(a)) +
+      '" data-tip2="' +
+      esc(agentStats(a)) +
+      '"/></g>';
   }
   s += '<text x="' + p.l + '" y="' + (H - 3) + '">' + tr("turn") + " 0</text>";
   s +=
@@ -1582,8 +1684,11 @@ sel.onchange = () => render(sel.value);
 // The run being drawn. The drill-down keys on this and never on the select's value: reading
 // the control made the table depend on the DOM agreeing with the data.
 let currentRun = null;
+// What the drawer is showing, so a redraw of the same run can show it again.
+let drillSel = null;
 
 function render(id) {
+  const sameRun = currentRun === id;
   currentRun = id;
   const run = D.runs.find((x) => x.session_id === id);
   const d = D.detail[id];
@@ -1599,10 +1704,16 @@ function render(id) {
   if (unpriced) {
     const models = (d && d.unpriced) || [];
     unpriced.hidden = run.rate_known !== 0 && !models.length;
-    unpriced.textContent =
-      tr("unpricedBadge") +
-      " " +
-      (models.length ? models.join(", ") : tr("unpricedAny"));
+    unpriced.textContent = models.length
+      ? tr("unpricedBadge") + " " + models.join(", ")
+      : d && d.pricedStale
+        ? tr("pricedStale")
+        : tr("unpricedBadge") + " " + tr("unpricedAny");
+    unpriced.onclick = () => {
+      const target = document.getElementById("models");
+      if (target)
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
   }
   document.getElementById("runsub").textContent =
     (run.title ? run.title + " · " : "") +
@@ -1663,7 +1774,6 @@ function render(id) {
   // WORKING envelope (busy plus the short turnarounds), which a resume cannot inflate. The
   // span stays on the page as its own figure, with its own caveat.
   const workingMs = busyMs + coordMs;
-  const rr = d.rereads || { total: 0, again: 0 };
   // The host session is not a pipeline agent and it spans the whole conversation: leaving
   // it in made "longest agent" report the main thread on every run.
   const longest = d.agents
@@ -1678,9 +1788,13 @@ function render(id) {
   const par = busyMs > 0 ? agentMs / busyMs : 0;
   const P = [];
 
-  /* --- 1. cost ------------------------------------------------------------------ */
-  P.push(section(tr("sCost")));
-  P.push(
+  /* --- 1. what it cost, and how long it took ----------------------------------- */
+  // One heading, the cost tiles on one row and the clock tiles on the row under it: they
+  // are read together, and the panels sit below both rather than between them.
+  P.push(section(tr("sSummary")));
+  const costTiles = [];
+  const timeTiles = [];
+  costTiles.push(
     tileK(
       "cost",
       usd(run.usd),
@@ -1690,14 +1804,14 @@ function render(id) {
           : ""),
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "perTurn",
       usd(turns ? run.usd / turns : 0),
       turns + " " + tr("hTurns"),
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "preambleTax",
       Math.round(preShare * 100) + "<small>%</small>",
@@ -1705,7 +1819,7 @@ function render(id) {
       preShare >= 0.2 ? "flag" : "",
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "ctxBefore",
       startCtx.length ? kb(quantile(startCtx, 0.5)) : "-",
@@ -1714,7 +1828,7 @@ function render(id) {
         : tr("notRecorded"),
     ),
   );
-  P.push(
+  costTiles.push(
     tileK(
       "largestCtx",
       K(Math.max(...ctxs, 0)) + "<small> tok</small>",
@@ -1722,7 +1836,7 @@ function render(id) {
     ),
   );
   if (run.host_turns)
-    P.push(
+    costTiles.push(
       tileK(
         "outside",
         usd(run.host_usd),
@@ -1730,6 +1844,46 @@ function render(id) {
         "off",
       ),
     );
+  timeTiles.push(
+    tileK(
+      "working",
+      dur(workingMs),
+      day(run.started_at) + " · " + run.agent_count + " " + tr("agents"),
+    ),
+  );
+  timeTiles.push(tileK("wallClock", dur(windowMs), tr("endToEnd"), "off"));
+  timeTiles.push(
+    tileK(
+      "busy",
+      dur(busyMs),
+      pct(busyMs, workingMs) + tr("ofWorking") + " · " + tr("atLeastOne"),
+    ),
+  );
+  timeTiles.push(
+    tileK(
+      "coordination",
+      dur(coordMs),
+      pct(coordMs, workingMs) + tr("ofWorking") + " · " + tr("betweenAgents"),
+    ),
+  );
+  timeTiles.push(
+    tileK(
+      "stalls",
+      dur(stallMs),
+      (run.stall_count || 0) + " " + tr("incidents"),
+      (run.stall_count || 0) > 2 ? "flag" : "",
+    ),
+  );
+  timeTiles.push(
+    tileK(
+      "parallel",
+      par.toFixed(1) + "<small>x</small>",
+      dur(agentMs) + " / " + dur(busyMs),
+    ),
+  );
+  P.push('<div class="tiles">' + costTiles.join("") + "</div>");
+  P.push('<div class="tiles">' + timeTiles.join("") + "</div>");
+  P.push(panelK("pModels", modelsTable(d), "c3"));
   P.push(panelK("pTokens", tokenKinds(d), "c3"));
   P.push(panelK("pPreamble", preambleTable(d), "c3"));
   if (cov.total && cov.known < cov.total)
@@ -1749,63 +1903,7 @@ function render(id) {
       ),
     );
   P.push(panelK("pCtxFill", startingContext(d), "c3"));
-  if (d.contextFiles.length)
-    P.push(
-      panelK(
-        "pInstr",
-        topTable(
-          [tr("hFile"), tr("hSize")],
-          d.contextFiles.map((f) => [
-            '<span class="mono">' +
-              esc(String(f.detail).split("/").slice(-2).join("/")) +
-              "</span>",
-            kb(f.bytes),
-          ]),
-        ),
-        "c3",
-      ),
-    );
   P.push(panelK("pCtxGrowth", ctxChart(d), "c3"));
-
-  /* --- 2. wall clock ------------------------------------------------------------- */
-  P.push(section(tr("sTime")));
-  P.push(
-    tileK(
-      "working",
-      dur(workingMs),
-      day(run.started_at) + " · " + run.agent_count + " " + tr("agents"),
-    ),
-  );
-  P.push(tileK("wallClock", dur(windowMs), tr("endToEnd"), "off"));
-  P.push(
-    tileK(
-      "busy",
-      dur(busyMs),
-      pct(busyMs, workingMs) + tr("ofWorking") + " · " + tr("atLeastOne"),
-    ),
-  );
-  P.push(
-    tileK(
-      "coordination",
-      dur(coordMs),
-      pct(coordMs, workingMs) + tr("ofWorking") + " · " + tr("betweenAgents"),
-    ),
-  );
-  P.push(
-    tileK(
-      "stalls",
-      dur(stallMs),
-      (run.stall_count || 0) + " " + tr("incidents"),
-      (run.stall_count || 0) > 2 ? "flag" : "",
-    ),
-  );
-  P.push(
-    tileK(
-      "parallel",
-      par.toFixed(1) + "<small>x</small>",
-      dur(agentMs) + " / " + dur(busyMs),
-    ),
-  );
   if (d.stalls.length)
     P.push(
       panelK(
@@ -1892,6 +1990,8 @@ function render(id) {
           v: a.wall_ms,
           fill: color(a.activity),
           def: actDef(a.activity),
+          // Every slice opens onto the calls behind it, a skill onto the skills it loaded.
+          attr: ' data-activity="' + esc(a.activity) + '"',
         })),
         workMs || 1,
         dur,
@@ -1959,15 +2059,6 @@ function render(id) {
   P.push(section(tr("sWaste")));
   P.push(
     tileK(
-      "reread",
-      (rr.total ? Math.round((rr.again / rr.total) * 100) : 0) +
-        "<small>%</small>",
-      rr.again + " / " + rr.total + " " + tr("ofReads"),
-      rr.total && rr.again / rr.total > 0.15 ? "flag" : "",
-    ),
-  );
-  P.push(
-    tileK(
       "errorRate",
       (calls ? Math.round((errors / calls) * 100) : 0) + "<small>%</small>",
       errors + " / " + calls + " " + tr("ofCalls"),
@@ -2030,42 +2121,45 @@ function render(id) {
       "c3",
     ),
   );
+  // A dispatch lasts as long as its child and a question as long as the human: neither is a
+  // slow tool, and both would top this table for that reason alone.
+  const longCalls = d.calls
+    .filter((c) => !BLOCKED.has(c.activity))
+    .slice(0, 10);
   P.push(
     panelK(
       "pLongest",
       topTable(
         [tr("hToolArg"), tr("hActivity"), tr("hTook")],
-        d.calls
-          .slice(0, 10)
-          .map((c) => [
-            '<span class="mono">' +
-              esc(c.tool_short) +
-              "</span> " +
-              '<span style="color:var(--muted)">' +
-              esc(c.summary || "") +
-              "</span>",
-            '<i class="dot" style="background:' +
-              color(c.activity) +
-              '"></i> ' +
-              esc(actLabel(c.activity)),
-            dur(c.charged_ms) +
-              (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
-              (c.is_error ? ' <span class="tag bad">err</span>' : ""),
-          ]),
+        longCalls.map((c) => [
+          '<span class="mono">' +
+            esc(c.tool_short) +
+            "</span> " +
+            '<span style="color:var(--muted)">' +
+            esc(c.summary || "") +
+            "</span>",
+          '<i class="dot" style="background:' +
+            color(c.activity) +
+            '"></i> ' +
+            esc(actLabel(c.activity)),
+          dur(c.charged_ms) +
+            (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
+            (c.is_error ? ' <span class="tag bad">err</span>' : ""),
+        ]),
         (cells, i) =>
           ' data-tip="' +
           esc(
-            d.calls[i].tool_short +
+            longCalls[i].tool_short +
               " · " +
-              actLabel(d.calls[i].activity) +
+              actLabel(longCalls[i].activity) +
               " · " +
-              dur(d.calls[i].charged_ms) +
-              (d.calls[i].stalled ? " · stalled" : ""),
+              dur(longCalls[i].charged_ms) +
+              (longCalls[i].stalled ? " · stalled" : ""),
           ) +
           '" data-tip2="' +
           esc(
-            (d.calls[i].detail || "").slice(0, 420) +
-              (d.calls[i].stalled ? "  —  " + tr("stalledWhat") : ""),
+            (longCalls[i].detail || "").slice(0, 420) +
+              (longCalls[i].stalled ? "\n" + tr("stalledWhat") : ""),
           ) +
           '"',
       ),
@@ -2075,26 +2169,6 @@ function render(id) {
 
   /* --- 5. per role --------------------------------------------------------------- */
   P.push(section(tr("sRoles")));
-  P.push(
-    panelK(
-      "pAgents",
-      topTable(
-        [tr("hAgent"), tr("hTurns"), tr("hCalls"), tr("hCtxMax"), "$"],
-        d.agents
-          .filter((a) => a.turns_in_window > 0)
-          .map((a) => [
-            '<span class="mono">' +
-              esc((a.role || "?") + " " + a.agent_id.slice(-4)) +
-              "</span>",
-            a.turns_in_window,
-            a.calls_in_window,
-            K(a.ctx_max),
-            usd(a.usd_in_window),
-          ]),
-      ),
-      "c4",
-    ),
-  );
   P.push(
     panelK(
       "pCostRole",
@@ -2117,9 +2191,11 @@ function render(id) {
     panelK(
       "pWaitAfter",
       topTable(
-        [tr("hAfter"), tr("hTurns"), tr("hWait"), tr("hAvgOut")],
+        [tr("hAfter"), tr("hTurns"), tr("hGen"), tr("hAvgOut")],
+        // After a dispatch or a question, the gap is the model reading another agent's or a
+        // person's answer: the timeline already shows that wait, and no tool caused it.
         d.waitAfter
-          .filter((w) => w.prev !== "ask")
+          .filter((w) => !BLOCKED.has(w.prev))
           .slice(0, 8)
           .map((w) => [
             '<i class="dot" style="background:' +
@@ -2168,11 +2244,10 @@ function render(id) {
       ),
     );
 
-  P.push(panelK("pDrill", '<div id="drill"></div>', "full pdrill"));
-
   document.getElementById("grid").innerHTML = P.join("");
   wireTimeline();
-  drill(null);
+  // A language switch or a zoom redraws the same run: what was open stays open.
+  drill(sameRun ? drillSel : null);
 }
 
 for (const b of document.getElementById("langs").children) {
@@ -2208,65 +2283,166 @@ try {
 
 /* --- drill-down: what is behind a bar ---
    An aggregate that cannot be opened is a number to be taken on faith. Clicking a tool row,
-   an activity, or a band in the timeline lists the calls that make it up, with the full
-   command on hover rather than truncated into uselessness. */
+   an activity, a model or a band in the timeline lists what makes it up, with the full
+   command on hover rather than truncated into uselessness. It opens in a drawer over the
+   right edge, so the figure that was clicked stays in view beside its detail. */
 function drill(sel) {
-  const d = D.detail[currentRun];
+  const drawer = document.getElementById("drawer");
   const host = document.getElementById("drill");
-  if (!d || !host) return;
-  if (sel && sel.stall !== undefined)
-    return drillStall(d, host, d.stalls[sel.stall]);
-  if (sel && sel.ctx) return drillContext(d, host, sel.ctx, sel.role);
-  let rows = d.calls;
-  let what = tr("allCalls");
-  if (sel && sel.tool) {
-    rows = rows.filter((c) => c.tool_short === sel.tool);
-    what = sel.tool;
-  }
-  if (sel && sel.activity) {
-    rows = rows.filter((c) => c.activity === sel.activity);
-    what = actLabel(sel.activity);
-  }
-  if (!sel) {
-    host.innerHTML = '<div class="sub2">' + tr("noSelection") + "</div>";
+  if (!drawer || !host) return;
+  const d = D.detail[currentRun];
+  const wasOpen = drawer.classList.contains("open");
+  const html = d && sel ? drillBody(d, sel) : "";
+  drillSel = html ? sel : null;
+  if (!html) {
+    drawer.classList.remove("open");
+    drawer.setAttribute("aria-hidden", "true");
     return;
   }
-  host.innerHTML =
-    '<div class="drillhead"><b>' +
-    esc(what) +
-    "</b> · " +
-    rows.length +
-    " " +
-    tr("callsWord") +
-    " · " +
-    dur(rows.reduce((s, c) => s + c.charged_ms, 0)) +
-    ' <button type="button" id="drillClear">×</button></div>' +
-    topTable(
-      [tr("hTool"), tr("hActivity"), tr("hTook"), tr("hWhat")],
-      rows
-        .slice(0, 60)
-        .map((c) => [
-          '<span class="mono">' + esc(c.tool_short) + "</span>",
-          '<i class="dot" style="background:' +
-            color(c.activity) +
-            '"></i> ' +
-            esc(actLabel(c.activity)),
-          dur(c.charged_ms) +
-            (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
-            (c.is_error ? ' <span class="tag bad">err</span>' : ""),
-          '<span class="mono">' + esc(c.summary || "") + "</span>",
-        ]),
-      (cells, i) =>
-        ' data-tip="' +
-        esc(rows[i].tool_short + " · " + dur(rows[i].charged_ms)) +
-        '" data-tip2="' +
-        esc((rows[i].detail || "").slice(0, 400)) +
-        '"',
-    );
+  host.innerHTML = html;
+  drawer.scrollTop = 0;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
   const clear = document.getElementById("drillClear");
-  if (clear) clear.addEventListener("click", () => drill(null));
-  const panel = host.closest(".pdrill");
-  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (clear) {
+    clear.addEventListener("click", () => drill(null));
+    if (!wasOpen) clear.focus({ preventScroll: true });
+  }
+}
+
+function drillBody(d, sel) {
+  if (sel.stall !== undefined) return drillStall(d.stalls[sel.stall]);
+  if (sel.ctx) return drillContext(d, sel.ctx, sel.role);
+  if (sel.model) return drillModel(d, sel.model);
+  if (sel.activity) return drillActivity(d, sel.activity);
+  if (sel.tool) {
+    const rows = d.calls.filter((c) => c.tool_short === sel.tool);
+    return (
+      drillHead(sel.tool, callsMeta(rows)) +
+      '<h4 class="dsub">' +
+      esc(tr("dCalls")) +
+      "</h4>" +
+      callsTable(rows)
+    );
+  }
+  return "";
+}
+
+const drillHead = (title, meta) =>
+  '<div class="drillhead"><b>' +
+  esc(title) +
+  "</b>" +
+  (meta ? "<span>" + esc(meta) + "</span>" : "") +
+  ' <button type="button" id="drillClear" aria-label="' +
+  esc(tr("close")) +
+  '">×</button></div>';
+
+const callsMeta = (rows) =>
+  rows.length +
+  " " +
+  tr("callsWord") +
+  " · " +
+  dur(rows.reduce((s, c) => s + c.charged_ms, 0));
+
+/** One row per call, longest first, the full command one hover away. */
+function callsTable(rows) {
+  return topTable(
+    [tr("hTool"), tr("hActivity"), tr("hTook"), tr("hWhat")],
+    rows
+      .slice(0, 60)
+      .map((c) => [
+        '<span class="mono">' + esc(c.tool_short) + "</span>",
+        '<i class="dot" style="background:' +
+          color(c.activity) +
+          '"></i> ' +
+          esc(actLabel(c.activity)),
+        dur(c.charged_ms) +
+          (c.stalled ? ' <span class="tag bad">stalled</span>' : "") +
+          (c.is_error ? ' <span class="tag bad">err</span>' : ""),
+        '<span class="mono">' + esc(c.summary || "") + "</span>",
+      ]),
+    (cells, i) =>
+      ' data-tip="' +
+      esc(rows[i].tool_short + " · " + dur(rows[i].charged_ms)) +
+      '" data-tip2="' +
+      esc((rows[i].detail || "").slice(0, 400)) +
+      '"',
+  );
+}
+
+/**
+ * What one activity is made of: its definition, then its calls grouped by tool, then the
+ * calls themselves. A skill is grouped by the skill it loaded, since every one of those
+ * calls is the same tool.
+ */
+function drillActivity(d, activity) {
+  const rows = d.calls.filter((c) => c.activity === activity);
+  const bySkill = activity === "skill";
+  const groups = new Map();
+  for (const c of rows) {
+    const k = bySkill ? c.summary || c.tool_short : c.tool_short;
+    const g = groups.get(k) || { k, n: 0, ms: 0 };
+    g.n++;
+    g.ms += c.charged_ms;
+    groups.set(k, g);
+  }
+  const list = [...groups.values()].sort((a, b) => b.ms - a.ms || b.n - a.n);
+  return (
+    drillHead(actLabel(activity), callsMeta(rows)) +
+    (actDef(activity)
+      ? '<p class="def">' + esc(actDef(activity)) + "</p>"
+      : "") +
+    (bySkill || list.length > 1
+      ? '<h4 class="dsub">' +
+        esc(bySkill ? tr("dBySkill") : tr("dByTool")) +
+        "</h4>" +
+        topTable(
+          [bySkill ? tr("hSkill") : tr("hTool"), tr("hN"), tr("hTime")],
+          list.map((g) => [
+            '<span class="mono">' + esc(g.k) + "</span>",
+            g.n,
+            dur(g.ms),
+          ]),
+          bySkill
+            ? ""
+            : (cells, i) => ' class="seg" data-tool="' + esc(list[i].k) + '"',
+        )
+      : "") +
+    '<h4 class="dsub">' +
+    esc(tr("dCalls")) +
+    "</h4>" +
+    callsTable(rows)
+  );
+}
+
+/** The agents that ran one model, and what each spent on it. */
+function drillModel(d, model) {
+  const rows = (d.models || [])
+    .filter((r) => r.model === model)
+    .sort((a, b) => (b.usd || 0) - (a.usd || 0));
+  const m = modelRows(d).find((r) => r.model === model);
+  if (!m) return "";
+  return (
+    drillHead(
+      model,
+      usd(m.usd) + " · " + K(m.tokens) + " tok · " + dur(m.gen),
+    ) +
+    '<h4 class="dsub">' +
+    esc(tr("dAgents")) +
+    "</h4>" +
+    topTable(
+      [tr("hAgent"), tr("hTurns"), "$", tr("hTokens"), tr("hGen")],
+      rows.map((r) => [
+        '<span class="mono">' +
+          esc(agentName(d.agents.find((a) => a.agent_id === r.agent_id))) +
+          "</span>",
+        r.turns,
+        usd(r.usd),
+        K(r.tokens),
+        dur(r.gen_ms),
+      ]),
+    )
+  );
 }
 
 document.addEventListener("click", (e) => {
@@ -2276,11 +2452,19 @@ document.addEventListener("click", (e) => {
       return drill({ ctx: el.dataset.ctx, role: el.dataset.ctxRole || null });
     if (el.dataset && el.dataset.stall !== undefined)
       return drill({ stall: Number(el.dataset.stall) });
+    if (el.dataset && el.dataset.model)
+      return drill({ model: el.dataset.model });
     if (el.dataset && el.dataset.tool) return drill({ tool: el.dataset.tool });
     if (el.dataset && el.dataset.activity)
       return drill({ activity: el.dataset.activity });
+    // Inside the drawer, or on the page's own controls: nothing to close.
+    if (el.id === "drawer" || el.classList?.contains("bar")) return;
     el = el.parentNode;
   }
+  if (drillSel) drill(null);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && drillSel) drill(null);
 });
 
 /* --- drag a range on the timeline to zoom into it ---
@@ -2339,8 +2523,8 @@ function wireTimeline() {
  * between, which is the only evidence that a SubagentStop hook, and therefore the
  * validation chain, was what filled it.
  */
-function drillStall(d, host, g) {
-  if (!g) return;
+function drillStall(g) {
+  if (!g) return "";
   const when = (ms) => new Date(ms).toISOString().slice(11, 19);
   const side = (c, label) =>
     '<div class="stallside"><b>' +
@@ -2359,12 +2543,8 @@ function drillStall(d, host, g) {
       : '<span class="sub2">—</span>') +
     "</div>";
 
-  host.innerHTML =
-    '<div class="drillhead"><b>' +
-    esc(tr("stallAt") + " " + when(g.at)) +
-    "</b> · " +
-    dur(g.ms) +
-    ' <button type="button" id="drillClear">×</button></div>' +
+  return (
+    drillHead(tr("stallAt") + " " + when(g.at), dur(g.ms)) +
     '<div class="stallgrid">' +
     side(g.before, tr("lastBefore")) +
     side(g.after, tr("firstAfter")) +
@@ -2378,11 +2558,8 @@ function drillStall(d, host, g) {
             '<span class="mono">' + esc(h.message) + "</span>",
           ]),
         )
-      : '<div class="sub2">' + esc(tr("noHookTrace")) + "</div>");
-  const clear = document.getElementById("drillClear");
-  if (clear) clear.addEventListener("click", () => drill(null));
-  const panel = host.closest(".pdrill");
-  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      : '<div class="sub2">' + esc(tr("noHookTrace")) + "</div>")
+  );
 }
 
 /**
@@ -2396,7 +2573,7 @@ function drillStall(d, host, g) {
  */
 const CTX_PREFIX = { tools: "tool:", skills: "skill:", instructions: "file:" };
 
-function drillContext(d, host, component, role) {
+function drillContext(d, component, role) {
   const prefix = CTX_PREFIX[component];
   // Filtered to the role whose bar was clicked. Without it the list contradicted the bar:
   // a planner's 12 KB of tools opened onto the 125 KB union of every role's.
@@ -2421,15 +2598,11 @@ function drillContext(d, host, component, role) {
   const total = items.reduce((sum, i) => sum + (i.bytes || 0), 0);
   const sized = items.some((i) => i.bytes > 0);
 
-  host.innerHTML =
-    '<div class="drillhead"><b>' +
-    esc((role ? role + " · " : "") + ctxLabel(component)) +
-    "</b> · " +
-    items.length +
-    " " +
-    esc(tr("hItem")) +
-    (sized ? " · " + kb(total) : "") +
-    ' <button type="button" id="drillClear">×</button></div>' +
+  return (
+    drillHead(
+      (role ? role + " · " : "") + ctxLabel(component),
+      items.length + " " + tr("hItem") + (sized ? " · " + kb(total) : ""),
+    ) +
     (!prefix
       ? '<div class="sub2">' + esc(tr("noBreakdown")) + "</div>"
       : !items.length
@@ -2454,9 +2627,6 @@ function drillContext(d, host, component, role) {
                       "</span>",
                   ],
             ),
-          ));
-  const clear = document.getElementById("drillClear");
-  if (clear) clear.addEventListener("click", () => drill(null));
-  const panel = host.closest(".pdrill");
-  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+          ))
+  );
 }

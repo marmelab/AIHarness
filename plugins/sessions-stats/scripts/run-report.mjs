@@ -89,6 +89,10 @@ const picked = value("sessions")
 const detail = {};
 // Models a figure was priced at the fallback rate for, with the sessions that used them.
 const unpricedIn = new Map();
+// A turn that billed tokens under no model name at all.
+const UNNAMED_MODEL = "(unnamed)";
+// Sessions whose store row predates a rate the pricing table now has.
+const staleIn = [];
 
 for (const id of picked) {
   // Percentiles and the duration histogram must see EVERY call, not the embedded sample:
@@ -107,22 +111,31 @@ for (const id of picked) {
        FROM agents WHERE session_id = ? AND turns > 0 ORDER BY started_at`,
     id,
   );
-  // An agent's model is the first it ran; a later unpriced one shows as rate_known = 0
-  // on the run without a name, which the page reports as such.
-  const unpriced = [
-    ...new Set(
-      agents
-        .map((a) => a.model)
-        .filter((m) => m && m !== "<synthetic>" && !rateFor(m).known),
-    ),
-  ];
+  // Read from the turns, not from the agents: an agent's model is only the first it ran,
+  // so a model it switched to later would leave the run unpriced with no name to show.
+  // A turn that billed nothing needs no rate, which is what keeps `<synthetic>` out.
+  const unpriced = all(
+    `SELECT DISTINCT model FROM turns
+     WHERE session_id = ? AND in_tokens + cache_read + cache_write + out_tokens > 0`,
+    id,
+  )
+    .map((r) => r.model || "")
+    .filter((m) => !rateFor(m).known)
+    .map((m) => m || UNNAMED_MODEL);
+  // The store prices each turn when the session is ingested. A model given a rate since
+  // then leaves the run flagged with no model left to name: its figures are the fallback's
+  // until the session is ingested again.
+  const run = runs.find((r) => r.session_id === id);
+  const pricedStale = Boolean(run && run.rate_known === 0 && !unpriced.length);
   for (const m of unpriced)
     unpricedIn.set(m, [...(unpricedIn.get(m) || []), id.slice(0, 8)]);
+  if (pricedStale) staleIn.push(id.slice(0, 8));
 
   detail[id] = {
     durations,
     agents,
     unpriced,
+    pricedStale,
     activities: all(
       `SELECT activity, sum(wall_ms) wall_ms, sum(calls) calls, sum(errors) errors,
               sum(stalled) stalled
@@ -167,14 +180,31 @@ for (const id of picked) {
        WHERE session_id = ? ORDER BY wasted_ms DESC, count DESC LIMIT 12`,
       id,
     ),
+    // Generation only, by the wait bucket's rule: a gap of 5 min or more is idle, whole.
     waitAfter: all(
-      `SELECT prev_activity prev, count(*) turns, sum(min(wait_ms, 300000)) wait_ms,
+      `SELECT prev_activity prev, count(*) turns, sum(wait_ms) wait_ms,
               cast(avg(out_tokens) as int) avg_out
-       FROM turns WHERE session_id = ? AND wait_ms > 0 AND prev_activity IS NOT NULL
+       FROM turns WHERE session_id = ? AND wait_ms > 0 AND wait_ms < 300000
+         AND prev_activity IS NOT NULL
          AND agent_id <> 'main'
        GROUP BY prev_activity ORDER BY wait_ms DESC`,
       id,
     ),
+    // Per model and agent, over the run window like every other cost on the page. The
+    // generation time is the wait bucket's own rule: a gap of 5 min or more is idle, whole.
+    models: all(
+      `SELECT model, agent_id, count(*) turns, sum(usd) usd,
+              sum(in_tokens + cache_read + cache_write + out_tokens) tokens,
+              sum(CASE WHEN wait_ms < 300000 THEN wait_ms ELSE 0 END) gen_ms
+       FROM turns
+       WHERE session_id = ? AND in_tokens + cache_read + cache_write + out_tokens > 0
+         AND (? IS NULL OR (at >= ? AND at <= ?))
+       GROUP BY model, agent_id`,
+      id,
+      run?.window_start ?? null,
+      run?.window_start ?? null,
+      run?.window_end ?? null,
+    ).map((r) => ({ ...r, model: r.model || UNNAMED_MODEL })),
     // The preamble is measured, not reconstructed: ctx_first is the billed context of an
     // agent's very first turn, which is everything it was handed before it did anything.
     // The attachment breakdown is the right way to see WHAT is in it, but a wrong way to
@@ -253,20 +283,6 @@ for (const id of picked) {
       }
       return acc;
     })(),
-    // Reading is what an agent is for, so counting reads says nothing. Reading the SAME
-    // file twice in the same agent does: the first read fell out of the context, and the
-    // second one is paid twice over, once for the call and once for the tokens it puts
-    // back.
-    rereads: one(
-      `SELECT (SELECT count(*) FROM calls
-                WHERE session_id = ? AND tool_short = 'Read' AND path IS NOT NULL) total,
-              (SELECT coalesce(sum(n - 1), 0) FROM (
-                 SELECT count(*) n FROM calls
-                 WHERE session_id = ? AND tool_short = 'Read' AND path IS NOT NULL
-                 GROUP BY agent_id, path HAVING n > 1)) again`,
-      id,
-      id,
-    ),
     // What is inside each part of a fresh context, PER ROLE. Roles are not handed the same
     // thing at all: on one run the main thread carries 14 tool definitions for 124 KB while
     // the planner carries 6 for 12 KB. Grouping by component alone made every bar open onto
@@ -335,12 +351,6 @@ for (const id of picked) {
        WHERE c.session_id = ? AND c.component NOT LIKE 'file:%'`,
       id,
     ),
-    contextFiles: all(
-      `SELECT detail, max(bytes) bytes, count(*) agents FROM context
-       WHERE session_id = ? AND component LIKE 'file:%'
-       GROUP BY detail ORDER BY bytes DESC LIMIT 8`,
-      id,
-    ),
   };
 }
 
@@ -382,7 +392,6 @@ function redact(payload) {
     for (const a of d.agents) cut(a, "description");
     for (const l of d.loops) cut(l, "detail");
     for (const f of d.files) cut(f, "path");
-    for (const c of d.contextFiles) cut(c, "detail");
     for (const c of d.contextItems)
       if (c.component.startsWith("file:")) {
         c.component = "file:" + (c.component.split("/").pop() || "?");
@@ -447,6 +456,8 @@ const html = `<title>Session stats</title>
   <div class="grid" id="grid"></div>
 </div>
 
+<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Detail"><div id="drill"></div></aside>
+
 <script type="application/json" id="data">${json}</script>
 <script>
 ${JS}
@@ -480,4 +491,9 @@ for (const [model, sessions] of unpricedIn)
   console.log(
     `unpriced: ${model} (sessions ${sessions.join(", ")}) priced at the ` +
       `${FALLBACK_RATE_MODEL} rate; add it to scripts/lib/pricing.mjs`,
+  );
+if (staleIn.length)
+  console.log(
+    `stale: sessions ${staleIn.join(", ")} were priced before their models had a ` +
+      `rate; run scripts/run-ingest.mjs again to reprice them`,
   );
