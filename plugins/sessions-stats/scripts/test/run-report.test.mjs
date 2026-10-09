@@ -666,6 +666,26 @@ describe("the generated page", () => {
     expect(script).toContain('data-model="');
   });
 
+  test("cost is broken out by activity, each with the role that spent it", () => {
+    const { html } = build();
+    const data = payloadOf(html);
+    const d = data.detail[data.picked[0]];
+    // The same window and the same billed turns as the models: the two panels agree.
+    const sum = (rows, k) => rows.reduce((s, r) => s + r[k], 0);
+    expect(sum(d.activityCost, "usd")).toBeCloseTo(sum(d.models, "usd"), 6);
+    expect(sum(d.activityCost, "turns")).toBe(sum(d.models, "turns"));
+    const dev = d.agents.find((a) => a.agent_id === "dev-1");
+    const of = (activity) =>
+      d.activityCost.filter((r) => r.activity === activity);
+    expect(of("write").map((r) => r.role)).toEqual([dev.role]);
+    expect(of("validate").map((r) => r.role)).toEqual([dev.role]);
+    expect(of("git").map((r) => r.role)).toEqual(["main"]);
+    const script = html.match(/<script>([\s\S]*?)<\/script>\s*$/)[1];
+    expect(script).toContain('panelK("pCostActivity", activityCostTable(d)');
+    // A row opens onto the calls of its activity, like a slice of the time donut.
+    expect(script).toMatch(/function activityCostTable[\s\S]*?data-activity="/);
+  });
+
   test("tokens are broken out by billed kind, with their cost", () => {
     // On a subscription the dollars are an estimate at public rates; the tokens are what a
     // usage limit counts. Both are shown, and the kinds are not interchangeable: a cache

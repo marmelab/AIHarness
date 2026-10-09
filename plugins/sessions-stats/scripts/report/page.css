@@ -599,6 +599,19 @@ td .pc {
   color: var(--muted);
   font-size: 10.5px;
 }
+/* A share drawn in a table cell: the bar starts at the cell's left edge whatever the
+   column's alignment, so bars of one column compare. */
+td .sbarw {
+  display: inline-block;
+  width: 64px;
+  text-align: left;
+  vertical-align: middle;
+}
+td .sbar {
+  display: block;
+  height: 7px;
+  border-radius: 0 3px 3px 0;
+}
 #unpriced:not([hidden]) {
   cursor: pointer;
 }
