@@ -1,6 +1,6 @@
 {
   "name": "sessions-stats",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Where a Claude Code session's minutes, tokens and dollars went, agent by agent, as one self-contained page. Reads the transcripts Claude Code already writes, so it works on any session in any project, with or without the aiharness plugin. Ships commands only: no hook, nothing running in the background.",
   "author": {
     "name": "Jerome",

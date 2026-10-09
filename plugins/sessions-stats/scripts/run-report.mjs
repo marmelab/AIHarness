@@ -205,6 +205,22 @@ for (const id of picked) {
       run?.window_start ?? null,
       run?.window_end ?? null,
     ).map((r) => ({ ...r, model: r.model || UNNAMED_MODEL })),
+    // Per activity and role, over the same window and the same billed turns as the models,
+    // so the two panels sum to the same cost. A turn is charged whole to its activity: what
+    // it pays is mostly re-reading its context, which no single call of it owns.
+    activityCost: all(
+      `SELECT t.activity, coalesce(a.role, '') role, count(*) turns, sum(t.usd) usd
+       FROM turns t
+       LEFT JOIN agents a ON a.session_id = t.session_id AND a.agent_id = t.agent_id
+       WHERE t.session_id = ?
+         AND t.in_tokens + t.cache_read + t.cache_write + t.out_tokens > 0
+         AND (? IS NULL OR (t.at >= ? AND t.at <= ?))
+       GROUP BY t.activity, a.role`,
+      id,
+      run?.window_start ?? null,
+      run?.window_start ?? null,
+      run?.window_end ?? null,
+    ),
     // The preamble is measured, not reconstructed: ctx_first is the billed context of an
     // agent's very first turn, which is everything it was handed before it did anything.
     // The attachment breakdown is the right way to see WHAT is in it, but a wrong way to
