@@ -224,14 +224,13 @@ describe("parseAge", () => {
   });
 });
 
-describe("run-stats.mjs --recent", () => {
-  const stats = (args) => runStats(join(root, "repo"), args);
-  const pageOf = (r) => /^page: (.+)$/m.exec(r.stdout)?.[1];
-  const pickedOn = (r) =>
-    JSON.parse(
-      /"picked":(\[[^\]]*\])/.exec(readFileSync(pageOf(r), "utf8"))[1],
-    );
+const stats = (args) => runStats(join(root, "repo"), args);
+const pageOf = (r) => /^page: (.+)$/m.exec(r.stdout)?.[1];
+/** The session ids a page was built from. */
+const pickedOn = (r) =>
+  JSON.parse(/"picked":(\[[^\]]*\])/.exec(readFileSync(pageOf(r), "utf8"))[1]);
 
+describe("run-stats.mjs --recent", () => {
   test("puts the latest sessions of every project on one page, newest first", () => {
     projects({
       "-work-alpha": [
@@ -304,5 +303,55 @@ describe("run-stats.mjs --recent", () => {
     const r = stats(["--recent", "--no-open"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("no session with a model turn");
+  });
+});
+
+describe("run-stats.mjs --session with several ids", () => {
+  test("puts the named sessions, from any project, on one page", () => {
+    projects({
+      "-work-alpha": [{ id: "aaaaaaaa-1", second: 1000 }],
+      "-work-beta": [{ id: "bbbbbbbb-2", second: 2000 }],
+    });
+    const r = stats(["--session", "bbbbbbbb-2,aaaaaaaa-1", "--no-open"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("2 sessions");
+    expect(pageOf(r)).toBe(
+      join(root, "tmp", "sessions-stats", "bbbbbbbb+2.html"),
+    );
+    expect(pickedOn(r).sort()).toEqual(["aaaaaaaa-1", "bbbbbbbb-2"]);
+  });
+
+  test("leaves out a session with no model turn, and one with no transcript", () => {
+    projects({
+      "-work-alpha": [
+        { id: "aaaaaaaa-done", second: 1000 },
+        { id: "aaaaaaaa-fresh", body: prompt, second: 2000 },
+      ],
+    });
+    const r = stats([
+      "--session",
+      "aaaaaaaa-done,aaaaaaaa-fresh,cccccccc-gone",
+      "--no-open",
+    ]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain("no transcript for session cccccccc");
+    expect(pickedOn(r)).toEqual(["aaaaaaaa-done"]);
+    expect(readdirSync(join(root, "tmp", "sessions-stats"))).toEqual([
+      "aaaaaaaa+1.html",
+    ]);
+  });
+
+  test("says so when none of them has a model turn, and leaves no store", () => {
+    projects({
+      "-work-alpha": [
+        { id: "aaaaaaaa-1", body: prompt, second: 1000 },
+        { id: "aaaaaaaa-2", body: prompt, second: 2000 },
+      ],
+    });
+    const r = stats(["--session", "aaaaaaaa-1,aaaaaaaa-2", "--no-open"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("none of the 2 sessions has a model turn");
+    const tmp = join(root, "tmp", "sessions-stats");
+    expect(existsSync(tmp) ? readdirSync(tmp) : []).toEqual([]);
   });
 });
