@@ -10,6 +10,9 @@
 // a keyboard shortcut cannot, and when two sessions of one project run at once it takes
 // the one that wrote last.
 //
+// --session also takes several ids, comma-separated, for one page over them all; one with
+// no transcript or no model turn yet is left out.
+//
 // --recent reports the latest sessions of EVERY project instead, the last written first:
 // 25 by default, or `--last <n>`, or every session written within `--since <age>` (30m,
 // 12h, 3d, 2w). `--project <text>` keeps the projects whose transcript directory contains
@@ -22,7 +25,7 @@
 // Elsewhere the file itself is opened.
 //
 // Usage:
-//   node scripts/run-stats.mjs [--session <id>] [--whole] [--no-open]
+//   node scripts/run-stats.mjs [--session <id>[,<id>...]] [--whole] [--no-open]
 //   node scripts/run-stats.mjs --recent [--last <n>] [--since <age>] [--project <text>]
 //                              [--whole] [--no-open]
 
@@ -69,6 +72,11 @@ function main() {
   sweep(TMP_ROOT);
   if (flag("recent") || value("last") || value("since") || value("project"))
     return recent();
+  const named = (value("session") || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (named.length > 1) return several(named);
 
   const here = projectSlug(REPO);
   const sessionId = value("session") || latestSession(join(PROJECTS, here));
@@ -145,6 +153,47 @@ function recent() {
     console.error(`stat: no session with a model turn under ${PROJECTS}`);
     process.exit(1);
   }
+  const report = run("run-report.mjs", [
+    "--db",
+    db,
+    "--sessions",
+    picked.join(","),
+    "--out",
+    page,
+  ]);
+  drop(db);
+
+  console.log(`${picked.length} sessions`);
+  relayUnpriced(report);
+  show(page);
+}
+
+/**
+ * Several named sessions on one page, from whichever projects they ran in. One with no
+ * transcript, or no model turn yet, is left out with a word on stderr: the page is about
+ * the others.
+ */
+function several(ids) {
+  const db = join(TMP_ROOT, `several-${process.pid}.sqlite`);
+  drop(db);
+  const picked = [];
+  for (const id of ids) {
+    const slug = slugOf(PROJECTS, id);
+    if (!slug) {
+      console.error(`stat: no transcript for session ${id.slice(0, 8)}`);
+      continue;
+    }
+    const summary = ingest(id, slug, db, tryRun);
+    if (!summary) continue;
+    picked.push(id);
+    console.log(`${summary.trim()}  ${slug}`);
+  }
+  if (!picked.length) {
+    drop(db);
+    console.error(`stat: none of the ${ids.length} sessions has a model turn`);
+    process.exit(1);
+  }
+  const page = join(TMP_ROOT, `${picked[0].slice(0, 8)}+${picked.length}.html`);
   const report = run("run-report.mjs", [
     "--db",
     db,
