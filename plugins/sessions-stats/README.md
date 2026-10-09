@@ -40,6 +40,9 @@ It reads what Claude Code still holds, so it reaches back as far as `cleanupPeri
 `/sessions-stats:stat` opens the page of the session you are in. `--whole` also counts, in a
 harness run, your own work before the first harness agent started.
 
+The script behind it takes several ids too: `run-stats.mjs --session <id>,<id>` puts those
+sessions on one page, whichever projects they ran in.
+
 Both commands run their script before the model sees anything; the model's one short turn
 only relays the link.
 
