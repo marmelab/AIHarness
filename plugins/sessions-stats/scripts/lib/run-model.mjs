@@ -34,7 +34,7 @@ import {
 
 // Raised when a derivation changes what an already-ingested run reports, so `run-ingest
 // --status` can name the runs to re-derive.
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // A session's calendar span is not its working time. A resumed session shows days, an
 // abandoned tab shows hours, and neither is harness cost: the first ingest of 78 real runs
@@ -55,6 +55,21 @@ export const CALL_CAP_MS = 15 * 60 * 1000;
 
 // Above this, a gap is an incident with its own cause, not coordination overhead.
 export const STALL_MS = 5 * 60 * 1000;
+
+// Characters of visible output per output token, for a response whose final usage the
+// transcript lacks. Prose and code run 3.5 to 4; the higher figure keeps the estimate low.
+export const CHARS_PER_OUTPUT_TOKEN = 4;
+
+/** What a content block shows of the output it cost: thinking, text, a call's input. */
+function visibleChars(block) {
+  if (block?.type === "thinking") return String(block.thinking || "").length;
+  if (block?.type === "text") return String(block.text || "").length;
+  if (block?.type === "tool_use")
+    return (
+      String(block.name || "").length + JSON.stringify(block.input ?? {}).length
+    );
+  return 0;
+}
 
 /**
  * The quiet stretches between spans, split at STALL_MS.
@@ -255,6 +270,9 @@ export function parseTranscript(body, classify) {
           0,
         cw1h: usage.cache_creation?.ephemeral_1h_input_tokens || 0,
         out: 0,
+        final: false,
+        chars: 0,
+        blocks: new Set(),
         calls: [],
       };
       byId.set(id, turn);
@@ -262,6 +280,14 @@ export function parseTranscript(body, classify) {
     }
     // Output is the running total on each entry of the same response, not an increment.
     turn.out = Math.max(turn.out, usage.output_tokens || 0);
+    if (event.message.stop_reason) turn.final = true;
+    for (const block of event.message.content || []) {
+      const chars = visibleChars(block);
+      const key = `${block?.type}:${block?.id || ""}:${chars}:${JSON.stringify(block).slice(0, 80)}`;
+      if (!chars || turn.blocks.has(key)) continue;
+      turn.blocks.add(key);
+      turn.chars += chars;
+    }
     if (usage.iterations)
       turn.out = usage.iterations.reduce(
         (s, it) => s + (it.output_tokens || 0),
@@ -285,6 +311,16 @@ export function parseTranscript(body, classify) {
         signature: callSignature(block.name, block.input),
       });
     }
+  }
+
+  // A subagent transcript keeps the usage of a response's first chunk only: no entry
+  // carries a stop_reason, and output_tokens stays at a handful while the response wrote
+  // whole files. Its content is all there, so such a response is charged at least what it
+  // visibly wrote.
+  for (const t of order) {
+    if (!t.final && t.chars)
+      t.out = Math.max(t.out, Math.ceil(t.chars / CHARS_PER_OUTPUT_TOKEN));
+    delete t.blocks;
   }
 
   const turns = order
@@ -722,6 +758,7 @@ export function buildAgent({ agentId, body, meta = {}, classify }) {
       : agentType || "main",
     description: meta.description || null,
     parentToolUseId: meta.toolUseId || null,
+    parentAgentId: meta.parentAgentId || null,
     spawnDepth: Number.isFinite(meta.spawnDepth) ? meta.spawnDepth : null,
     requestShape: meta.requestShape || null,
     model: models[0] || "",
@@ -820,6 +857,37 @@ export function detectRedispatches(agents) {
 }
 
 /**
+ * Name the agents a forked skill started.
+ *
+ * A skill that runs forked (the built-in /code-review) starts a subagent that no Agent call
+ * names: its sidecar has a parent but no tool_use id, and its type is the generic one the
+ * agents that write code also carry, so every figure per role mixed the two. Each is tied
+ * to the parent's Skill call that was running when it started, and named after that skill.
+ *
+ * @param {object[]} agents built by buildAgent, changed in place
+ */
+export function nameSkillForks(agents) {
+  for (const a of agents) {
+    if (a.parentToolUseId || !a.parentAgentId || !Number.isFinite(a.startedAt))
+      continue;
+    const parent = agents.find(
+      (p) =>
+        p.agentId === a.parentAgentId ||
+        p.agentId === "agent-" + a.parentAgentId,
+    );
+    const call = (parent?.callRows || []).find(
+      (c) =>
+        c.tool === "Skill" && c.start <= a.startedAt && a.startedAt <= c.end,
+    );
+    if (!call) continue;
+    const skill = String(call.summary || "skill");
+    a.parentToolUseId = call.toolUseId;
+    a.role = skill + " fork";
+    a.description = a.description || "/" + skill + " (fork)";
+  }
+}
+
+/**
  * Fold a whole session into the shape the store writes.
  *
  * Pure: the caller does the reading, so a test builds a run from strings and the CLI
@@ -869,6 +937,7 @@ export function buildRun({
       }),
     );
 
+  nameSkillForks(rows);
   const withTurns = rows.filter((a) => a.turns > 0);
 
   // THE RUN WINDOW. A session is not a run. When a session dispatched harness agents, the

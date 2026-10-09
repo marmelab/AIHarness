@@ -11,6 +11,7 @@ import {
   activeSpans,
   buildAgent,
   CALL_CAP_MS,
+  CHARS_PER_OUTPUT_TOKEN,
   buildRun,
   commonPrefixRatio,
   detectLoops,
@@ -101,6 +102,44 @@ describe("parseTranscript", () => {
     const { turns } = parseTranscript(body, classify);
     expect(turns).toHaveLength(1);
     expect(turns[0].ctx).toBe(1000);
+  });
+
+  test("a response with no final usage is charged at least what it visibly wrote", () => {
+    // A subagent transcript keeps the first chunk's usage: no stop_reason, 4 output tokens
+    // on a response that thought for 4000 characters and wrote a 2000-character edit.
+    const edit = {
+      file_path: "/a.ts",
+      old_string: "x",
+      new_string: "y".repeat(2000),
+    };
+    const body = [
+      assistant(
+        0,
+        "msg-1",
+        [{ type: "thinking", thinking: "t".repeat(4000) }],
+        {
+          output_tokens: 4,
+        },
+      ),
+      assistant(100, "msg-1", [toolUse("t1", "Edit", edit)], {
+        output_tokens: 4,
+      }),
+      result(600, "t1"),
+    ].join("\n");
+    const { turns } = parseTranscript(body, classify);
+    const chars = 4000 + "Edit".length + JSON.stringify(edit).length;
+    expect(turns[0].out).toBe(Math.ceil(chars / CHARS_PER_OUTPUT_TOKEN));
+  });
+
+  test("a response with a stop_reason keeps its recorded output", () => {
+    const line = JSON.parse(
+      assistant(0, "msg-1", [{ type: "text", text: "w".repeat(4000) }], {
+        output_tokens: 40,
+      }),
+    );
+    line.message.stop_reason = "end_turn";
+    const { turns } = parseTranscript(JSON.stringify(line), classify);
+    expect(turns[0].out).toBe(40);
   });
 
   test("a call runs from its tool_use to its tool_result", () => {
@@ -505,6 +544,47 @@ describe("buildRun", () => {
     expect(run.agents.map((a) => a.role)).toEqual(["main", "developer"]);
     expect(run.turnCount).toBe(2);
     expect(run.hasHooksLog).toBe(false);
+  });
+
+  test("an agent a forked skill started is named after the skill", () => {
+    const lane = [
+      assistant(0, "msg-1", [
+        toolUse("s1", "Skill", { skill: "code-review", args: "high a..b" }),
+      ]),
+      result(9000, "s1"),
+    ].join("\n");
+    const fork = [
+      assistant(2000, "msg-2", [toolUse("t1", "Read", { file_path: "/a.ts" })]),
+      result(3000, "t1"),
+    ].join("\n");
+    const run = buildRun({
+      sessionId: "s1",
+      slug: "-p",
+      agents: [
+        {
+          agentId: "agent-lane1",
+          body: lane,
+          meta: { agentType: "reviewer", toolUseId: "toolu_x" },
+        },
+        {
+          agentId: "agent-fork1",
+          body: fork,
+          meta: { agentType: "general-purpose", parentAgentId: "lane1" },
+        },
+        // A general-purpose agent that an Agent call started stays what it is.
+        {
+          agentId: "agent-dev1",
+          body,
+          meta: { agentType: "general-purpose", toolUseId: "toolu_y" },
+        },
+      ],
+      classify,
+    });
+    const by = Object.fromEntries(run.agents.map((a) => [a.agentId, a]));
+    expect(by["agent-fork1"].role).toBe("code-review fork");
+    expect(by["agent-fork1"].description).toBe("/code-review (fork)");
+    expect(by["agent-fork1"].parentToolUseId).toBe("s1");
+    expect(by["agent-dev1"].role).toBe("general-purpose");
   });
 
   test("agents running at the same time cost one wall-clock minute, not two", () => {
