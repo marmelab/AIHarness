@@ -48,6 +48,16 @@ describe("bash", () => {
     expect(bash("cd /wt && L=x grep -rn foo src/")).toBe("explore");
   });
 
+  test("sed printing a range is a read, sed editing in place is not", () => {
+    expect(bash("sed -n 40,80p src/a.ts")).toBe("explore");
+    expect(bash("cd /wt && sed -n 1,20p a.ts; grep -n foo b.ts | head")).toBe(
+      "explore",
+    );
+    expect(bash("sed -n -i 's/a/b/p' a.ts")).toBe("exec");
+    expect(bash("sed -i 's/a/b/' a.ts")).toBe("exec");
+    expect(bash("sed -n 1,5p a.ts | node transform.mjs")).toBe("exec");
+  });
+
   test("a pipeline into a writer is not exploration", () => {
     expect(bash("grep -rn foo src/ | node transform.mjs")).toBe("exec");
   });

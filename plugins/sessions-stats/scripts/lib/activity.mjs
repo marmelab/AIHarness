@@ -36,6 +36,18 @@ export const SYNTHETIC = Object.freeze({
 });
 
 /**
+ * `sed -n` without `-i` only prints: as a read it is a `cat`. The harness's classifier
+ * leaves every `sed` out of its free commands, rightly for a work budget since `sed -i`
+ * writes, but here that filed an agent's file reads (`sed -n 40,80p a.ts`) as execution.
+ * @param {string} text
+ */
+function sedPrintsAsCat(text) {
+  return text.replace(/\bsed\s+-n\b([^;&|]*)/g, (m, rest) =>
+    /(^|\s)-i|--in-place/.test(rest) ? m : "cat" + rest,
+  );
+}
+
+/**
  * Load the rule table.
  * @param {string} [file]
  * @returns {object}
@@ -108,7 +120,8 @@ export function makeClassifier({
         continue;
       }
       if (rule.free) {
-        if (isFreeCommand(text)) return rule.activity;
+        if (isFreeCommand(text) || isFreeCommand(sedPrintsAsCat(text)))
+          return rule.activity;
         continue;
       }
       return rule.activity; // a rule with neither match nor free is the bash default
