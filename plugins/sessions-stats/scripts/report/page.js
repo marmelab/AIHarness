@@ -293,6 +293,13 @@ const L = {
       "Ce que les agents ont FAIT : l'attente et l'inactif en sont absents par construction. Chaque appel est classé par son outil et, pour Bash, par ce que fait la commande.",
     ],
   ],
+  pCostActivity: [
+    ["Cost by activity", "Coût par activité"],
+    [
+      "Each billed turn of the run window, charged whole to the activity most of its calls belong to; a turn with no call is thinking. A turn mostly pays to re-read its context, so an activity spread over many turns costs a lot even when its results are small. The role column names who spent the most on it. Click a row for its calls.",
+      "Chaque tour facturé de la fenêtre du run, imputé en entier à l'activité de la plupart de ses appels ; un tour sans appel est de la réflexion. Un tour paie surtout la relecture de son contexte, donc une activité étalée sur beaucoup de tours coûte cher même quand ses résultats sont petits. La colonne rôle nomme celui qui y a le plus dépensé. Cliquez une ligne pour ses appels.",
+    ],
+  ],
   pCostRole: [
     ["Cost by role", "Coût par rôle"],
     [
@@ -416,6 +423,8 @@ const S = {
   nobodyWorking: ["nobody was working", "personne ne travaillait"],
   atLeastOne: ["at least one agent working", "au moins un agent au travail"],
   hRole: ["role", "rôle"],
+  hTopRole: ["top role", "rôle principal"],
+  hShare: ["share", "part"],
   hPreamble: ["preamble", "préambule"],
   hKind: ["kind", "type"],
   redactedBadge: ["redacted: figures only", "expurgé : chiffres seulement"],
@@ -941,6 +950,69 @@ function modelsTable(d) {
       (cells, i) => ' class="seg" data-model="' + esc(rows[i].model) + '"',
     ) +
     "</div>"
+  );
+}
+
+/** Per activity: what its turns cost, and which role spent the most on it. */
+function activityCostRows(d) {
+  const by = new Map();
+  for (const r of d.activityCost || []) {
+    const a = by.get(r.activity) || {
+      activity: r.activity,
+      usd: 0,
+      turns: 0,
+      roles: new Map(),
+    };
+    a.usd += r.usd || 0;
+    a.turns += r.turns || 0;
+    a.roles.set(r.role, (a.roles.get(r.role) || 0) + (r.usd || 0));
+    by.set(r.activity, a);
+  }
+  return [...by.values()]
+    .map((a) => ({
+      ...a,
+      roles: [...a.roles.entries()].sort((x, y) => y[1] - x[1]),
+    }))
+    .sort((a, b) => b.usd - a.usd || b.turns - a.turns);
+}
+
+function activityCostTable(d) {
+  const rows = activityCostRows(d);
+  const total = rows.reduce((s, r) => s + r.usd, 0);
+  const top = rows.length ? rows[0].usd : 0;
+  return topTable(
+    [tr("hActivity"), "$", tr("hShare"), tr("hTurns"), tr("hTopRole")],
+    rows.map((r) => [
+      '<i class="dot" style="background:' +
+        color(r.activity) +
+        '"></i> ' +
+        esc(actLabel(r.activity)),
+      usd(r.usd) + ' <span class="pc">' + pct(r.usd, total) + "%</span>",
+      '<span class="sbarw"><span class="sbar" style="width:' +
+        (top > 0 ? Math.max(2, Math.round((r.usd / top) * 100)) : 0) +
+        "%;background:" +
+        color(r.activity) +
+        '"></span></span>',
+      r.turns,
+      r.roles.length
+        ? esc(r.roles[0][0] || "?") +
+          ' <span class="pc">' +
+          pct(r.roles[0][1], r.usd) +
+          "%</span>"
+        : "",
+    ]),
+    (cells, i) =>
+      ' class="seg" data-activity="' +
+      esc(rows[i].activity) +
+      '" data-tip="' +
+      esc(actLabel(rows[i].activity) + " · " + tr("clickForCalls")) +
+      '" data-tip2="' +
+      esc(
+        rows[i].roles
+          .map(([role, v]) => (role || "?") + " " + usd(v))
+          .join(" · "),
+      ) +
+      '"',
   );
 }
 
@@ -1999,6 +2071,7 @@ function render(id) {
       "c2",
     ),
   );
+  P.push(panelK("pCostActivity", activityCostTable(d), "c3"));
   P.push(panelK("pHistogram", histogram(dd, ttl("pHistogram")), "c2"));
   // Their duration is the child's or the human's, so they rank apart from the tools the
   // agent actually ran: sorted by time they sat on top for the wrong reason.
