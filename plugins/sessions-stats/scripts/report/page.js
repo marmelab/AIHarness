@@ -314,6 +314,13 @@ const L = {
       "Tous les appels chronométrés, en échelle log : la plupart sont rapides, quelques uns non, ce qu'un axe linéaire cache. Survolez une barre pour sa plage et son compte.",
     ],
   ],
+  pCoverage: [
+    ["Starting context known for", "Contexte de départ connu pour"],
+    [
+      "Agents whose transcript records what their first context holds, out of the agents that ran a turn in the window. The panels below describe only the known ones.",
+      "Agents dont le transcript enregistre ce que contient leur premier contexte, sur ceux qui ont joué un tour dans la fenêtre. Les panneaux suivants ne décrivent que les connus.",
+    ],
+  ],
   pCtxFill: [
     [
       "What fills a context before the task",
@@ -472,6 +479,10 @@ const S = {
   noBreakdown: [
     "the transcript records this part as one size, with no list of what makes it up",
     "le transcript enregistre cette part comme une taille unique, sans liste de ce qui la compose",
+  ],
+  compositionKnown: [
+    "agents with a known starting context",
+    "agents au contexte de départ connu",
   ],
   inventoryOnly: [
     "listed to every agent of the run; the transcript records the names, not a size each",

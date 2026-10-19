@@ -954,3 +954,71 @@ describe("a model without a rate", () => {
     expect(script).toContain('tr("pricedStale")');
   });
 });
+
+describe("the page script", () => {
+  // The page script, run against a built page's payload with just enough of a DOM for its
+  // top level, handing back the functions under test.
+  const PAGE = join(HERE, "..", "report", "page.js");
+  const EXPORTS = [];
+  const pageApi = (html, { vscode = null, byId = {} } = {}) => {
+    const payload = html
+      .match(
+        /<script type="application\/json" id="data">([\s\S]*?)<\/script>/,
+      )[1]
+      .replace(/<\\\/script/g, "</script");
+    const el = (id) =>
+      byId[id] || {
+        textContent: id === "data" ? payload : "",
+        children: [],
+        dataset: {},
+        classList: { add() {}, remove() {}, contains: () => false },
+        style: {},
+        addEventListener() {},
+        setAttribute() {},
+        querySelectorAll: () => [],
+        appendChild() {},
+      };
+    const listeners = {};
+    const document = {
+      getElementById: el,
+      addEventListener() {},
+      createElement: () => el(""),
+    };
+    const window = {
+      addEventListener: (type, fn) => (listeners[type] = fn),
+    };
+    const run = new Function(
+      "document",
+      "window",
+      "localStorage",
+      "navigator",
+      "acquireVsCodeApi",
+      readFileSync(PAGE, "utf8") +
+        "\nreturn { " +
+        [...EXPORTS, "D", "currentRun", "L", "S"].join(", ") +
+        " };",
+    );
+    const api = run(
+      document,
+      window,
+      { getItem: () => null, setItem() {} },
+      { language: "en" },
+      vscode ? () => vscode : undefined,
+    );
+    return { ...api, d: api.D.detail[api.currentRun], listeners };
+  };
+
+  test("every label the page asks for is defined", () => {
+    // A missing one throws inside render, and the page reads "This report failed to draw":
+    // the coverage panel's title did, for every session with an agent of unknown context.
+    const { L, S } = pageApi(build().html);
+    const src = readFileSync(PAGE, "utf8");
+    const keys = (re) => [...new Set([...src.matchAll(re)].map((m) => m[1]))];
+    const panels = keys(/\b(?:ttl|tipOf|panelK)\("(\w+)"/g);
+    const strings = keys(/\btr\("(\w+)"\)/g);
+    expect(panels.length).toBeGreaterThan(5);
+    expect(strings.length).toBeGreaterThan(20);
+    expect(panels.filter((k) => !L[k])).toEqual([]);
+    expect(strings.filter((k) => !S[k])).toEqual([]);
+  });
+});
