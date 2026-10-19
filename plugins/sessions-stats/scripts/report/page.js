@@ -488,6 +488,34 @@ const S = {
     "listed to every agent of the run; the transcript records the names, not a size each",
     "listées à chaque agent du run ; le transcript enregistre les noms, pas une taille par skill",
   ],
+  ctxAskTab: [
+    "Ask Claude how to shrink it",
+    "Demander à Claude comment l'alléger",
+  ],
+  ctxAskCopy: [
+    "Copy a prompt asking Claude how to shrink it",
+    "Copier un prompt qui demande à Claude comment l'alléger",
+  ],
+  ctxAskSent: [
+    "opened in a new Claude tab",
+    "ouvert dans un nouvel onglet Claude",
+  ],
+  ctxAskCopied: ["copied", "copié"],
+  ctxAskFailed: [
+    "the clipboard refused: copy it from here",
+    "le presse-papiers a refusé : le copier ici",
+  ],
+  ctxAskWhoRole: ["the {role} agents", "les agents {role}"],
+  ctxAskWhoAll: ["every agent", "tous les agents"],
+  ctxAskHead: [
+    "Shrink what {who} start with in this project. Their {part} part weighs {kb} per agent ({n} agents in the session {session}). The largest items:",
+    "Allège ce que {who} reçoivent au démarrage dans ce projet. Leur part {part} pèse {kb} par agent ({n} agents dans la session {session}). Les plus gros éléments :",
+  ],
+  ctxAskMore: ["and {n} smaller ones", "et {n} plus petits"],
+  ctxAskBody: [
+    "For each item, say where it comes from (a file, a plugin, an MCP server, a built-in tool) and whether these agents need it, then propose the change that removes or shrinks it: a rule scoped with paths:, rarely needed text moved into a skill, a plugin or MCP server turned off for this project, duplicated text cut. Give the KB each change saves, largest first. Propose only: change nothing until I approve.",
+    "Pour chaque élément, dis d'où il vient (un fichier, un plugin, un serveur MCP, un outil intégré) et si ces agents en ont besoin, puis propose le changement qui le retire ou le réduit : une règle restreinte avec paths:, un texte rarement utile déplacé dans un skill, un plugin ou un serveur MCP désactivé pour ce projet, un texte dupliqué supprimé. Donne les KB que chaque changement économise, du plus gros au plus petit. Propose seulement : ne modifie rien avant mon accord.",
+  ],
   dragToZoom: [
     "drag across the chart to zoom in",
     "glissez sur le graphe pour zoomer",
@@ -701,6 +729,15 @@ const ttl = (k) => L[k][0][lang];
 const tipOf = (k) => L[k][1][lang];
 const actLabel = (a) => (lang ? ACT_FR[a] || a : a);
 const ctxLabel = (c) => (lang ? CTX_FR[c] || c : c);
+
+// Inside the claude-buttons webview the page hands a prompt to the extension, which opens it
+// in a new Claude tab. Anywhere else the prompt goes to the clipboard.
+let vscodeApi = null;
+try {
+  if (typeof acquireVsCodeApi === "function") vscodeApi = acquireVsCodeApi();
+} catch {
+  /* acquired twice: the clipboard path still works */
+}
 
 /* Fixed slot per activity: a colour means the same thing in every panel and every run.
    Past eight, an activity folds into "other" rather than being handed a ninth hue. */
@@ -1199,15 +1236,25 @@ function histogram(values, label) {
 /**
  * A top-N table. rowAttrs(cells, i) may return attributes for the row, which is how a
  * row becomes hoverable (its full, untruncated content) or clickable (a drill-down).
+ * cols gives each column its class; by default the first one takes what is left of the
+ * width and truncates, and the others are right-aligned figures.
  */
-function topTable(head, rows, rowAttrs) {
+function topTable(head, rows, rowAttrs, cols) {
   if (!rows.length) return '<div class="sub2">' + tr("nothing") + "</div>";
   const attrOf = (cells, i) =>
     typeof rowAttrs === "function" ? rowAttrs(cells, i) : rowAttrs || "";
+  const colOf = (j) => (cols ? cols[j] || "" : j ? "r" : "trunc");
   return (
     '<div class="scroll"><table><thead><tr>' +
     head
-      .map((h, i) => '<th class="' + (i ? "r" : "") + '">' + esc(h) + "</th>")
+      .map(
+        (h, i) =>
+          '<th class="' +
+          colOf(i).replace("trunc", "").trim() +
+          '">' +
+          esc(h) +
+          "</th>",
+      )
       .join("") +
     "</tr></thead><tbody>" +
     rows
@@ -1217,10 +1264,7 @@ function topTable(head, rows, rowAttrs) {
           attrOf(cells, i) +
           ">" +
           cells
-            .map(
-              (c, j) =>
-                '<td class="' + (j ? "r" : "trunc") + '">' + c + "</td>",
-            )
+            .map((c, j) => '<td class="' + colOf(j) + '">' + c + "</td>")
             .join("") +
           "</tr>",
       )
@@ -1321,7 +1365,7 @@ function startingContext(d) {
       "</text>";
   });
   return (
-    '<svg viewBox="0 0 ' +
+    '<svg id="ctxStart" viewBox="0 0 ' +
     W +
     " " +
     H +
@@ -2384,6 +2428,12 @@ function drill(sel) {
     return;
   }
   host.innerHTML = html;
+  for (const table of host.querySelectorAll("table")) resizableColumns(table);
+  const ask = document.getElementById("ctxAsk");
+  if (ask && sel.ctx)
+    ask.addEventListener("click", () =>
+      askClaude(ctxPrompt(d, sel.ctx, sel.role)),
+    );
   drawer.scrollTop = 0;
   drawer.classList.add("open");
   drawer.setAttribute("aria-hidden", "false");
@@ -2657,7 +2707,8 @@ function drillStall(g) {
  */
 const CTX_PREFIX = { tools: "tool:", skills: "skill:", instructions: "file:" };
 
-function drillContext(d, component, role) {
+/** The items of one context part, for one role or deduplicated over every role. */
+function contextItemsOf(d, component, role) {
   const prefix = CTX_PREFIX[component];
   // Filtered to the role whose bar was clicked. Without it the list contradicted the bar:
   // a planner's 12 KB of tools opened onto the 125 KB union of every role's.
@@ -2679,6 +2730,12 @@ function drillContext(d, component, role) {
       (a, b) => (b.bytes || 0) - (a.bytes || 0),
     );
   }
+  return items.map((i) => ({ ...i, name: i.component.slice(prefix.length) }));
+}
+
+function drillContext(d, component, role) {
+  const prefix = CTX_PREFIX[component];
+  const items = contextItemsOf(d, component, role);
   const total = items.reduce((sum, i) => sum + (i.bytes || 0), 0);
   const sized = items.some((i) => i.bytes > 0);
 
@@ -2694,23 +2751,163 @@ function drillContext(d, component, role) {
         : (sized
             ? ""
             : '<div class="sub2">' + esc(tr("inventoryOnly")) + "</div>") +
+          // The name is what the reader came for: it keeps its width, and the
+          // description is the column that gives way.
           topTable(
             sized ? [tr("hItem"), tr("hSize"), tr("hWhat")] : [tr("hItem")],
             items.map((i) =>
               sized
                 ? [
-                    '<span class="mono">' +
-                      esc(i.component.slice(prefix.length)) +
-                      "</span>",
+                    '<span class="mono">' + esc(i.name) + "</span>",
                     kb(i.bytes),
                     '<span class="sub2">' + esc(i.detail || "") + "</span>",
                   ]
-                : [
-                    '<span class="mono">' +
-                      esc(i.component.slice(prefix.length)) +
-                      "</span>",
-                  ],
+                : ['<span class="mono">' + esc(i.name) + "</span>"],
             ),
-          ))
+            (cells, j) =>
+              ' data-tip="' +
+              esc(items[j].name) +
+              '" data-tip2="' +
+              esc((items[j].detail || "").slice(0, 400)) +
+              '"',
+            sized ? ["keep", "r", "trunc"] : ["keep"],
+          ) +
+          (sized ? askButton() : ""))
   );
 }
+
+/* --- a drawer table's columns, resized by hand ---
+   The drawer is narrow and a description can be long: whatever the default split, some
+   reader needs the other one. Dragging a header's right edge moves that border. */
+const COL_MIN = 36;
+
+/**
+ * The widths once the border right of column i has moved by dx. The last column gives or
+ * takes the difference, so the table keeps its width until that column is down to min;
+ * past that the table grows and scrolls.
+ */
+function colWidths(widths, i, dx, min) {
+  const w = widths.slice();
+  const last = w.length - 1;
+  w[i] = Math.max(min, widths[i] + dx);
+  if (i !== last) w[last] = Math.max(min, widths[last] - (w[i] - widths[i]));
+  return w;
+}
+
+function resizableColumns(table) {
+  const ths = [...table.querySelectorAll("thead th")];
+  if (ths.length < 2) return;
+  let widths = ths.map((th) => th.getBoundingClientRect().width);
+  // Not laid out (a detached or hidden host): fixing zero widths would collapse the table.
+  if (!widths.every((w) => w > 0)) return;
+  const apply = () => {
+    ths.forEach((th, k) => (th.style.width = widths[k] + "px"));
+    table.style.width = widths.reduce((a, b) => a + b, 0) + "px";
+  };
+  table.classList.add("fixed");
+  apply();
+  ths.slice(0, -1).forEach((th, i) => {
+    const grip = document.createElement("span");
+    grip.className = "colgrip";
+    grip.setAttribute("aria-hidden", "true");
+    th.appendChild(grip);
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      grip.classList.add("on");
+      const x0 = e.clientX;
+      const start = widths;
+      const move = (ev) => {
+        widths = colWidths(start, i, ev.clientX - x0, COL_MIN);
+        apply();
+      };
+      const up = () => {
+        grip.classList.remove("on");
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    });
+  });
+}
+
+/* --- from a context part to a question for Claude ---
+   The list says what weighs. Which item these agents can do without, and how to take it out
+   (a rule scoped with paths:, a skill, a plugin turned off), is a question about the
+   project, so it goes to Claude, asked to propose and to change nothing on its own. */
+const ASK_ITEMS = 15;
+
+const fill = (text, values) =>
+  text.replace(/\{(\w+)\}/g, (m, k) => (k in values ? String(values[k]) : m));
+
+function askButton() {
+  return (
+    '<div class="ask"><button type="button" id="ctxAsk">' +
+    esc(tr(vscodeApi ? "ctxAskTab" : "ctxAskCopy")) +
+    '</button> <span class="sub2" id="ctxAskSaid"></span></div>'
+  );
+}
+
+/** The prompt that asks Claude how to shrink one part of a role's starting context. */
+function ctxPrompt(d, component, role) {
+  const items = contextItemsOf(d, component, role).filter((i) => i.bytes > 0);
+  const agents = new Set(
+    d.context.filter((c) => !role || c.role === role).map((c) => c.agent_id),
+  ).size;
+  const run = (D.runs || []).find((r) => r.session_id === currentRun);
+  const lines = items
+    .slice(0, ASK_ITEMS)
+    .map((i) => "- " + i.name + ": " + kb(i.bytes));
+  if (items.length > ASK_ITEMS)
+    lines.push("- " + fill(tr("ctxAskMore"), { n: items.length - ASK_ITEMS }));
+  return (
+    fill(tr("ctxAskHead"), {
+      who: role ? fill(tr("ctxAskWhoRole"), { role }) : tr("ctxAskWhoAll"),
+      part: ctxLabel(component),
+      kb: kb(items.reduce((sum, i) => sum + i.bytes, 0)),
+      n: agents,
+      session: (run && run.title) || currentRun,
+    }) +
+    "\n" +
+    lines.join("\n") +
+    "\n\n" +
+    tr("ctxAskBody")
+  );
+}
+
+function askClaude(prompt) {
+  const said = document.getElementById("ctxAskSaid");
+  const say = (k) => {
+    if (said) said.textContent = tr(k);
+  };
+  if (vscodeApi) {
+    vscodeApi.postMessage({ type: "claude-prompt", prompt });
+    return say("ctxAskSent");
+  }
+  const copied = navigator.clipboard
+    ? navigator.clipboard.writeText(prompt)
+    : Promise.reject(new Error("no clipboard"));
+  copied.then(
+    () => say("ctxAskCopied"),
+    () => {
+      say("ctxAskFailed");
+      const box = document.createElement("textarea");
+      box.className = "asktext";
+      box.readOnly = true;
+      box.value = prompt;
+      (said || document.getElementById("ctxAsk")).after(box);
+      box.select();
+    },
+  );
+}
+
+// claude-buttons opens the page on the part it was asked about.
+window.addEventListener("message", (e) => {
+  const m = e.data;
+  if (!m || m.type !== "focus" || m.panel !== "context") return;
+  const el = document.getElementById("ctxStart");
+  if (el) (el.closest(".p") || el).scrollIntoView({ block: "start" });
+});
