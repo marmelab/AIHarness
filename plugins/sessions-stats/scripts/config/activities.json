@@ -4,7 +4,9 @@
     "What an agent was DOING, per tool call. Read by scripts/lib/activity.mjs.",
     "This file is the extension point: adding a bucket is one entry here, no code change.",
     "Order matters inside `bash`: the first matching rule wins, so the specific ones",
-    "come before the generic ones and the `free` rule stays second to last."
+    "come before the generic ones and the `free` rule stays second to last.",
+    "Rules match the command with its heredoc bodies cut out: a body is a file's text or a",
+    "script's, not a command. `heredocWrites` matches a heredoc that writes a file."
   ],
   "byTool": {
     "Agent": "dispatch",
@@ -53,6 +55,7 @@
       "match": "\\b(npm|pnpm|yarn|bun)\\s+(run\\s+)?(test|typecheck|lint|format|check)\\b"
     },
     { "activity": "git", "match": "(^|\\|\\||&&|;|\\s)git(\\s|$)" },
+    { "activity": "write", "heredocWrites": true },
     { "activity": "explore", "free": true },
     { "activity": "exec" }
   ],
