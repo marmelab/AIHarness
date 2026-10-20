@@ -12,6 +12,7 @@ import {
   callSignature,
   loadRules,
   makeClassifier,
+  splitHeredocs,
   validateCommandsFrom,
 } from "../lib/activity.mjs";
 
@@ -118,6 +119,80 @@ describe("project validation commands", () => {
     expect(withProject("Bash", { command: "cd /wt && make verify" })).toBe(
       "validate",
     );
+  });
+});
+
+describe("heredocs", () => {
+  // A heredoc body is a file's text or a script's, not a command: matched as one, the
+  // agent rewriting a test file filed its edit as validation, because the file imports
+  // vitest.
+  const pythonEdit = [
+    "python3 - <<'EOF'",
+    "from pathlib import Path",
+    "p = Path('src/play.test.tsx')",
+    "p.write_text(p.read_text().replace('a', 'b'))",
+    '# import { page } from "vitest/browser"; git stash',
+    "EOF",
+  ].join("\n");
+
+  test("a script that writes a file is a write, whatever its text names", () => {
+    expect(bash(pythonEdit)).toBe("write");
+  });
+
+  test("a heredoc redirected into a file is a write", () => {
+    expect(
+      bash(
+        "cat > src/a.test.ts <<'EOF'\nimport { test } from \"vitest\";\nEOF",
+      ),
+    ).toBe("write");
+    expect(bash("cat <<EOF >> notes.md\nrun git rebase\nEOF")).toBe("write");
+    expect(bash("tee src/a.ts <<EOF\nexport {};\nEOF")).toBe("write");
+  });
+
+  test("a heredoc that writes nothing is not a write", () => {
+    expect(bash("python3 - <<'EOF'\nimport json\nprint(1)\nEOF")).toBe("exec");
+    expect(bash("node - <<EOF 2>&1\nconsole.log(1)\nEOF")).toBe("exec");
+    expect(bash("node - <<EOF > /dev/null\nx()\nEOF")).toBe("exec");
+    expect(
+      bash("pg_dump > a.sql; python3 - a.sql <<'EOF'\nprint(1)\nEOF"),
+    ).toBe("exec");
+  });
+
+  test("the command around the heredoc still decides", () => {
+    expect(bash(`${pythonEdit}\nnpx vitest run src/play.test.tsx`)).toBe(
+      "validate",
+    );
+    expect(bash("python3 - <<'EOF' && npm test\nprint(1)\nEOF")).toBe(
+      "validate",
+    );
+    // A commit message naming vitest is a commit.
+    expect(
+      bash("git commit -m \"$(cat <<'EOF'\nfix: vitest config\nEOF\n)\""),
+    ).toBe("git");
+  });
+
+  test("project validation commands are not matched inside a body", () => {
+    const withProject = makeClassifier({ validateCommands: ["make verify"] });
+    expect(
+      withProject("Bash", {
+        command: "cat > Makefile <<EOF\nmake verify\nEOF",
+      }),
+    ).toBe("write");
+  });
+
+  test("the split keeps every line outside the bodies", () => {
+    expect(splitHeredocs("a <<-X\n\tb\n\tX\nc <<< d")).toEqual({
+      outside: "a <<-X\nc <<< d",
+      bodies: ["\tb"],
+    });
+    expect(splitHeredocs("a <<X <<'Y'\nb\nX\nc\nY\nd")).toEqual({
+      outside: "a <<X <<'Y'\nd",
+      bodies: ["b", "c"],
+    });
+    expect(splitHeredocs("a <<X\nb")).toEqual({
+      outside: "a <<X",
+      bodies: ["b"],
+    });
   });
 });
 

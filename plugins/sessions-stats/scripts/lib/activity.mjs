@@ -48,6 +48,57 @@ function sedPrintsAsCat(text) {
 }
 
 /**
+ * A command split from its heredoc bodies.
+ *
+ * A body is data: the text of a file being written, a script fed to python. Matched as part
+ * of the command, a test file's `import { page } from "vitest/browser"` filed its edit as
+ * validation, and a script that mentions git filed it as git.
+ *
+ * @param {string} command
+ * @returns {{outside: string, bodies: string[]}}
+ */
+export function splitHeredocs(command) {
+  const lines = String(command ?? "").split("\n");
+  const outside = [];
+  const bodies = [];
+  for (let i = 0; i < lines.length; i++) {
+    outside.push(lines[i]);
+    // `<<<` is a here-string: its word stays on the line.
+    for (const [, dash, , word] of lines[i].matchAll(
+      /(?<!<)<<(?!<)(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2/g,
+    )) {
+      const body = [];
+      while (++i < lines.length) {
+        if ((dash ? lines[i].replace(/^\t+/, "") : lines[i]) === word) break;
+        body.push(lines[i]);
+      }
+      bodies.push(body.join("\n"));
+    }
+  }
+  return { outside: outside.join("\n"), bodies };
+}
+
+// A script that opens a file for writing, in python or node.
+const BODY_WRITES =
+  /\bopen\([^)\n]*,\s*['"][wax]|\.write_(text|bytes)\(|\bwriteFile(Sync)?\(/;
+// `cat > f <<EOF`, `cat <<EOF >> f`, `tee f <<EOF`; not `2>&1` nor `> /dev/null`.
+const LINE_WRITES =
+  /\btee\s+(-a\s+)?[^\s-]|(^|[^\d&>])>>?\s*(?!&|\/dev\/null)[^\s&|;]/;
+
+/**
+ * Whether a command's heredoc writes a file: redirected into one, or a script that does.
+ * Only the command the heredoc feeds counts: in `pg_dump > a.sql; python3 - <<EOF` the
+ * redirect is pg_dump's.
+ * @param {{outside: string, bodies: string[]}} split
+ */
+function heredocWrites({ outside, bodies }) {
+  if (bodies.some((b) => BODY_WRITES.test(b))) return true;
+  return outside
+    .split(/\n|&&|\|\||;|\|/)
+    .some((cmd) => /(?<!<)<<(?!<)/.test(cmd) && LINE_WRITES.test(cmd));
+}
+
+/**
  * Load the rule table.
  * @param {string} [file]
  * @returns {object}
@@ -102,6 +153,7 @@ export function makeClassifier({
   const bashRules = (rules.bash || []).map((r) => ({
     activity: r.activity,
     free: r.free === true,
+    heredocWrites: r.heredocWrites === true,
     re: r.match ? new RegExp(r.match) : null,
   }));
   const fallback = rules.fallback || "other";
@@ -111,12 +163,17 @@ export function makeClassifier({
     .map((c) => new RegExp(`(^|[\\s;&|(])${escape(c)}([\\s;&|)]|$)`));
 
   const classifyBash = (command) => {
-    const text = String(command ?? "");
-    if (!text.trim()) return fallback;
+    if (!String(command ?? "").trim()) return fallback;
+    const split = splitHeredocs(command);
+    const text = split.outside;
     for (const re of validateRes) if (re.test(text)) return "validate";
     for (const rule of bashRules) {
       if (rule.re) {
         if (rule.re.test(text)) return rule.activity;
+        continue;
+      }
+      if (rule.heredocWrites) {
+        if (split.bodies.length && heredocWrites(split)) return rule.activity;
         continue;
       }
       if (rule.free) {
