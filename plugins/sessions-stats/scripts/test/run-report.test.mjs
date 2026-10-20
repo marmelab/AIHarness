@@ -954,3 +954,149 @@ describe("a model without a rate", () => {
     expect(script).toContain('tr("pricedStale")');
   });
 });
+
+describe("the page script", () => {
+  // The page script, run against a built page's payload with just enough of a DOM for its
+  // top level, handing back the functions under test.
+  const PAGE = join(HERE, "..", "report", "page.js");
+  const EXPORTS = [
+    "colWidths",
+    "drillContext",
+    "ctxPrompt",
+    "askClaude",
+    "contextItemsOf",
+  ];
+  const pageApi = (html, { vscode = null, byId = {} } = {}) => {
+    const payload = html
+      .match(
+        /<script type="application\/json" id="data">([\s\S]*?)<\/script>/,
+      )[1]
+      .replace(/<\\\/script/g, "</script");
+    const el = (id) =>
+      byId[id] || {
+        textContent: id === "data" ? payload : "",
+        children: [],
+        dataset: {},
+        classList: { add() {}, remove() {}, contains: () => false },
+        style: {},
+        addEventListener() {},
+        setAttribute() {},
+        querySelectorAll: () => [],
+        appendChild() {},
+      };
+    const listeners = {};
+    const document = {
+      getElementById: el,
+      addEventListener() {},
+      createElement: () => el(""),
+    };
+    const window = {
+      addEventListener: (type, fn) => (listeners[type] = fn),
+    };
+    const run = new Function(
+      "document",
+      "window",
+      "localStorage",
+      "navigator",
+      "acquireVsCodeApi",
+      readFileSync(PAGE, "utf8") +
+        "\nreturn { " +
+        [...EXPORTS, "D", "currentRun", "L", "S"].join(", ") +
+        " };",
+    );
+    const api = run(
+      document,
+      window,
+      { getItem: () => null, setItem() {} },
+      { language: "en" },
+      vscode ? () => vscode : undefined,
+    );
+    return { ...api, d: api.D.detail[api.currentRun], listeners };
+  };
+  const toolRole = (d) =>
+    d.contextItems.find((i) => i.component.startsWith("tool:") && i.bytes > 0)
+      .role;
+
+  test("every label the page asks for is defined", () => {
+    // A missing one throws inside render, and the page reads "This report failed to draw":
+    // the coverage panel's title did, for every session with an agent of unknown context.
+    const { L, S } = pageApi(build().html);
+    const src = readFileSync(PAGE, "utf8");
+    const keys = (re) => [...new Set([...src.matchAll(re)].map((m) => m[1]))];
+    const panels = keys(/\b(?:ttl|tipOf|panelK)\("(\w+)"/g);
+    const strings = keys(/\btr\("(\w+)"\)/g);
+    expect(panels.length).toBeGreaterThan(5);
+    expect(strings.length).toBeGreaterThan(20);
+    expect(panels.filter((k) => !L[k])).toEqual([]);
+    expect(strings.filter((k) => !S[k])).toEqual([]);
+  });
+
+  test("a column border follows the drag, and the last column pays for it", () => {
+    const { colWidths } = pageApi(build().html);
+    // Item widened: the description gives the room back, the table keeps its width.
+    expect(colWidths([100, 50, 200], 0, 40, 36)).toEqual([140, 50, 160]);
+    expect(colWidths([100, 50, 200], 0, -90, 36)).toEqual([36, 50, 264]);
+    // The description down to its minimum: the table grows instead, and scrolls.
+    expect(colWidths([100, 50, 60], 0, 50, 36)).toEqual([150, 50, 36]);
+    // The last column's own border only widens or narrows the table.
+    expect(colWidths([100, 50, 200], 2, 30, 36)).toEqual([100, 50, 230]);
+  });
+
+  test("an item's name keeps its width; its description is the column that gives way", () => {
+    // The first column used to be the truncated one, so in the narrow drawer a 42 KB tool
+    // read "Wo..." beside a full line of its description.
+    const { drillContext, d } = pageApi(build().html);
+    const html = drillContext(d, "tools", toolRole(d));
+    const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].slice(1);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const [, row] of rows) {
+      const cells = [...row.matchAll(/<td class="([^"]*)">/g)].map((m) => m[1]);
+      expect(cells).toEqual(["keep", "r", "trunc"]);
+    }
+    expect(html).toMatch(/<tr data-tip="[^"]+" data-tip2="/);
+  });
+
+  test("the prompt names the role, the part and its largest items, and asks for a proposal only", () => {
+    const { ctxPrompt, contextItemsOf, d } = pageApi(build().html);
+    const role = toolRole(d);
+    const prompt = ctxPrompt(d, "tools", role);
+    expect(prompt).toContain(`the ${role} agents`);
+    expect(prompt).toContain("Their tools part");
+    const biggest = contextItemsOf(d, "tools", role).filter((i) => i.bytes > 0);
+    expect(prompt).toContain(`- ${biggest[0].name}: `);
+    expect(prompt).toContain("change nothing until I approve");
+  });
+
+  test("inside VS Code the prompt goes to the extension, elsewhere to the clipboard", () => {
+    const sent = [];
+    const vscode = { postMessage: (m) => sent.push(m) };
+    const said = { textContent: "" };
+    const inCode = pageApi(build().html, {
+      vscode,
+      byId: { ctxAskSaid: said },
+    });
+    expect(
+      inCode.drillContext(inCode.d, "tools", toolRole(inCode.d)),
+    ).toContain("Ask Claude how to shrink it");
+    inCode.askClaude("shrink it");
+    expect(sent).toEqual([{ type: "claude-prompt", prompt: "shrink it" }]);
+    expect(said.textContent).toBe("opened in a new Claude tab");
+
+    const outside = pageApi(build().html);
+    expect(
+      outside.drillContext(outside.d, "tools", toolRole(outside.d)),
+    ).toContain("Copy a prompt asking Claude how to shrink it");
+  });
+
+  test("the extension can bring the starting context into view", () => {
+    let scrolled = 0;
+    const panel = { scrollIntoView: () => scrolled++ };
+    const { listeners } = pageApi(build().html, {
+      byId: { ctxStart: { closest: () => panel } },
+    });
+    listeners.message({ data: { type: "focus", panel: "timeline" } });
+    expect(scrolled).toBe(0);
+    listeners.message({ data: { type: "focus", panel: "context" } });
+    expect(scrolled).toBe(1);
+  });
+});
