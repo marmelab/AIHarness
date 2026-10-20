@@ -164,7 +164,9 @@ for (const id of picked) {
       id,
     ),
     turns: all(
-      `SELECT agent_id, idx, at, activity, prev_activity, ctx, out_tokens, calls, wait_ms
+      `SELECT agent_id, idx, at, activity, prev_activity, ctx, out_tokens, calls, wait_ms,
+              usd, coalesce(in_tokens, 0) + coalesce(cache_read, 0) + coalesce(cache_write, 0)
+                + coalesce(out_tokens, 0) tokens
        FROM turns WHERE session_id = ? ORDER BY agent_id, idx`,
       id,
     ),
