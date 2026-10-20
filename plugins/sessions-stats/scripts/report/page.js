@@ -522,6 +522,13 @@ const S = {
   ],
   zoomOn: ["zoomed on", "zoom sur"],
   reset: ["show the whole run", "revenir au run entier"],
+  costCurves: ["cost curves", "courbes de coût"],
+  costCurvesHow: [
+    "Each line climbs from 0 to 100% of what the window spent, a step per billed turn: the solid one in dollars, the dashed one in tokens. A steep stretch is where the money went. Hover to read what had been spent by a moment; drag a range to read what that range cost.",
+    "Chaque ligne monte de 0 à 100 % de ce que la fenêtre a dépensé, d'une marche par tour facturé : la pleine en dollars, la pointillée en tokens. Une pente raide montre où l'argent est parti. Survolez pour lire ce qui était dépensé à un instant ; glissez sur une plage pour lire ce qu'elle a coûté.",
+  ],
+  cumCost: ["cost", "coût"],
+  cumTokens: ["tokens", "tokens"],
   blockedOnChildren: [
     "blocked on child agents, excluded",
     "bloqué sur des agents enfants, exclu",
@@ -1448,6 +1455,83 @@ let zoom = null;
 // The scale of the chart as last drawn, so the drag handler can turn pixels back into
 // moments without rebuilding it.
 let lastClock = null;
+// Whether the cost and token curves are drawn over the lanes. Kept across redraws.
+let curves = true;
+
+/* --- what the run spent, along the timeline ---
+   Dollars and tokens share no scale, and two y-axes would let either line be drawn to look
+   like the other. Both are shown on one axis instead, as the running share of what the
+   window spent, 0 to 100%: a steep stretch is where the money went. Each turn is counted
+   when its response arrives. */
+function costCurve(turns, from = null, to = null) {
+  const billed = turns
+    .filter(
+      (t) =>
+        Number.isFinite(t.at) &&
+        ((t.usd || 0) > 0 || (t.tokens || 0) > 0) &&
+        (from === null || (t.at >= from && t.at <= to)),
+    )
+    .sort((a, b) => a.at - b.at);
+  let usd = 0;
+  let tokens = 0;
+  const points = billed.map((t) => {
+    usd += t.usd || 0;
+    tokens += t.tokens || 0;
+    return { at: t.at, usd, tokens };
+  });
+  return { points, usd, tokens };
+}
+
+// What the curve had spent by `t`, turns at `t` included.
+function spentBy(curve, t) {
+  let lo = 0;
+  let hi = curve.points.length - 1;
+  let found = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (curve.points[mid].at <= t) {
+      found = curve.points[mid];
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found
+    ? { usd: found.usd, tokens: found.tokens }
+    : { usd: 0, tokens: 0 };
+}
+
+// What the turns between `a` and `b`, both included, cost.
+function spentBetween(curve, a, b) {
+  const end = spentBy(curve, b);
+  const start = spentBy(curve, a - 1);
+  return { usd: end.usd - start.usd, tokens: end.tokens - start.tokens };
+}
+
+// One cumulative line as a step path: flat between turns, a rise at each.
+function curvePath(curve, key, x, x0, x1, yLow, yHigh) {
+  const y = (v) => (yLow - (v / curve[key]) * (yLow - yHigh)).toFixed(1);
+  let path = "M" + x0.toFixed(1) + " " + yLow.toFixed(1);
+  for (const p of curve.points)
+    path += "H" + x(p.at).toFixed(1) + "V" + y(p[key]);
+  return path + "H" + x1.toFixed(1);
+}
+
+// The readout's figures: a sum and its share of the window's total.
+function spentText(part, curve) {
+  return (
+    tr("cumCost") +
+    " " +
+    usd(part.usd) +
+    " (" +
+    pct(part.usd, curve.usd) +
+    "%) · " +
+    tr("cumTokens") +
+    " " +
+    K(part.tokens) +
+    " (" +
+    pct(part.tokens, curve.tokens) +
+    "%)"
+  );
+}
 
 function timeline(d) {
   const agents = d.agents.filter((a) => Number.isFinite(a.started_at));
@@ -1586,9 +1670,35 @@ function timeline(d) {
         '"/>';
     }
   });
+  const curve = costCurve(
+    d.turns || [],
+    zoom ? zoom.from : null,
+    zoom ? zoom.to : null,
+  );
+  const drawn = curves && curve.usd > 0;
+  if (drawn) {
+    const line = (key, cls) =>
+      curvePath(curve, key, x, padL, W - 8, H - 14, padT);
+    // A surface halo under each line keeps it legible where it crosses the call bars.
+    s +=
+      '<g class="curves" pointer-events="none">' +
+      '<path class="halo" d="' +
+      line("tokens") +
+      '"/><path class="halo" d="' +
+      line("usd") +
+      '"/><path class="cTok" d="' +
+      line("tokens") +
+      '"/><path class="cUsd" d="' +
+      line("usd") +
+      '"/></g>';
+  }
   // The scale is stashed so the drag handler can turn pixels back into moments without
   // rebuilding it, and so a zoom can be nested inside a zoom.
-  lastClock = { clock, W, padL, padT, H };
+  lastClock = { clock, W, padL, padT, H, curve: drawn ? curve : null };
+  const swatch = (cls) =>
+    '<svg width="18" height="6" aria-hidden="true"><line class="' +
+    cls +
+    '" x1="0" x2="18" y1="3" y2="3"/></svg>';
   return (
     '<div class="tlwrap"><svg id="tlsvg" viewBox="0 0 ' +
     W +
@@ -1596,6 +1706,11 @@ function timeline(d) {
     H +
     '" role="img" aria-label="Agent timeline">' +
     s +
+    '<line id="tlcross" x1="0" x2="0" y1="' +
+    padT +
+    '" y2="' +
+    (H - 14) +
+    '" visibility="hidden" pointer-events="none"/>' +
     '<rect id="tlbrush" x="0" y="0" width="0" height="0" fill="var(--accent)" ' +
     'opacity="0.18" pointer-events="none"/></svg>' +
     '<div class="tlbar"><span>' +
@@ -1606,6 +1721,25 @@ function timeline(d) {
     (zoom
       ? '<button type="button" id="tlreset">' + esc(tr("reset")) + "</button>"
       : "") +
+    (curve.usd > 0
+      ? '<label class="tlcurves"' +
+        help(tr("costCurves"), tr("costCurvesHow")) +
+        '><input type="checkbox" id="tlcurves"' +
+        (curves ? " checked" : "") +
+        "> " +
+        esc(tr("costCurves")) +
+        "</label>" +
+        (drawn
+          ? '<span class="tlkey">' +
+            swatch("cUsd") +
+            esc(tr("cumCost") + " " + usd(curve.usd)) +
+            " " +
+            swatch("cTok") +
+            esc(tr("cumTokens") + " " + K(curve.tokens)) +
+            "</span>"
+          : "")
+      : "") +
+    '<span id="tlread" class="mono"></span>' +
     "</div></div>"
   );
 }
@@ -2601,6 +2735,31 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && drillSel) drill(null);
 });
 
+/* What the bar under the timeline says for the pointer at `now`: the moment and what had
+   been spent by then, or, while a range is dragged from `from`, what that range cost. The
+   range is the answer to "which step was expensive". */
+function timelineReadout(from, now) {
+  if (!lastClock) return "";
+  const { clock, curve } = lastClock;
+  const at = (px) => new Date(clock.inv(px)).toISOString().slice(11, 19);
+  if (from === null)
+    return (
+      at(now) +
+      (curve ? " · " + spentText(spentBy(curve, clock.inv(now)), curve) : "")
+    );
+  const a = clock.inv(Math.min(from, now));
+  const b = clock.inv(Math.max(from, now));
+  return (
+    at(Math.min(from, now)) +
+    " → " +
+    at(Math.max(from, now)) +
+    " (" +
+    dur(b - a) +
+    ")" +
+    (curve ? " · " + spentText(spentBetween(curve, a, b), curve) : "")
+  );
+}
+
 /* --- drag a range on the timeline to zoom into it ---
    A run can spread 25 agents over three hours; the interesting minute is then two pixels
    wide. Dragging selects a range, and the chart is rebuilt over it. */
@@ -2614,7 +2773,16 @@ function wireTimeline() {
       render(currentRun);
     });
 
+  const toggle = document.getElementById("tlcurves");
+  if (toggle)
+    toggle.addEventListener("change", () => {
+      curves = !curves;
+      render(currentRun);
+    });
+
   const brush = document.getElementById("tlbrush");
+  const cross = document.getElementById("tlcross");
+  const read = document.getElementById("tlread");
   const { clock, W, padT, H } = lastClock;
   let from = null;
   const toUser = (e) => {
@@ -2628,10 +2796,21 @@ function wireTimeline() {
     e.preventDefault();
   });
   svg.addEventListener("mousemove", (e) => {
-    if (from === null) return;
     const now = toUser(e);
+    read.textContent = timelineReadout(from, now);
+    if (from === null) {
+      cross.setAttribute("x1", String(now));
+      cross.setAttribute("x2", String(now));
+      cross.setAttribute("visibility", "visible");
+      return;
+    }
+    cross.setAttribute("visibility", "hidden");
     brush.setAttribute("x", String(Math.min(from, now)));
     brush.setAttribute("width", String(Math.abs(now - from)));
+  });
+  svg.addEventListener("mouseleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    read.textContent = "";
   });
   const finish = (e) => {
     if (from === null) return;

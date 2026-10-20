@@ -598,6 +598,44 @@ tr[data-model] {
   font-size: 11px;
   color: var(--muted);
 }
+/* The cost curves: ink, never an activity colour, so they cannot be read as a lane. */
+#tlsvg .curves path {
+  fill: none;
+  stroke-linejoin: round;
+}
+#tlsvg .curves .halo {
+  stroke: var(--panel);
+  stroke-width: 4;
+}
+.cUsd,
+.cTok {
+  stroke-width: 2;
+  fill: none;
+}
+.cUsd {
+  stroke: var(--ink);
+}
+.cTok {
+  stroke: var(--ink-2);
+  stroke-dasharray: 5 3;
+}
+#tlcross {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.tlcurves,
+.tlkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tlkey svg {
+  margin-left: 6px;
+}
+#tlread {
+  margin-left: auto;
+  color: var(--ink-2);
+}
 .tlbar button {
   border: 1px solid var(--rule);
   background: var(--panel-2);

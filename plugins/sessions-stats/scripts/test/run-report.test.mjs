@@ -965,6 +965,11 @@ describe("the page script", () => {
     "ctxPrompt",
     "askClaude",
     "contextItemsOf",
+    "costCurve",
+    "spentBy",
+    "spentBetween",
+    "timeline",
+    "timelineReadout",
   ];
   const pageApi = (html, { vscode = null, byId = {} } = {}) => {
     const payload = html
@@ -1002,7 +1007,7 @@ describe("the page script", () => {
       readFileSync(PAGE, "utf8") +
         "\nreturn { " +
         [...EXPORTS, "D", "currentRun", "L", "S"].join(", ") +
-        " };",
+        ", setCurves: (on) => (curves = on) };",
     );
     const api = run(
       document,
@@ -1086,6 +1091,83 @@ describe("the page script", () => {
     expect(
       outside.drillContext(outside.d, "tools", toolRole(outside.d)),
     ).toContain("Copy a prompt asking Claude how to shrink it");
+  });
+
+  test("the cost curve sums billed turns in time order, within a window", () => {
+    const { costCurve, spentBy, spentBetween } = pageApi(build().html);
+    const turns = [
+      { at: 30, usd: 1, tokens: 10 },
+      { at: 10, usd: 2, tokens: 100 },
+      { at: 20, usd: 0, tokens: 0 },
+      { at: 40, usd: 4, tokens: 1000 },
+    ];
+    const all = costCurve(turns);
+    expect(all.points).toEqual([
+      { at: 10, usd: 2, tokens: 100 },
+      { at: 30, usd: 3, tokens: 110 },
+      { at: 40, usd: 7, tokens: 1110 },
+    ]);
+    expect([all.usd, all.tokens]).toEqual([7, 1110]);
+    expect(costCurve(turns, 15, 35).points).toEqual([
+      { at: 30, usd: 1, tokens: 10 },
+    ]);
+    expect(spentBy(all, 9)).toEqual({ usd: 0, tokens: 0 });
+    expect(spentBy(all, 10)).toEqual({ usd: 2, tokens: 100 });
+    expect(spentBy(all, 35)).toEqual({ usd: 3, tokens: 110 });
+    // A range includes the turns on both of its edges, and nothing before them.
+    expect(spentBetween(all, 10, 30)).toEqual({ usd: 3, tokens: 110 });
+    expect(spentBetween(all, 11, 30)).toEqual({ usd: 1, tokens: 10 });
+  });
+
+  test("the timeline draws both curves on one axis, from 0 to 100% of the window", () => {
+    const api = pageApi(build().html);
+    const billed = api.d.turns.filter((t) => t.usd > 0);
+    expect(billed.length).toBeGreaterThan(1);
+    const html = api.timeline(api.d);
+    const H = Number(html.match(/viewBox="0 0 1000 (\d+)"/)[1]);
+    for (const cls of ["cUsd", "cTok"]) {
+      const d = html.match(new RegExp(`<path class="${cls}" d="([^"]+)"`))[1];
+      // From the bottom of the lanes at the left edge, to their top at the right one.
+      expect(d.startsWith(`M116.0 ${(H - 14).toFixed(1)}`)).toBe(true);
+      expect(d.endsWith("V15.0H992.0")).toBe(true);
+    }
+    expect(html).toContain('id="tlcurves" checked');
+    const total = billed.reduce((s, t) => s + t.usd, 0);
+    expect(html).toContain("cost $" + total.toFixed(2));
+
+    api.setCurves(false);
+    const off = api.timeline(api.d);
+    expect(off).not.toContain('class="curves"');
+    expect(off).toContain('id="tlcurves">');
+
+    // A run with nothing billed has no curve to offer.
+    const free = {
+      ...api.d,
+      turns: api.d.turns.map((t) => ({ ...t, usd: 0, tokens: 0 })),
+    };
+    api.setCurves(true);
+    expect(api.timeline(free)).not.toContain("tlcurves");
+  });
+
+  test("the readout gives what was spent by a moment, and what a dragged range cost", () => {
+    const api = pageApi(build().html);
+    api.timeline(api.d);
+    const total = api.d.turns.reduce((s, t) => s + (t.usd || 0), 0);
+    expect(api.timelineReadout(null, 116)).toMatch(
+      /^\d\d:\d\d:\d\d · cost \$[\d.]+ \(\d+%\) · tokens \S+ \(\d+%\)$/,
+    );
+    expect(api.timelineReadout(null, 992)).toContain(
+      "cost $" + total.toFixed(2) + " (100%)",
+    );
+    // The whole width, dragged either way, is the whole window.
+    for (const [a, b] of [
+      [116, 992],
+      [992, 116],
+    ])
+      expect(api.timelineReadout(a, b)).toContain(
+        "cost $" + total.toFixed(2) + " (100%) · tokens",
+      );
+    expect(api.timelineReadout(116, 117)).toContain(" → ");
   });
 
   test("the extension can bring the starting context into view", () => {
